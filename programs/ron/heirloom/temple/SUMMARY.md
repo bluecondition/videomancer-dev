@@ -161,3 +161,12 @@ Working files: `.heirloom_work/rb_temple/` (`notes.md`; `fit_*.py` = the field f
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Element.** K6 Camera adds the camera luma to the sky / floor colouriser input and (halved) to the stack row: it recolours the drawing and bends the stack bands.
+- **Change.** `c_k6` = (K6 + K6 / 4) / 8 in Q8 (was K6 / 4 in Q9), and the camera term takes p3_cam(15..8) instead of (15..9). The camera term peaks at 158 (was 127); every register keeps its width (the 8 × 8 product is unchanged). Latency unchanged.
+  - Check: the new code at K6 818 reproduces the old code at K6 1023 (0.4 % of pixels differ by > 8; `.heirloom_work/rb_temple/k6b/k6b_eqcmp.png`).
+- **Render.** `.heirloom_work/rb_temple/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same frame structure: the bright areas move further along the colouriser, so on the bear the ears and eyes pass cyan back toward blue and the bright chest clamps at the end of the ramp (less orange). That is the palette's cycle, not a wrap (see the K6 818 check).
+- **Build** v0.1.2, router1, all six configs seed 1 (v0.1.0's HD Dual needed seed 2). HD Analog 88.05, HD HDMI 95.62, HD Dual 89.06 MHz (worst HD 88.05). 6426–6446 / 7680 LC, 23 / 32 EBR. Not flashed.

@@ -232,3 +232,12 @@ Working files are in `.heirloom_work/rb_butterfly/`: `notes.md`, `axes.py`, `edg
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 224 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Bend adds the smoothed camera luma to both ring fields, so the lens bands and heart rings bend around the picture.
+- **Change.** The Video bend gain `c_gq` = K6² >> 13 now gets a quarter added (g + g / 4, zone clock 362): max 127 -> 158, ×1.25 at every position. It still fits the 8-bit register; the camera product q5_m (8 × 8) peaks at 40 290 and the bend term q6_m at 314, inside their 16 / 10-bit widths. Latency unchanged.
+  - Osc mode is unchanged: its gain (K6² >> 9, 8 bits) already saturates at 255 from K6 ≈ 362 up.
+- **Render.** `.heirloom_work/rb_butterfly/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same picture; the magenta floods a little further over the bent bands.
+- **Build** v0.1.3, router1, all six configs seed 1. HD Analog 91.26, HD HDMI 84.56, HD Dual 93.22 MHz (worst HD 84.56). 7032–7059 / 7680 LC, 20 / 32 EBR. Not flashed.

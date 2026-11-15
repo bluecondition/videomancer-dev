@@ -1,5 +1,6 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- Hawser v0.1.0 -- Heirloom from the video clips, built from the still WIN_20231116_23_41_37 t3.5
 -- (clip WIN_20231116_23_41_37, 9.5 s; the same patch in clip 23_43_35, turned to lemon).
@@ -457,7 +458,7 @@ begin
                     when 4      => f_a <= resize(z_d, 17);              f_b <= resize(z_d, 16);
                     when 5      => f_a <= to_unsigned(45, 17);          f_b <= z_dsq;
                     when 6      => f_a <= resize(z_k6, 17);             f_b <= resize(z_k6, 16);
-                    when others => f_a <= to_unsigned(2298, 17);        f_b <= z_ksq;
+                    when others => f_a <= to_unsigned(2873, 17);        f_b <= z_ksq;   -- 2298 x 1.25 (K6 top +25 %)
                 end case;
             end if;
             z_fld <= '0';
@@ -564,7 +565,7 @@ begin
                         z_fms <= to_unsigned(6, 3); z_fld <= '1';             -- job 6 at 140: k6^2
                     when 157 =>
                         z_ksq <= f_acc(19 downto 4);
-                        z_fms <= to_unsigned(7, 3); z_fld <= '1';             -- job 7 at 158: (k6^2 / 16) 2298
+                        z_fms <= to_unsigned(7, 3); z_fld <= '1';             -- job 7 at 158: (k6^2 / 16) 2873
                     when 160 =>                                       -- twist a1 = 23 p12 (Q16), cords a2
                         z_pp <= s_gp(12 downto 3);
                     when 161 =>

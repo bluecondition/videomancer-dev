@@ -385,3 +385,15 @@ filtered at 8 bits, key interpolation in 1.2 px steps, the fold half's pool-key 
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.6.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Melt adds the camera luma (minus its running mean) to the keys and the stripe phase, so the pools, stripes and red regions re-shape around the picture.
+- **Change.** The melt gain `s_mg` = (K6 + K6 / 4) / 16, 7 bits, 0 .. 79 (was K6 / 16, 0 .. 63). The rest follows it:
+  - the running-mean product runs 7 multiplier iterations (was 6); `s_ck` takes f_acc(14..6) (≤ 314 + 126);
+  - the pixel product p2_mv is 8 × 7 = 15 bits (one more partial row); the key offset mvK is 9 bits (≤ 314) through stages 3-5; p5_ramp is 11 bits (min −568);
+  - the stripe phase keeps using the low 12 bits of both the product and the mean (mod 4096, as before).
+  - p6_Kp / p7_k stay 11-bit signed (range −568 .. 951). Latency unchanged.
+- **Render.** `.heirloom_work/rb_curtain/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new). The same picture; the keys and pink regions follow the camera a little further.
+- **Build** v0.6.3, router1 (v0.6.1 was router2 with hand-installed seeds), all six configs seed 1. HD Analog 74.79, HD HDMI 86.66, HD Dual 76.31 MHz (worst HD 74.79: thin, router1 is deterministic). 7373–7430 / 7680 LC (96–96.7 %, +~90 over v0.6.1), 27 / 32 EBR. These are the builder's bitstreams, with no pin-skew screen this time: thin per-line hue lines on HD HDMI would mean re-seeding (see v0.6.1). Not flashed.

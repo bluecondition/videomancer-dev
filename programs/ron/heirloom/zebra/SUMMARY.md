@@ -212,3 +212,12 @@ seam the stripes run flat and dense. Presets are hand-written placeholders. Work
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 180 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Etch adds the camera luma to the stripe phase W and a quarter of it to the seam phase S.
+- **Change.** The etch constant is 15088 instead of 12070 (×1.25): `c_eg` = K6² × 15088 >> 20, max 12 046 -> 15 058 (14 bits). Stripes 3 -> 3.75 cycles per full luma. The etch partials (4 × 14) and p5_e (≤ 3 839 535 in 22 bits) fit. Logic and latency unchanged.
+  - Check: the new code at K6 915 reproduces the old code at K6 1023 bit-exactly (`.heirloom_work/rb_zebra/k6b/k6b_eqcmp.png`).
+- **Render.** `.heirloom_work/rb_zebra/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). At 100 % the stripes are already shredded, so 0.75 more cycles re-shuffles them; the bear's head reads more clearly as a bent oval.
+- **Build** v0.1.2, router1, all six configs seed 1. HD Analog 83.30, HD HDMI 79.23, HD Dual 84.43 MHz (worst HD 79.23). 6918–6935 / 7680 LC, 19 / 32 EBR. Not flashed.

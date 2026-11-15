@@ -1,5 +1,6 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- Curtain v0.6.1 -- Heirloom #34 (2026-10-27 rebuild, 2026-11-01 phase 2), from WIN_20230521_01_34_12.
 --
@@ -134,7 +135,7 @@ architecture curtain of program_top is
     signal s_th35 : unsigned(9 downto 0) := to_unsigned(190, 10);
     signal s_kp : unsigned(6 downto 0) := to_unsigned(51, 7);
     signal s_kf : unsigned(7 downto 0) := to_unsigned(69, 8);
-    signal s_mg : unsigned(5 downto 0) := (others => '0');
+    signal s_mg : unsigned(6 downto 0) := (others => '0');          -- (k6 + k6/4) / 16, 0 .. 79 (K6 top +25 %)
     -- per-field offsets: melt mean x gain (am), key offset am / 64 + 2 w/4, stripe blue base
     -- 120 - 6 w/4, the fold half's stripe offset -am
     signal s_am : unsigned(13 downto 0) := (others => '0');
@@ -275,12 +276,12 @@ architecture curtain of program_top is
     signal p1_L8 : unsigned(7 downto 0) := x"80";
     signal p1_aS : unsigned(15 downto 0) := (others => '0');
     signal p1_dS : unsigned(11 downto 0) := (others => '0');
-    signal p2_mv : unsigned(13 downto 0) := (others => '0');        -- L x melt (the mean is a per-field offset)
+    signal p2_mv : unsigned(14 downto 0) := (others => '0');        -- L x melt (the mean is a per-field offset)
     signal p2_aS : unsigned(15 downto 0) := (others => '0');
     signal p2_lcur : unsigned(7 downto 0) := (others => '0');
     signal p3_lcur : unsigned(9 downto 0) := (others => '0');
     signal p3_v0, p3_v1 : std_logic_vector(15 downto 0) := (others => '0');
-    signal p3_mvK : unsigned(7 downto 0) := (others => '0');
+    signal p3_mvK : unsigned(8 downto 0) := (others => '0');
     signal p3_ad : t_u16(0 to 2) := (others => (others => '0'));
     type t_slv16 is array (natural range <>) of std_logic_vector(15 downto 0);
     signal p8_pool : std_logic_vector(15 downto 0) := (others => '0');
@@ -298,12 +299,12 @@ architecture curtain of program_top is
     signal p_shx : t_u5(3 to 7) := (others => (others => '0'));
     signal p4_dK, p4_dR : signed(13 downto 0) := (others => '0');
     signal p4_K0, p4_R0 : unsigned(7 downto 0) := (others => '0');
-    signal p4_mvK : unsigned(7 downto 0) := (others => '0');
+    signal p4_mvK : unsigned(8 downto 0) := (others => '0');
     signal p_arc : t_u2(4 to 12) := (others => (others => '0'));  -- 0 none, 1 core, 2 left, 3 right
     signal p4_rUy : unsigned(8 downto 0) := (others => '0');
     signal p5_K, p5_R, p5_S : unsigned(7 downto 0) := (others => '0');
-    signal p5_ramp : signed(9 downto 0) := (others => '0');
-    signal p5_mvK : unsigned(7 downto 0) := (others => '0');
+    signal p5_ramp : signed(10 downto 0) := (others => '0');
+    signal p5_mvK : unsigned(8 downto 0) := (others => '0');
     signal p6_Kp : signed(10 downto 0) := (others => '0');
     signal p6_P : unsigned(11 downto 0) := (others => '0');          -- stripe wave / 4 x weave / 4
     signal p6_sG : unsigned(7 downto 0) := (others => '0');
@@ -598,7 +599,7 @@ begin
                         if v_k < 0 then s_kp <= (others => '0');
                         elsif v_k > 127 then s_kp <= (others => '1');
                         else s_kp <= unsigned(v_k(6 downto 0)); end if;
-                        s_mg <= s_k6(9 downto 4);
+                        s_mg <= resize(shift_right(resize(s_k6, 11) + resize(s_k6(9 downto 2), 11), 4), 7);
                         f_st <= f_st + 1;
                     when 10 =>      -- pixels since the last cut at the line start: aB0 * PBpx / 65536
                         s_kf <= resize(s_kp, 8) + 18;
@@ -616,11 +617,11 @@ begin
                         f_st <= f_st + 1;
                     when 13 =>      -- melt mean x gain
                         s_ysc <= f_acc(18 downto 5);
-                        f_ma <= resize(s_avg(15 downto 8), 24); f_mb <= resize(s_mg, 12); f_acc <= (others => '0'); f_mc <= to_unsigned(6, 4);
+                        f_ma <= resize(s_avg(15 downto 8), 24); f_mb <= resize(s_mg, 12); f_acc <= (others => '0'); f_mc <= to_unsigned(7, 4);
                         f_st <= f_st + 1;
                     when 14 =>
                         s_am <= f_acc(13 downto 0);
-                        s_ck <= resize(f_acc(13 downto 6), 9) + resize(s_wv(7 downto 2) & '0', 9);
+                        s_ck <= resize(f_acc(14 downto 6), 9) + resize(s_wv(7 downto 2) & '0', 9);   -- max 314 + 126
                         s_cB <= 120 - signed(resize(s_wv(7 downto 2) & "00", 11)) - signed(resize(s_wv(7 downto 2) & '0', 11));
                         s_dSf <= 0 - f_acc(11 downto 0);
                         s_linit <= '1';            -- start the line engine on line 0
@@ -1097,7 +1098,7 @@ begin
             -- 3: wave address, line RAM and x LUTs to fabric, |arc offsets|, arc width, gate, flame test
             v_s16 := p2_aS + shift_left(resize(p2_mv, 16), 4);
             s_wa <= v_s16(15 downto 8);
-            p3_mvK <= p2_mv(13 downto 6);
+            p3_mvK <= p2_mv(14 downto 6);
             p3_v0 <= s_lq0; p3_v1 <= s_lq1;
             p_orng(3) <= unsigned(s_xqb(15 downto 11));
             p3_rU <= unsigned(s_xqb(10 downto 6));
@@ -1163,11 +1164,11 @@ begin
             p5_K <= unsigned(v_d10(7 downto 0));
             p5_S <= unsigned(s_wq);
             if p_fold(4) = '1' then
-                p5_ramp <= signed(resize(p4_rUy(8 downto 3), 10)) - signed(resize(s_ck, 10));
+                p5_ramp <= signed(resize(p4_rUy(8 downto 3), 11)) - signed(resize(s_ck, 11));
             elsif p_first(4) = '1' then
-                p5_ramp <= -signed(resize(s_ck, 10));
+                p5_ramp <= -signed(resize(s_ck, 11));
             else
-                p5_ramp <= resize(signed(p_rL(4)), 10) - signed(resize(s_ck, 10));
+                p5_ramp <= resize(signed(p_rL(4)), 11) - signed(resize(s_ck, 11));
             end if;
             p5_mvK <= p4_mvK;
             p_first(5) <= p_first(4);

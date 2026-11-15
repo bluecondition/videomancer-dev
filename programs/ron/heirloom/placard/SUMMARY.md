@@ -219,3 +219,11 @@ Working files are in `.heirloom_work/rb_placard/` (`notes.md`, `proto.py`, `imod
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Etch adds the camera luma to the arc phase and the zone position, so the arcs and the diagonal zone edges bend.
+- **Change.** The etch gain `c_eg` = min(16 383, 16.25 q) with q = K6² >> 10 (was 13 q). `z_eg` is 15 bits (16 q + q / 4) and saturates into the 14-bit `c_eg` (zone clocks 195 / 196): exactly ×1.25 up to K6 ≈ 1016, ×1.233 at 1023. The pixel etch p5_le peaks at 4 177 665, inside its 22 bits. Latency unchanged.
+- **Render.** `.heirloom_work/rb_placard/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same picture; the zone edges and arcs wobble further with the camera.
+- **Build** v0.1.2, router1, all six configs seed 1. HD Analog 95.81, HD HDMI 81.70, HD Dual 86.72 MHz (worst HD 81.70). 7149–7167 / 7680 LC, 15 / 32 EBR. Not flashed.

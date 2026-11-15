@@ -1,5 +1,6 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- Placard v0.1.0 -- Heirloom from the clip WIN_20230221_00_58_22 (0.5 s).
 --
@@ -233,7 +234,7 @@ architecture placard of program_top is
     signal z_zm1, z_zm2 : unsigned(14 downto 0) := (others => '0');
     signal c_zm   : unsigned(14 downto 0) := (others => '0');          -- zone shift per field = 14.375 vf (Q6 h)
     signal z_th3, z_th4 : unsigned(13 downto 0) := (others => '0');
-    signal z_eg   : unsigned(13 downto 0) := (others => '0');
+    signal z_eg   : unsigned(14 downto 0) := (others => '0');
     signal z_g    : signed(11 downto 0) := (others => '0');
 
     -- field serial multiplier
@@ -675,8 +676,8 @@ begin
                         z_th4 <= z_th4 - shift_right(c_pq, 4);
                     when 174 => c_th4 <= z_th4 + shift_right(c_pq, 7);
                     when 194 => z_q <= f_acc(19 downto 10);
-                    when 195 => z_eg <= shift_left(resize(z_q, 14), 3) + shift_left(resize(z_q, 14), 2);
-                    when 196 => c_eg <= z_eg + resize(z_q, 14);                                                   -- 13 q
+                    when 195 => z_eg <= shift_left(resize(z_q, 15), 4) + resize(z_q(9 downto 2), 15);            -- 16.25 q (13 q x 1.25)
+                    when 196 => if z_eg(14) = '1' then c_eg <= (others => '1'); else c_eg <= z_eg(13 downto 0); end if;  -- saturate
                     when 218 => c_g2 <= to_unsigned(470, 10) - resize(f_acc(18 downto 10), 10);
                     when 219 => z_g <= signed(resize(c_g2, 12)) - 282;
                     when 220 => z_g <= shift_left(z_g, 2) + z_g;

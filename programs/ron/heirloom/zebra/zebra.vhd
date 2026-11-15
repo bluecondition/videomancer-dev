@@ -1,5 +1,6 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- Zebra v0.1.0 -- Heirloom (phase 3, video clips), from the clip still WIN_20230404_23_59_18 at 9.5 s.
 --
@@ -522,7 +523,7 @@ begin
                     when 10 => z_fa <= signed(resize(s_g5(12 downto 3), 28)); z_fb <= to_unsigned(9021, 16);   -- cells T
                     when 11 => z_fa <= to_signed(C_ZB_G_PHOTO_Q8, 28); z_fb <= z_mtg;                          -- bands G
                     when 13 => z_fa <= signed(resize(s_g6(12 downto 3), 28)); z_fb <= resize(s_g6(12 downto 3), 16);  -- etch^2
-                    when 14 => z_fa <= signed(resize(z_a, 28)); z_fb <= to_unsigned(12070, 16);
+                    when 14 => z_fa <= signed(resize(z_a, 28)); z_fb <= to_unsigned(15088, 16);  -- 12070 x 1.25 (K6 top +25 %)
                     when 15 => z_fa <= signed(resize(s_vm, 28)); z_fb <= resize(s_vm, 16);                     -- speed^2
                     when 16 => z_fa <= signed(resize(z_sq, 28)); z_fb <= to_unsigned(845, 16);
                     when 17 => z_fa <= signed(resize(z_sq, 28)); z_fb <= to_unsigned(26, 16);

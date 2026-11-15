@@ -1,5 +1,6 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- Butterfly v0.1.1 -- Heirloom (video clips), rebuilt from the still WIN_20231008_20_41_21 t0.5.
 --
@@ -622,8 +623,8 @@ begin
                     when 362 =>                               -- bend gain = k6^2 >> 13 (Osc: x16, centred)
                         if s_src = '1' then
                             if f_acc(20 downto 17) /= "0000" then c_gq <= (others => '1'); else c_gq <= f_acc(16 downto 9); end if;
-                        else
-                            c_gq <= f_acc(20 downto 13);
+                        else                                  -- x1.25 (K6 top +25 %): max 127 + 31 = 158
+                            c_gq <= f_acc(20 downto 13) + resize(f_acc(20 downto 15), 8);
                         end if;
                     when 386 => c_lstep <= f_acc(20 downto 9);                 -- flap step = k4^2 >> 9
                     when 410 =>                               -- Osc: subtract its mid level (111) so it bends both ways

@@ -1,5 +1,6 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- Temple v0.1.0 -- Heirloom from the video clips, built from the still WIN_20230816_00_32_31 t5.0
 -- (a 12 s clip: one knob-like sweep moves the colouriser through the palette -- the sky corners go orange ->
@@ -179,7 +180,7 @@ architecture temple of program_top is
     signal c_k2   : unsigned(8 downto 0) := to_unsigned(128, 9);     -- spindle size, Q7
     signal c_k3   : unsigned(8 downto 0) := to_unsigned(256, 9);     -- flame depth, Q8
     signal c_k5   : unsigned(9 downto 0) := to_unsigned(256, 10);    -- stack pinch, Q8
-    signal c_k6   : unsigned(7 downto 0) := to_unsigned(50, 8);      -- camera gain, Q9
+    signal c_k6   : unsigned(7 downto 0) := to_unsigned(25, 8);      -- camera gain, Q8
     signal c_dcp  : signed(7 downto 0) := (others => '0');           -- sun position (+-48)
     signal c_dc   : signed(7 downto 0) := (others => '0');           -- sun + LFO
     signal c_lfo  : unsigned(15 downto 0) := x"4000";
@@ -512,8 +513,8 @@ begin
                             v_t := resize(v_k - 512, 13);
                             c_k5 <= resize(256 + v_t + shift_right(v_t, 1), 10);
                         end if;
-                    when 44 =>                                        -- camera: k / 4
-                        c_k6 <= resize(shift_right(s_g6(12 downto 3), 2), 8);
+                    when 44 =>                                        -- camera: (k + k/4) / 8, Q8 (K6 top +25 %)
+                        c_k6 <= resize(shift_right(resize(s_g6(12 downto 3), 11) + resize(s_g6(12 downto 5), 11), 3), 8);
                     when 45 =>                                        -- LFO rate: k/4 + k/64 (0 below 16)
                         v_k := s_g4(12 downto 3);
                         if v_k < 16 then c_lst <= (others => '0');
@@ -862,7 +863,7 @@ begin
             p4_ed <= signed(resize(l_aux & '0', 12)) - signed(resize(p3_ex, 12));
             p4_dd <= signed(resize(l_aux & '0', 12)) - signed(resize(p3_dx, 12));
             p4_bbo <= f_bbo(p3_xf(9 downto 3));
-            p4_cam <= resize(p3_cam(15 downto 9), 8);
+            p4_cam <= p3_cam(15 downto 8);                    -- c_k6 is Q8 since the K6 +25 % pass (max 158)
             -- 5: the column word (fabric copy of the ROM read) and its fields; shape flags
             v_cw := r_c_q;
             if l_zone = 0 then p5_t <= unsigned(v_cw(6 downto 0)); else p5_t <= unsigned(v_cw(13 downto 7)); end if;

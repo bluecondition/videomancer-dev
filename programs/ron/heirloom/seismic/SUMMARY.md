@@ -106,3 +106,13 @@ segment-walker bug in the pre-fit RTL (entry 1 of every strip skipped → black 
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Melt adds the camera luma (minus its running mean) to the carrier phase and the vertical phase: the stripes and ribbons bend.
+- **Change.** The per-field melt code `f_m6` = (K6 + K6 / 4) / 16, 7 bits, 0 .. 79 (was K6 / 16, 0 .. 63). Stripes ≤ 2 -> 2.5 cycles, ribbons ≤ 0.585 -> 0.73 cycle.
+  - The pixel product p2_pm (dl × melt, 8 × 8 signed) is 15 bits (|p2_pm| ≤ 10 112).
+  - The vertical-phase term p3_m1 takes a slice of p2_pm / 4 (mod 4096, the phase's own wrap) instead of a signed resize, which would have folded values past ±2047. Latency unchanged.
+- **Render.** `.heirloom_work/rb_seismic/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new; K6 is not glided). The same picture; the colours shift further with the camera.
+- **Build** v0.5.3, router1, all six configs seed 1. HD Analog 89.73, HD HDMI 90.95, HD Dual 96.58 MHz (worst HD 89.73). 7051–7063 / 7680 LC, 11 / 32 EBR. Not flashed.

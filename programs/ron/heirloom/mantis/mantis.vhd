@@ -1,5 +1,6 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- Mantis v0.1.1 -- Heirloom from the video clips (phase 3b), made from the still WIN_20230906_22_43_27 @ 2.5 s.
 --
@@ -26,7 +27,7 @@
 --   K3  Bands    the vertical oscillator: one colour segment per frame (0) .. the clip (2.9) .. 8.7 (1023)
 --   K4  Flow     bipolar colour flow, +-8 deadband; 687 = the clip (one cycle per 8.93 s, bands sliding down)
 --   K5  Grain    wood-grain contour depth: none (0) .. the clip (512) .. x3.9 (1023)
---   K6  Etch     how far the camera (or the Osc lattice, x16) pushes the shapes sideways: 0 .. 89 px (default 104, 8 px)
+--   K6  Etch     how far the camera (or the Osc lattice, x16) pushes the shapes sideways: 0 .. 111 px
 --   S7  Twin     one mantis / two side by side
 --   S8  Hue      R G B / G B R: the keyers rotated (green -> blue, magenta -> yellow ...)
 --   S9  Key      Soft (the clip) / Hard: the keyers' gain x4, posterised neon edges
@@ -562,7 +563,7 @@ begin
                     when 4 => z_fa <= resize(c_vk, 18); z_fb <= resize(s_ys, 18);         -- per line
                     when 5 => z_fa <= resize(c_vk, 18); z_fb <= to_unsigned(150, 18);     -- u at line 0
                     when 6 => z_fa <= resize(s_vm, 18); z_fb <= resize(s_vm, 18);         -- flow^2
-                    when others => z_fa <= resize(s_g6(12 downto 3), 18); z_fb <= to_unsigned(97, 18);  -- etch
+                    when others => z_fa <= resize(s_g6(12 downto 3), 18); z_fb <= to_unsigned(121, 18);  -- etch (97 x 1.25: K6 top +25 %)
                 end case;
             end if;
             if z_ld = '1' then

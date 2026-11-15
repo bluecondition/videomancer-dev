@@ -1,5 +1,6 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- Seismic v0.5.0 -- Heirloom #44 (2026-10-27 rebuild), from WIN_20230610_00_10_54.
 --
@@ -148,7 +149,7 @@ architecture seismic of program_top is
     -- field values (knobs, drift phases)
     signal f_x1, f_x2, f_x3, f_x5, f_p : unsigned(9 downto 0);    -- slices of the glide bank
     signal f_v     : signed(9 downto 0) := (others => '0');       -- speed, deadbanded
-    signal f_m6    : unsigned(5 downto 0) := (others => '0');
+    signal f_m6    : unsigned(6 downto 0) := (others => '0');            -- (k6 + k6/4) / 16, 0 .. 79 (K6 top +25 %)
     signal f_blk, f_ramp, f_swap, f_shuf, f_osc : std_logic := '0';
     signal f_tau   : unsigned(20 downto 0) := (others => '0');    -- Q16 strips, mod 24
     signal f_thc   : unsigned(23 downto 0) := (others => '0');    -- carrier drift, Q24 cycles
@@ -257,7 +258,7 @@ architecture seismic of program_top is
     signal p1_dl : signed(7 downto 0) := (others => '0');
     signal p1_L8 : unsigned(7 downto 0) := (others => '0');
     signal p1_lv, p2_lv, p3_lv, p4_lv, p5_lv, p6_lv, p7_lv : unsigned(5 downto 0) := (others => '0');
-    signal p2_pm : signed(13 downto 0) := (others => '0');
+    signal p2_pm : signed(14 downto 0) := (others => '0');
     signal p3_psim : signed(15 downto 0) := (others => '0');
     signal p3_m1, p3_m2 : signed(11 downto 0) := (others => '0');
     signal p3_aE : unsigned(14 downto 0) := (others => '0');
@@ -387,7 +388,7 @@ begin
                 if v_x > 8 then f_v <= resize(v_x - 8, 10);
                 elsif v_x < -8 then f_v <= resize(v_x + 8, 10);
                 else f_v <= (others => '0'); end if;
-                f_m6   <= unsigned(registers_in(5)(9 downto 4));
+                f_m6   <= resize(shift_right(resize(unsigned(registers_in(5)), 11) + resize(unsigned(registers_in(5)(9 downto 2)), 11), 4), 7);
                 f_blk  <= not registers_in(6)(0);
                 f_ramp <= registers_in(6)(1);
                 f_swap <= registers_in(6)(2);
@@ -808,6 +809,7 @@ begin
         variable v_ix  : signed(9 downto 0);
         variable v_dd  : signed(8 downto 0);
         variable v_e   : signed(30 downto 0);
+        variable v_pq  : signed(14 downto 0);
     begin
         if rising_edge(clk) then
             -- 1: source luma (or Osc), dl; Benv distance; widen bands
@@ -841,12 +843,13 @@ begin
             end if;
 
             -- 2: melt product (dl/2 x Melt/16)
-            p2_pm <= resize(p1_dl * signed('0' & f_m6), 14);
+            p2_pm <= resize(p1_dl * signed('0' & f_m6), 15);
             p2_psi <= p1_psi; p2_E <= p1_E; p2_lv <= p1_lv;
 
             -- 3: melt into the phase (2 cycles at full) and the vertical (0.585 cycle); |E|
             p3_psim <= p2_psi + resize(shift_right(p2_pm, 4), 16);
-            p3_m1 <= resize(shift_right(p2_pm, 2), 12) + resize(shift_right(p2_pm, 5), 12);
+            v_pq := shift_right(p2_pm, 2);                    -- slice, not resize: the vertical phase is mod 4096
+            p3_m1 <= v_pq(11 downto 0) + resize(shift_right(p2_pm, 5), 12);
             p3_m2 <= resize(shift_right(p2_pm, 6), 12) - resize(shift_right(p2_pm, 9), 12);
             if p2_E(14) = '1' then p3_aE <= unsigned(-p2_E); p3_En <= '1';
             else p3_aE <= unsigned(p2_E); p3_En <= '0'; end if;

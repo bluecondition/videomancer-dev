@@ -185,3 +185,11 @@ the colour profiles; `proto.py` + `glint2.py` = the float proto; `imodel.py` = t
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend / element.** K6 Camera adds the camera luma to both strand phases (the tubes and cords bend) and its positive part sprouts glints.
+- **Change.** The camera-gain constant in the sequencer's job 7 is 2873 instead of 2298 (×1.25): `c_g6h` = (K6² / 16) × 2873 >> 18, max 573 -> 716, inside its 10 bits. The 12 × 11 camera product peaks at 773 280 (Osc) in 23 bits; the glint term still clamps at 511. Logic and latency unchanged.
+- **Render.** `.heirloom_work/rb_hawser/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same picture; the ropes bend further and more glint red grows over the bright areas.
+- **Build** v0.1.2, router1, all six configs seed 1. HD Analog 86.16, HD HDMI 92.28, HD Dual 90.19 MHz (worst HD 86.16). 6824–6840 / 7680 LC, 22 / 32 EBR. Not flashed.
