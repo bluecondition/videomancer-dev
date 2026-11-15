@@ -241,3 +241,10 @@ If HD HDMI ever shows lines, re-seed that config. No pin-skew screen was run.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 100 -> 512 (v0.6.1). The vmprog was repacked from the same bitstreams (lava_diag build, as merged; verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Classification: bend.** K6 Melt bends the rows by camera (or Osc) luma (the Camera ground on S8 doesn't use K6).
+- **Change (v0.6.2):** the Melt gain `f_melt` = K6 / 16 is now `g + (g >> 2)` (0 .. 78, 7 bits; was 0 .. 63), in its existing free-running knob decode. The pixel product keeps its 17 bits (|256 × 78| = 19 968), so the bend at full white grows from about ±504 to ±624 lines. The existing tile clamp is unchanged. K6 default 1023 (TOML).
+- **Render check:** `.heirloom_work/rb_lava/k6b/k6b_cmp.png` (old vs new at K6 100 %, bear, 720p dec 4: rows bent further, no wrap).
+- **Build:** router1. SD Dual on seed 2 (seed 1 stalled the router), the rest seed 1. HD worst 84.78 MHz (HD Analog 84.78, HD HDMI 86.10, HD Dual 91.16), LC 7291.

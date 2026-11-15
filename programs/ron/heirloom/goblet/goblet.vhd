@@ -1,6 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
 -- Goblet v0.6.0 -- Heirloom #49 (2026-10-27 rebuild; phase 2: wider knob ranges), from WIN_20230916_01_08_00.
 --
 -- The photo is an additive RGB patch: three stripe oscillators (R ~124 px, G ~327 px, B ~182 px
@@ -141,9 +142,9 @@ architecture goblet of program_top is
     signal c_dyk : unsigned(15 downto 0) := (others => '0');
     signal c_g : unsigned(8 downto 0) := to_unsigned(256, 9);
     signal c_kr : unsigned(7 downto 0) := (others => '0');
-    signal c_km : unsigned(8 downto 0) := (others => '0');
+    signal c_km : unsigned(9 downto 0) := (others => '0');
     signal c_ka, c_kv : unsigned(10 downto 0) := (others => '0');
-    signal c_m5 : unsigned(11 downto 0) := (others => '0');      -- Melt curve, 0 .. 2922 (v0.5: k5)
+    signal c_m5 : unsigned(11 downto 0) := (others => '0');      -- Melt curve, 0 .. 3656 (x1.25 2026-11-15)
     signal c_hue : unsigned(9 downto 0) := (others => '0');
     signal c_osx : unsigned(7 downto 0) := (others => '0');
     signal c_osy : unsigned(9 downto 0) := (others => '0');
@@ -502,11 +503,11 @@ begin
                         c_kr <= f_acc(16 downto 9);
                         f_ma <= resize(g5(12 downto 3), 34); f_mb <= resize(g5(12 downto 3), 13); f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
                         f_st <= f_st + 1;
-                    when 18 =>      -- m5 = (k5^2 * 183) >> 16 (358 -> 357, 1023 -> 2922); Osc: ((k5^2 >> 10) * k5) >> 9
+                    when 18 =>      -- m5 = (k5^2 * 229) >> 16 (1023 -> 3656, x1.25); Osc: ((k5^2 >> 10) * k5 * 1.25) >> 9
                         if s_osc = '1' then
-                            f_ma <= shift_left(resize(f_acc(19 downto 10), 34), 7); f_mb <= resize(g5(12 downto 3), 13);
+                            f_ma <= shift_left(resize(f_acc(19 downto 10), 34), 7) + shift_left(resize(f_acc(19 downto 10), 34), 5); f_mb <= resize(g5(12 downto 3), 13);
                         else
-                            f_ma <= resize(f_acc(19 downto 0), 34); f_mb <= to_unsigned(183, 13);
+                            f_ma <= resize(f_acc(19 downto 0), 34); f_mb <= to_unsigned(229, 13);
                         end if;
                         f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
                         f_st <= f_st + 1;
@@ -518,7 +519,7 @@ begin
                         f_ma <= resize(f_acc(20 downto 6), 34); f_mb <= to_unsigned(7, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(3, 4);
                         f_st <= f_st + 1;
                     when 21 =>      -- ka = (m5 * 410) >> 10
-                        c_km <= f_acc(16 downto 8);
+                        c_km <= f_acc(17 downto 8);
                         f_ma <= resize(c_m5, 34); f_mb <= to_unsigned(410, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(9, 4);
                         f_st <= f_st + 1;
                     when 22 =>      -- kv, hue; speed^2
@@ -871,7 +872,7 @@ begin
             if v_w < 0 then p_m12 <= (others => '0'); else p_m12 <= unsigned(v_w(8 downto 0)); end if;
             -- 13: gain and source products; angle + hue
             p_mg13 <= p_m12 * c_g(8 downto 2);
-            p_ms13 <= resize(p_sd12(8 downto 2) * signed(resize(c_km, 10)), 16);
+            p_ms13 <= resize(p_sd12(8 downto 2) * signed(resize(c_km, 11)), 16);
             p_aa13 <= p_a12 + c_hue;
             p_as13 <= resize(p_sd12(8 downto 2) * signed(resize(c_ka(10 downto 3), 9)), 14);
             -- 14: Mg = (M8 g7 + s7 km) >> 6 ; A += (s7 ka6) >> 3
@@ -907,7 +908,7 @@ begin
     p_stripe : process(clk)
         variable v_e, v_o : unsigned(8 downto 0);
         variable v_x : unsigned(11 downto 0);
-        variable v_p : signed(12 downto 0);
+        variable v_p : signed(13 downto 0);
         variable v_q : signed(11 downto 0);
         variable v_u : unsigned(15 downto 0);
         variable v_si : unsigned(8 downto 0);
@@ -920,7 +921,7 @@ begin
             if s_noblk = '0' and v_x < resize(l_xe, 12) then q_in1 <= '1'; else q_in1 <= '0'; end if;
             q_r1 <= v_x(7 downto 3); q_rf1 <= v_x(2 downto 0);
             -- 2: bent position, mod 480 samples
-            v_p := signed(resize(q_pos1, 13)) + resize(shift_right(q_off1, 4), 13);
+            v_p := signed(resize(q_pos1, 14)) + resize(shift_right(q_off1, 4), 14);
             if v_p < 0 then v_p := v_p + 3840; elsif v_p >= 3840 then v_p := v_p - 3840; end if;
             q_p2 <= unsigned(v_p(11 downto 0));
             q_in2 <= q_in1; q_r2 <= q_r1; q_rf2 <= q_rf1;

@@ -1,6 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
 -- Brazier v0.1.0 -- Heirloom from the video clips (phase 3), made from the still WIN_20230930_01_37_53 @ 0.5 s.
 --
 -- The still: a blue / violet nested diamond with glowing pink rims and red / green fringes, keyed over a vertical
@@ -175,7 +176,7 @@ architecture brazier of program_top is
     signal c_jit  : unsigned(6 downto 0) := to_unsigned(8, 7);         -- jitter, Q3
     signal c_kx   : unsigned(14 downto 0) := to_unsigned(256, 15);     -- horizontal gain, Q8 (twin x2)
     signal c_kv   : unsigned(11 downto 0) := to_unsigned(256, 12);     -- vertical gain, Q8 (twin x2)
-    signal c_gd   : unsigned(7 downto 0) := (others => '0');           -- etch gain, D units per luma step
+    signal c_gd   : unsigned(8 downto 0) := (others => '0');           -- etch gain, D units per luma step (x1.25)
     signal c_vsq  : unsigned(17 downto 0) := (others => '0');
     signal c_lst  : unsigned(15 downto 0) := (others => '0');          -- LFO step per field
     signal c_lfo  : unsigned(15 downto 0) := (others => '0');          -- LFO phase
@@ -267,7 +268,7 @@ architecture brazier of program_top is
     signal q2_d, q3_d, q4_d, q5_d, q6_d : unsigned(12 downto 0) := (others => '1');
     signal q2_ph, q3_ph, q4_ph, q5_ph, q6_ph : unsigned(16 downto 0) := (others => '0');
     signal q4_lm : unsigned(3 downto 0) := (others => '0');
-    signal q5_ed : unsigned(11 downto 0) := (others => '0');
+    signal q5_ed : unsigned(12 downto 0) := (others => '0');
     type t_flags is array (2 to 14) of std_logic;
     signal q_rev, q_key, q_out, q_fin : t_flags := (others => '0');
     signal q9_tq  : unsigned(15 downto 0) := (others => '0');
@@ -563,7 +564,7 @@ begin
                             when 3      => c_kxs <= (resize(c_kx, 17) sll 1) + resize(c_kx, 17);
                             when others => c_kxs <= resize(c_kx, 17) sll 1;
                         end case;
-                    when 388 => c_gd  <= f_acc(19 downto 12);
+                    when 388 => c_gd  <= resize(f_acc(19 downto 12), 9) + f_acc(19 downto 14);  -- x1.25
                     when 412 => c_vsq <= f_acc(17 downto 0);
                     when 436 => c_lst <= f_acc(30 downto 15);
                     when 460 => c_th  <= f_acc(20 downto 10);

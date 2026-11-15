@@ -255,3 +255,15 @@ Glides (1/8 of the gap per field): K1, K3, P12. K2, K5 and K6 are read per field
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 256 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Classification: bend / element.** K6 Etch bends the vines' phase and swells their girth by camera (or Osc) luma; the camera picture itself is never shown.
+- **Change (v0.1.2):**
+  - The etch gain was K6 / 32 (0 .. 31, read per field). It is now a registered `s_kg = g + (g >> 2)` (0 .. 38, 6 bits), computed from the field-latched K6.
+  - The pixel product `p2_ep` widened 15 -> 16 bits and `p3_du` 14 -> 15 bits. The Osc's ×2 path reaches ±9728, which the old 14 bits could not hold.
+  - The phase still wraps as a phase, and the girth sum stays inside its 15 bits before the existing 0 .. 2047 clamp.
+
+  K6 default 1023 (TOML).
+- **Render check:** `.heirloom_work/rb_vine/k6b/k6b_cmp.png` (old vs new at K6 100 %, bear, 720p dec 4: the top-left crop, vines bent and swollen further where the camera is bright, no wrap).
+- **Build:** router1. HD Analog and SD Dual on seed 2 (seed 1 stalled the router, 600 s timeout), the rest seed 1. HD worst 82.65 MHz (HD Analog 85.27, HD HDMI 85.27, HD Dual 82.65), LC 7140.

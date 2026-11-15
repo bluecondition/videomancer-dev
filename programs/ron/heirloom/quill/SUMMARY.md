@@ -156,3 +156,10 @@ sweep); Ember Fan (Ember, Curl 820); Splayed (Curl 60, Quills 380); Fast Sweep.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Classification: bend.** K6 Warp bends the quills' VCO phase and grows the blue body by camera (or Osc) luma; the camera picture itself is never shown.
+- **Change (v0.1.2):** the per-field warp gain is ×1.25. Its constant 6567 became 8209. Kept at the old scale, the gain would no longer fit `c_gw`'s 17 bits (or the product's 2^29), so `c_gw` now holds half the gain (`f_acc(29 .. 13)`, max 65 544). The pixel path shifts its luma × gain sum one place further (camera << 5, Osc << 7), so the pixel multipliers keep their widths and the cost is one LSB of gain precision. Peak `p5_lw` is 133.7 M, under its 28 bits. The body shift `p6_bsh` peaks at 2295, inside 12 bits. K6 default 1023 (TOML).
+- **Render check:** `.heirloom_work/rb_quill/k6b/k6b_cmp.png` (old vs new at K6 100 %, bear, 720p dec 4: the top-left crop of the spine band. At 100 % the quills are already chaotic, so the visible change is mostly the body edge; no wrap).
+- **Build:** router1, all six on seed 1. HD worst 95.97 MHz (HD Analog 95.97, HD HDMI 101.20, HD Dual 96.62), LC 7051.

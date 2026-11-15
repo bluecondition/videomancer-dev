@@ -233,3 +233,10 @@ Working files: `.heirloom_work/rb_brazier/` (`notes.md`; `pal16_*` = palfit k = 
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Classification: bend.** K6 Etch pushes the diamond field D and the fin phase by camera (or Osc) luma; it never shows the camera picture itself.
+- **Change (v0.1.2):** the per-field etch gain `c_gd` (etch² >> 12, 0 .. 255) is now `g + (g >> 2)` (0 .. 318, 9 bits), set in the sequencer state that already latched it. The pixel product `q5_ed` widened 12 -> 13 bits; D + etch still fits its 14-bit sum (max 12976) before the existing saturation, and the fin-phase add wraps as a phase as before. K6 default 1023 (TOML).
+- **Render check:** `.heirloom_work/rb_brazier/k6b/k6b_cmp.png` (old vs new at K6 100 %, bear, 720p dec 4: the top-left crop, crescents bent further, no wrap).
+- **Build:** router1, HD Analog seed 2 (seed 1 stalled the router, 600 s timeout), all others seed 1. HD worst 80.80 MHz (HD Analog 86.87, HD HDMI 82.45, HD Dual 80.80), LC 6765.

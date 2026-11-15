@@ -1,6 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
 -- Lava v0.6.0 (phase 2) -- Heirloom #43, rebuilt from the photo WIN_20230605_01_14_56.
 --
 -- The photo: a red, glossy lava sheet hangs over violet / magenta vertical stripes.  Across the right half
@@ -162,7 +163,7 @@ architecture lava of program_top is
     signal f_bend  : signed(9 downto 0) := to_signed(128, 10);          -- Q7, -1 .. 2.25
     signal f_ca    : unsigned(11 downto 0) := (others => '0');           -- comb gain (phase / 2^21 per tri unit)
     signal f_ramp  : unsigned(7 downto 0) := to_unsigned(40, 8);         -- comb amplitude, Q4 px
-    signal f_melt  : unsigned(5 downto 0) := to_unsigned(6, 6);          -- Melt gain (src * m / 32 lines)
+    signal f_melt  : unsigned(6 downto 0) := to_unsigned(6, 7);          -- Melt gain (src * m / 32 lines)
     -- ground stripes: their own oscillator at the photo's pitch (= the drops' at the default Columns)
     -- Drip: depth (lines, signed: negative hangs down), breath phase
     signal f_dd    : signed(9 downto 0) := (others => '0');
@@ -561,8 +562,8 @@ begin
             f_dd <= resize(shift_right(v_c, 2) - v_c, 10);
             if v_c(11) = '1' then v_w := unsigned(not v_c(9 downto 0)); else v_w := unsigned(v_c(9 downto 0)); end if;
             f_ramp <= to_unsigned(40, 8) + resize(shift_right(v_w, 2), 8);
-            -- K6 Melt: K6 / 16 (0 .. 63, twice v0.5's gain per step); the photo's 6 at the new default 100
-            f_melt <= s_g(4)(12 downto 7);
+            -- K6 Melt: K6 / 16 x1.25 (0 .. 78; 2026-11-15 top +25 %, was 0 .. 63)
+            f_melt <= resize(s_g(4)(12 downto 7), 7) + s_g(4)(12 downto 9);
             v_k := signed(resize(s_g(5)(12 downto 3), 11)) - 512;                  -- P12 Flow: +-416 lines
             v_13 := shift_left(resize(v_k, 15), 3) + shift_left(resize(v_k, 15), 2) + resize(v_k, 15);
             f_fk <= resize(shift_right(v_13, 4), 11);

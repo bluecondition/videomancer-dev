@@ -1,6 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
 -- Quill v0.1.0 -- Heirloom (phase 3, video clips), rebuilt from the clip WIN_20230910_00_11_50 at 7.0 s.
 --
 -- The still: blue feather plumes on black.  A full-blue spine band at the top is crowded with wavy cyan /
@@ -175,7 +176,7 @@ architecture quill of program_top is
     signal c_gq   : signed(10 downto 0) := to_signed(256, 11);         -- curl g, Q8
     signal c_gqa  : unsigned(9 downto 0) := to_unsigned(256, 10);      -- |g|
     signal c_wg3  : unsigned(7 downto 0) := to_unsigned(12, 8);        -- 0.75 barb half-width
-    signal c_gw   : unsigned(16 downto 0) := (others => '0');          -- warp per luma step, Q24 periods
+    signal c_gw   : unsigned(16 downto 0) := (others => '0');          -- warp per luma step / 2, Q24 periods
     signal c_x0p  : unsigned(12 downto 0) := to_unsigned(260, 13);     -- x' + sync offset at pixel 0 (h)
     signal c_ctr  : unsigned(10 downto 0) := to_unsigned(959, 11);     -- mirror: last pixel stepping down
 
@@ -487,7 +488,7 @@ begin
             if z_oh(3) = '1' then v_fa := v_fa or resize(s_vm, 32);                  v_fb := v_fb or resize(s_vm, 16);        end if;  -- speed^2
             if z_oh(4) = '1' then v_fa := v_fa or resize(z_av, 32);                  v_fb := v_fb or to_unsigned(216, 16);    end if;
             if z_oh(5) = '1' then v_fa := v_fa or resize(s_g6(12 downto 3), 32);     v_fb := v_fb or resize(s_g6(12 downto 3), 16); end if;  -- warp^2
-            if z_oh(6) = '1' then v_fa := v_fa or resize(z_k6, 32);                  v_fb := v_fb or to_unsigned(6567, 16);   end if;
+            if z_oh(6) = '1' then v_fa := v_fa or resize(z_k6, 32);                  v_fb := v_fb or to_unsigned(8209, 16);   end if;  -- 6567 x1.25
             if z_oh(7) = '1' then v_fa := v_fa or to_unsigned(C_KB, 32);             v_fb := v_fb or z_m1;                    end if;  -- k0
             if z_oh(8) = '1' then v_fa := v_fa or to_unsigned(82, 32);               v_fb := v_fb or z_md;                    end if;  -- dot duty
             if z_oh(9) = '1' then v_fa := v_fa or to_unsigned(61, 32);               v_fb := v_fb or z_mw;                    end if;  -- barb width
@@ -599,7 +600,7 @@ begin
                     when 146 =>                   -- LFO rate: speed^2 * 216 >> 8 (Q24 turns per field)
                         s_om <= f_acc(31 downto 8); s_omn <= s_vneg;
                     when 170 => z_k6 <= resize(f_acc(19 downto 4), 20);                   -- warp^2 >> 4
-                    when 194 => c_gw <= f_acc(28 downto 12);                              -- (warp^2 >> 4) * 6567 >> 12
+                    when 194 => c_gw <= f_acc(29 downto 13);                              -- (warp^2 >> 4) * 8209 >> 13 (x1.25, halved)
                     when 218 =>                   -- k0 = C_KB * m1 >> (15 - sh), sh = -2 .. 1
                         case to_integer(z_s1) is
                             when -2     => c_k0 <= resize(f_acc(31 downto 17), 18);
@@ -997,9 +998,9 @@ begin
             p4_eb <= p3_lm(7 downto 4) * c_gw(16 downto 4);
             -- 5: luma x warp (Q24 periods); Osc runs at four times the depth
             if s_src = '1' then
-                p5_lw <= shift_left(resize(p4_ea, 28) + shift_left(resize(p4_eb, 28), 4), 6);
+                p5_lw <= shift_left(resize(p4_ea, 28) + shift_left(resize(p4_eb, 28), 4), 7);   -- (c_gw is halved)
             else
-                p5_lw <= shift_left(resize(p4_ea, 28) + shift_left(resize(p4_eb, 28), 4), 4);
+                p5_lw <= shift_left(resize(p4_ea, 28) + shift_left(resize(p4_eb, 28), 4), 5);
             end if;
             -- 6: the camera bends the phase; 1.125 lines of plume per 1/256 period of bend; noise - tilt
             p6_ph <= b_ph + p5_lw;

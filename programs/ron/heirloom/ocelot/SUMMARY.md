@@ -232,3 +232,10 @@ Glides (1/8 of the gap per field) on K1, K2, K3, K5, K6 and P12.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Classification: bend.** K6 Etch bends the bands' phase and the body's edge (key) by camera (or Osc) luma; the camera picture itself is never shown.
+- **Change (v0.1.2):** the per-field etch gain `c_ge` (etch² >> 14, 0 .. 63) is now `g + (g >> 2)` (0 .. 78, 7 bits), in the sequencer state that already latched it. The pixel product keeps its 16 bits (camera 239 × 78 = 18 642, Osc ±112 × 78). The key sum stays inside its 14 bits before the existing ±4095 clamp, and the band phase wraps as a phase. K6 default 1023 (TOML).
+- **Render check:** `.heirloom_work/rb_ocelot/k6b/k6b_cmp.png` (old vs new at K6 100 %, bear, 720p dec 4: the top-left crop, the body edge and bands pushed further, no wrap).
+- **Build:** router1, all six on seed 1. HD worst 99.07 MHz (HD Analog 100.32, HD HDMI 99.07, HD Dual 102.30), LC 5729.

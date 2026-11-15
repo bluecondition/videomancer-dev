@@ -1,6 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
 -- Ocelot v0.1.0 -- Heirloom (video phase), from the clip WIN_20231227_00_20_47 at 6.0 s.
 --
 -- The still: orange zebra bands with a yellow edge over salmon / grey-teal horizontal stripes, the bands dipped
@@ -177,7 +178,7 @@ architecture ocelot of program_top is
     signal c_bq : unsigned(4 downto 0) := to_unsigned(15, 5);        -- flame push (Q2 per F unit)
     signal c_m2 : unsigned(17 downto 0) := (others => '0');          -- roll^2
     signal c_roll : unsigned(17 downto 0) := (others => '0');        -- roll per field (Q24)
-    signal c_ge : unsigned(5 downto 0) := to_unsigned(9, 6);        -- etch gain
+    signal c_ge : unsigned(6 downto 0) := to_unsigned(9, 7);        -- etch gain (0 .. 78: x1.25)
     signal c_rk0  : unsigned(23 downto 0) := to_unsigned(K_RK0, 24);  -- key phase of line 0 (rolls)
     signal c_psi0 : unsigned(19 downto 0) := to_unsigned(K_PSI0, 20); -- stripe phase of line 0 (creeps up)
     signal c_loff : unsigned(6 downto 0) := (others => '0');          -- Osc: lattice mean
@@ -541,7 +542,7 @@ begin
                         end case;
                     when 76  => c_m2 <= f_acc(17 downto 0);
                     when 100 => c_roll <= f_acc(25 downto 8);
-                    when 124 => c_ge <= f_acc(19 downto 14);
+                    when 124 => c_ge <= resize(f_acc(19 downto 14), 7) + f_acc(19 downto 16);   -- x1.25
                     when others => null;
                 end case;
             end if;

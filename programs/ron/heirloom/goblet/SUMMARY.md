@@ -228,3 +228,15 @@ knobs for the ones that make sense to do so."
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Patch** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.1, rebuilt with router1: all six seed 1; HD worst 83.85 MHz (HD Analog 87.56, HD HDMI 83.85, HD Dual 92.96), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh goblet`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Classification: bend / element.** K6 Melt bends the stripes and shifts the glass hue and magnitude by camera (or Osc) luma. The camera "printing through" the glass is that re-colouring, not a camera layer.
+- **Change (v0.6.2):** the per-field Melt curve `c_m5` is ×1.25 at every position: video `(k² × 229) >> 16` (was 183; 0 .. 3656). Osc: the cubic's ×128 operand is now ×160 (0 .. 2552). The derived gains follow, and their widths were checked at the new top:
+  - `c_km` (magnitude) widened 9 -> 10 bits (max 598), its pixel operand 10 -> 11 bits. The product still fits its 16 bits.
+  - `c_ka` (hue) and `c_kv` (stripe bend) fit as they were.
+  - The stripe position sum `v_p` widened 13 -> 14 bits before its mod-3840 fold. It could already overflow at the very top of the position range with the old gain.
+
+  K6 default 1023 (TOML).
+- **Render check:** `.heirloom_work/rb_goblet/k6b/k6b_cmp.png` (old vs new at K6 100 %, K5 Patch RGB, bear, 720p dec 4: more hue modulation and stripe bend, no wrap).
+- **Build:** router1, all six on seed 1. HD worst 85.82 MHz (HD Analog 92.00, HD HDMI 85.82, HD Dual 89.66), LC 7306 (+36 over v0.6.1).

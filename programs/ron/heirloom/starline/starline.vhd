@@ -1,6 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
 -- Starline v0.1.0 -- Heirloom (video phase), from the clip WIN_20231218_21_31_11 at 3.0 s.
 --
 -- The still: a neon "star" drawn as bundles of thin bright tubes: a left point (313, 775) and a right point
@@ -243,7 +244,7 @@ architecture starline of program_top is
     signal c_p    : unsigned(15 downto 0) := to_unsigned(60621, 16);     -- LFO phase (Q16)
     signal c_xv   : unsigned(12 downto 0) := to_unsigned(618, 13);
     signal c_u0   : unsigned(23 downto 0) := (others => '0');
-    signal c_eg   : unsigned(7 downto 0) := to_unsigned(43, 8);
+    signal c_eg   : unsigned(8 downto 0) := to_unsigned(43, 9);   -- etch gain (0 .. 318: x1.25)
     signal c_xst  : unsigned(11 downto 0) := to_unsigned(8, 12);         -- beam start x (h)
     signal c_bsh  : std_logic := '0';                                    -- bead block: 64 h (0) / 256 h (1)
     signal c_su   : unsigned(11 downto 0) := to_unsigned(127, 12);       -- the arc's slope at the kink (h/16 per line, >= 0)
@@ -342,7 +343,7 @@ architecture starline of program_top is
     signal p3_lt, p4_lt : std_logic := '0';
     signal p3_lm : unsigned(9 downto 0) := (others => '0');
     signal p4_sf : unsigned(6 downto 0) := (others => '0');
-    signal p4_ea, p4_eb : unsigned(12 downto 0) := (others => '0');
+    signal p4_ea, p4_eb : unsigned(13 downto 0) := (others => '0');
     signal p5_ts, p5_et : unsigned(11 downto 0) := (others => '0');
     signal p6_tp : unsigned(11 downto 0) := (others => '0');
     signal p7_t, p8_t : unsigned(12 downto 0) := (others => '0');
@@ -678,7 +679,7 @@ begin
                         z_dx <= resize(c_xst, 14) + 8192 - resize(c_xv, 14);
                     when 386 =>
                         c_u0 <= f_acc(23 downto 0) - shift_left(resize(c_us, 24), 13);
-                    when 410 => c_eg <= f_acc(19 downto 12);
+                    when 410 => c_eg <= resize(f_acc(19 downto 12), 9) + f_acc(19 downto 14);   -- x1.25
                     when 411 =>
                         c_p <= c_p + c_rate;
                         c_vt1 <= c_us(16 downto 9) srl 1;
@@ -964,7 +965,7 @@ begin
         variable v_u8  : unsigned(7 downto 0);
         variable v_d   : signed(12 downto 0);
         variable v_t   : unsigned(12 downto 0);
-        variable v_s   : unsigned(17 downto 0);
+        variable v_s   : unsigned(18 downto 0);
         variable v_l   : unsigned(12 downto 0);
         variable v_g   : signed(12 downto 0);
         variable v_a   : unsigned(13 downto 0);
@@ -1003,11 +1004,11 @@ begin
             p4_eb <= p3_lm(9 downto 5) * c_eg;
             -- 5: T rounded; etch = luma * gain >> 8 (x4 for the Osc)
             if p4_lt = '1' then p5_ts <= to_unsigned(128, 12) + resize(p4_sf, 12); else p5_ts <= p4_dx; end if;
-            v_s := resize(p4_ea, 18) + shift_left(resize(p4_eb, 18), 5);
+            v_s := resize(p4_ea, 19) + shift_left(resize(p4_eb, 19), 5);
             if s_src = '1' then
-                p5_et <= v_s(17 downto 8) & "00";
+                p5_et <= v_s(17 downto 8) & "00";                   -- the Osc's 0 .. 765 keeps v_s < 2^18
             else
-                p5_et <= resize(v_s(17 downto 8), 12);
+                p5_et <= resize(v_s(18 downto 8), 12);
             end if;
             -- 6: T' = T + etch
             v_t := resize(p5_ts, 13) + resize(p5_et, 13);

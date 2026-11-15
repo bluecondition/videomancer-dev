@@ -1,6 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
 -- Confetti v0.1.0 -- Heirloom (phase 3, video clips), rebuilt from the clip WIN_20231123_23_27_50 at 5.5 s.
 --
 -- The still: magenta petal cards over a striped ground.  Three columns of tall rounded petals (each wider than
@@ -577,7 +578,7 @@ begin
                     when 7  => z_xa <= resize(z_g3a, 32); z_xb <= resize(z_fw, 16);                   -- slant / P
                     when 8  => z_xa <= to_unsigned(63937, 32); z_xb <= resize(z_fw, 16);              -- 1 / P
                     when 9  => z_xa <= resize(s_g6(12 downto 3), 32); z_xb <= resize(s_g6(12 downto 3), 16);   -- warp^2
-                    when 10 => z_xa <= resize(z_q(19 downto 4), 32); z_xb <= to_unsigned(4798, 16);
+                    when 10 => z_xa <= resize(z_q(19 downto 4), 32); z_xb <= to_unsigned(5998, 16);   -- 4798 x1.25 (K6 top +25 %)
                     when 11 => z_xa <= resize(s_vm, 32); z_xb <= resize(s_vm, 16);                    -- speed^2
                     when 12 => z_xa <= resize(z_q(17 downto 0), 32); z_xb <= to_unsigned(1626, 16);
                     when 13 => z_xa <= resize(s_acc(23 downto 8), 32); z_xb <= to_unsigned(1116, 16); -- V centre
@@ -971,7 +972,7 @@ begin
         variable v_h  : unsigned(9 downto 0);
         variable v_z  : signed(17 downto 0);
         variable v_l  : signed(10 downto 0);
-        variable v_lw : unsigned(13 downto 0);
+        variable v_lw : unsigned(16 downto 0);
         variable v_k  : unsigned(11 downto 0);
         variable v_c  : std_logic;
         variable v_zn : unsigned(1 downto 0);
@@ -1002,7 +1003,7 @@ begin
             if v_l < -256 then p6_dl <= to_signed(-8192, 14); else p6_dl <= shift_left(resize(v_l, 14), 5); end if;
             if p5_xr(7 downto 0) < l_pth and q6_ct = '1' then p6_pt <= '1'; else p6_pt <= '0'; end if;
             p6_et <= resize(l_eth, 15) + signed(resize(p5_lw(16 downto 3), 15));
-            v_lw := resize(p5_lw(16 downto 1), 14) + resize(p5_lw(16 downto 3), 14);
+            v_lw := resize(p5_lw(16 downto 1), 17) + resize(p5_lw(16 downto 3), 17);   -- wide: no wrap at the Osc's x4
             if v_lw > 8191 then p6_zl <= to_unsigned(8191, 13); else p6_zl <= v_lw(12 downto 0); end if;
             -- 7: window product h x |m / P|; fan phase; zone max
             p7_kp <= p6_h8 * c_ks;

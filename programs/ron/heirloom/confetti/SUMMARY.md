@@ -169,3 +169,10 @@ Warp 640, Speed 900).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Classification: bend.** K6 Warp bends the fan, swells the cards and spreads the red zone by camera (or Osc) luma; the camera picture itself is never shown.
+- **Change (v0.1.2):** the per-field warp gain `c_gw` = ((warp² >> 4) × C) >> 20 now uses C = 5998 instead of 4798 (×1.25: 0 .. 374, still inside its 9 bits; the product stays under 2^29). Every consumer was checked at the new top: the luma × gain products and the fan / card sums fit their widths. The zone-spread sum `v_lw` widened 14 -> 17 bits before its existing 8191 clamp. It already wrapped in Osc mode (×4) at high Warp; the camera path never reached the wrap. K6 default 1023 (TOML).
+- **Render check:** `.heirloom_work/rb_confetti/k6b/k6b_cmp.png` (old vs new at K6 100 %, bear, 720p dec 4: the top-left crop, camera texture and card edges pushed further, no wrap).
+- **Build:** router1. SD HDMI on seed 2 (seed 1 stalled the router), the rest seed 1. HD worst 86.05 MHz (HD Analog 93.55, HD HDMI 86.05, HD Dual 95.62), LC 6914.

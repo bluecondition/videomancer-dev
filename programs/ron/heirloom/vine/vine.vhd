@@ -1,6 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
 -- Vine v0.1.0 -- Heirloom (video phase), from the clip WIN_20231026_23_13_39 at 0.5 s.
 --
 -- The still: four blue vines (~134 px wide) swaying down a green ground that is banded by a vertical sine (black
@@ -151,6 +152,7 @@ architecture vine of program_top is
     signal s_gr : unsigned(9 downto 0) := (others => '0');
     signal s_k4 : unsigned(9 downto 0) := to_unsigned(700, 10);
     signal s_k6 : unsigned(9 downto 0) := to_unsigned(256, 10);
+    signal s_kg : unsigned(5 downto 0) := to_unsigned(10, 6);         -- etch gain K6 / 32 x1.25 (0 .. 38)
     signal s_vm : unsigned(8 downto 0) := (others => '0');
     signal s_vneg : std_logic := '0';
     signal s_zig, s_night, s_mirror, s_pal, s_src : std_logic := '0';
@@ -268,8 +270,8 @@ architecture vine of program_top is
     signal p2_wx : t_u4x2 := (others => (others => '0'));
     signal p3_p  : t_s14x2 := (others => (others => '0'));
     signal p2_v, p3_v : unsigned(11 downto 0) := (others => '0');
-    signal p2_ep : signed(14 downto 0) := (others => '0');
-    signal p3_du : signed(13 downto 0) := (others => '0');
+    signal p2_ep : signed(15 downto 0) := (others => '0');
+    signal p3_du : signed(14 downto 0) := (others => '0');
     signal p4_v  : unsigned(11 downto 0) := (others => '0');
     signal p4_w, p5_w, p6_w, p7_w, p8_w : unsigned(10 downto 0) := (others => '0');
     signal p4_n1, p5_n1, p6_n1, p7_n1, p8_n1, p9_n1, p10_n1, p11_n1 : unsigned(7 downto 0) := (others => '0');
@@ -429,6 +431,7 @@ begin
             end if;
             s_vm <= v_m(8 downto 0);
 
+            s_kg <= resize(s_k6(9 downto 5), 6) + s_k6(9 downto 7);       -- K6 top +25 % (2026-11-15)
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
                 s_zig   <= registers_in(6)(0);
@@ -926,14 +929,14 @@ begin
             end loop;
             p2_v <= b_ph(23 downto 12);
             if s_src = '1' then v_lm := resize(signed(s_lb_q), 9); else v_lm := signed(resize(unsigned(s_lb_q), 9)); end if;
-            p2_ep <= v_lm * signed(resize(s_k6(9 downto 5), 6));
+            p2_ep <= v_lm * signed(resize(s_kg, 7));
             -- 3: x interpolation products; etch (Osc 8x the camera's gain)
             for o in 0 to 1 loop
                 p3_p(o) <= p2_dx(o) * signed(resize(p2_wx(o), 5));
                 p3_c0(o) <= p2_c0(o);
             end loop;
-            if s_src = '1' then p3_du <= shift_left(resize(p2_ep, 14), 1);
-            else p3_du <= resize(shift_right(p2_ep, 2), 14); end if;
+            if s_src = '1' then p3_du <= shift_left(resize(p2_ep, 15), 1);
+            else p3_du <= resize(shift_right(p2_ep, 2), 15); end if;
             p3_v <= p2_v;
             -- 4: the two noises (n1 blossom, n2 flame); etched phase; etched half-width
             v_n := signed(resize(p3_c0(0), 10)) + resize(shift_right(p3_p(0), 4), 10);
