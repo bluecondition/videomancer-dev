@@ -1,6 +1,6 @@
 # Wallpaper (Kinetic)
 
-**v0.1.0 built 2026-11-14, not flashed.** Flash `out/rev_b/ron/kinetic/wallpaper.vmprog`.
+**v0.1.1 (K6 camera pass) built 2026-11-15, not flashed** (v0.1.0 built 2026-11-14). Flash `out/rev_b/ron/kinetic/wallpaper.vmprog`; see the last section.
 
 ## What it draws
 
@@ -35,8 +35,8 @@ The second modulator (source) drives a second property, the motif's SCALE, per q
 | K2 | Shape | the motif, interpolated through five figures: Pin, Flag (default), Sail, Dot, Slab (the bar, wedge and disc move and resize) |
 | K3 | Depth | swing of the rotation wave, square law, 0 .. half a turn each way (default about +-40 degrees) |
 | K4 | Rate | wave travel, bipolar, centre = still; 60 s per cycle just off the deadband to 2 cycles per second |
-| K5 | Spread | phase step per cell, square law, 0 .. 1/2 cycle (default about a tenth: one wave across the screen) |
-| K6 | Colour | the 16 shared Kinetic palettes (ground; bar = A, wedge = B, disc and mesh = accent), with hysteresis |
+| K5 | Colour | the 16 shared Kinetic palettes (ground; bar = A, wedge = B, disc and mesh = accent), with hysteresis (was K6 until the K6 camera pass; the old K5 Spread, the phase step per cell, is fixed at its default 500: about a tenth, one wave across the screen) |
+| K6 | Camera | how strongly the picture (or the Osc) sets the motif sizes, linear: 0 % = none (every motif at the black-input size), 25 % = v0.1.0 exactly, 50 % (default) = twice the size swing, 100 % = four times (big motifs grow past their quadrant, cropped at its edge). See "K6 camera pass" |
 | S7 | Wave | Smooth (sine) / Snap (dwell at the two extremes, quick eased flips) |
 | S8 | Field | Linear (the wave crosses on the diagonal) / Radial (rings from the screen centre) |
 | S9 | Spin | Off / On: the whole lattice turns (one turn in 68 s) and breathes (+-25 %) |
@@ -123,3 +123,38 @@ with a wider range (0.52 .. 1.0), so big diamonds of swelling motifs drift acros
 - Hold RAM is indexed by 5 + 5 bits of the quadrant number: with Spin on at the smallest Scale the far
   corners can share a level with the opposite corner (a wrong motif size there, nothing else).
 - The source level lags the picture by about 12 pixels to the right (the box filter).
+
+## K6 camera pass (2026-11-15), v0.1.1
+
+- **K6 = Camera** (new, 0 .. 100 %, default 50 %): how strongly the held source sets the motif sizes. The scale
+  is now a 5-bit size code c per quadrant, g = 31 - c (16 = the full quadrant), computed on the source side
+  before the hold RAM: c = c_cb + level x c_cm / 64, clamped to 0 .. 23, one 4 x 8 multiply in its own stage,
+  then the add and clamp. With G = K6 / 256:
+  - Video: c = 7 + G x 9 L / 16 (L = the 4-bit level), so g = 24 - G x 9 L / 16;
+  - Osc: c = 7 + G (L - 7), so g = 24 + G (7 - L) (the Osc keeps its wider, two-sided swing).
+  - 0 % = none: every motif at the black-input size (g 24, 0.67 of the quadrant), with Osc as well;
+  - 25 % (K6 256) = exactly v0.1.0 (Video 0.67 .. 1.0 of the quadrant, Osc 0.52 .. 1.0);
+  - 50 % (K6 512, default) = twice the size swing: bright quadrants grow their motif past the quadrant (to
+    2 x at white, g 8) and it is cropped at the quadrant edge;
+  - 100 % (K6 1023) = four times: most of a bright picture saturates at the 2 x crop (g 8).
+  A motif enlarged past 1.41 x (g <= 11) takes its AA code a half-octave finer (a new bit in the mesh delay
+  ring), so the big motifs keep 1 .. 1.5 px edges. K6 is glided in the shared glide (channel 3, the old Spread
+  channel) with a +-4 deadband on this channel (the others keep +-2).
+- Looks (integer-model preview, `.kinetic_work/rb_wallpaper/k6/model/msheet.png`, and the GHDL sheet
+  `.kinetic_work/rb_wallpaper/k6/k6sheet.png`: 720p60 decimation 2, the top-left quarter, K6 0 / 256 / 512 / 1023
+  and Osc at 512): 25 % is the old gentle halftone; 50 % makes the bright parts of the picture a field of big
+  motifs, some cut at their quadrant edges (half discs, clipped bars), the dark parts small; 100 % is a bold
+  mosaic of cropped bars, wedges and discs over the bright areas, still the group's pattern, not washed out.
+  Osc 50 % / 100 %: drifting diamonds of big cropped motifs and small ones.
+- **Frozen: K5 Spread at its default 500** (c_sp is the constant 500^2 >> 5 = 7812; serial slot 12 is gone).
+  **K6's old function, Colour, moved to K5** (same 16 palettes with hysteresis, default Ink); the presets'
+  Colour values moved with it and their old Spread values (400, 650, 300, 450, 350) are dropped.
+- The hold RAM now stores 8-bit words (the 5-bit code padded): 21 EBR. Standalone yosys: 4,722 LUT / 2,469 FF
+  (v0.1.0: 4,638 / 2,450); no emulate_transparency. The held sample is taken 2 px later (invisible behind the
+  32-px box). Latency unchanged (35).
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic wallpaper`): **router1, every config on seed 1**.
+  Post-route Fmax HD Analog 77.14, HD HDMI 83.54, HD Dual 84.63 MHz (worst HD 77.14, 3.9 % margin); SD Analog
+  85.80, SD HDMI 85.54, SD Dual 86.89. **7,469 .. 7,490 / 7,680 LC (97.5 %**, up about 110 from v0.1.0's
+  96 %: freezing Spread paid for little of the gain stage), 21 / 32 EBR. It closes on seed 1 everywhere with
+  router1, but there is now almost no room left for additions. Not flashed.
+  Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic wallpaper`.

@@ -6,7 +6,7 @@
 processing_delay_clks = 35
 program_id = "com.czartroniks.wallpaper"
 program_name = "Wallpaper"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -58,19 +58,19 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Spread"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 500
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Colour"
 value_labels = ["Ink", "Paper", "Bauhaus", "Vega", "Outrun", "Ultra", "Ocean", "Ice", "Moss", "Citrus", "Terra", "Ember", "Gold", "Candy", "Mint", "Plum"]
 initial_value_label = "Ink"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -120,8 +120,7 @@ name = "Kaleidoscope"
 rotary_potentiometer_1 = 950
 rotary_potentiometer_2 = 512
 rotary_potentiometer_3 = 700
-rotary_potentiometer_5 = 400
-rotary_potentiometer_6 = 224
+rotary_potentiometer_5 = 224
 toggle_switch_10 = 1
 linear_potentiometer_12 = 1023
 
@@ -131,8 +130,7 @@ rotary_potentiometer_1 = 600
 rotary_potentiometer_2 = 0
 rotary_potentiometer_3 = 800
 rotary_potentiometer_4 = 800
-rotary_potentiometer_5 = 650
-rotary_potentiometer_6 = 96
+rotary_potentiometer_5 = 96
 toggle_switch_7 = 1
 linear_potentiometer_12 = 0
 
@@ -141,8 +139,7 @@ name = "Glide"
 rotary_potentiometer_1 = 750
 rotary_potentiometer_2 = 768
 rotary_potentiometer_3 = 420
-rotary_potentiometer_5 = 300
-rotary_potentiometer_6 = 160
+rotary_potentiometer_5 = 160
 toggle_switch_8 = 1
 linear_potentiometer_12 = 640
 
@@ -152,8 +149,7 @@ rotary_potentiometer_1 = 880
 rotary_potentiometer_2 = 1023
 rotary_potentiometer_3 = 600
 rotary_potentiometer_4 = 300
-rotary_potentiometer_5 = 450
-rotary_potentiometer_6 = 288
+rotary_potentiometer_5 = 288
 toggle_switch_9 = 1
 linear_potentiometer_12 = 940
 
@@ -162,7 +158,6 @@ name = "Halftone"
 rotary_potentiometer_1 = 250
 rotary_potentiometer_2 = 768
 rotary_potentiometer_3 = 300
-rotary_potentiometer_5 = 350
-rotary_potentiometer_6 = 608
+rotary_potentiometer_5 = 608
 toggle_switch_11 = 1
 linear_potentiometer_12 = 470

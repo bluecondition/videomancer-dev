@@ -22,8 +22,12 @@
 --   K2  Shape    strap half-width 1.5 px .. 1.5 px + 3/32 pitch (SD: from 2.5 px)
 --   K3  Depth    angle swing 0 .. 1/4 turn (square law)
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
---   K5  Spread   phase step per tile 0 .. 1/2 cycle (square law)
---   K6  Colour   the 16 shared palettes
+--   K5  Colour   the 16 shared palettes  [K6 camera pass: was K6; the old K5 Spread, the phase step per tile
+--                (square law, 0 .. 1/2 cycle), is fixed at its default 330]
+--   K6  Camera   how far the held source closes each tile's angle: linear gain, 0 = none (the black-input
+--                picture), 25 % = the v0.1.0 strength (Video x6, white = 29 degrees), 50 % (default) = twice it,
+--                100 % = four times (Osc keeps its 16 / 6 of the camera's gain).  Glided per field, applied to
+--                the smeared sample by one 8 x 10 multiply (two 8 x 5 halves, then their sum) before the hold RAM
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Lattice  Square / Octagon
@@ -40,6 +44,7 @@
 --   [F] output conditioning: luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1] with resync, luma 13/16, blanking gate
 -- One latency (C_LAT = 36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 330 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -52,6 +57,7 @@ use work.girih_pkg.all;
 use work.all;
 
 architecture girih of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(330, 10));   -- K6 camera pass: fixed knob
     constant C_LAT      : integer := 36;      -- = processing_delay_clks
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
 
@@ -156,6 +162,10 @@ architecture girih of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(650 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(256 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
+    -- K6 Camera: its own glide (Q3, 1/8 of the gap per field, +-4 deadband) and the source gain (x / 16)
+    signal s_gk6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_k6d : signed(14 downto 0) := (others => '0');
+    signal s_cm  : unsigned(9 downto 0) := to_unsigned(192, 10);
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
     signal s_k4 : unsigned(9 downto 0) := to_unsigned(640, 10);
@@ -227,6 +237,8 @@ architecture girih of program_top is
     signal s_sav, s_savd, s_srow, s_wbank : std_logic := '0';
     signal s_ext : unsigned(5 downto 0) := (others => '0');
     signal s_y1 : unsigned(13 downto 0) := (others => '0');
+    signal s_ygl, s_ygh : unsigned(12 downto 0) := (others => '0');   -- smeared sample x K6 gain, two halves
+    signal s_yg : unsigned(13 downto 0) := (others => '0');           -- the source term (14 bits per turn)
 
     -- [D] tile accumulators: line registers (the NEXT line's start values), pixel accumulators (stage 1)
     signal ls_sk  : signed(27 downto 0) := (others => '0');
@@ -265,7 +277,7 @@ architecture girih of program_top is
     signal q13_w  : unsigned(9 downto 0) := (others => '0');
     signal q14_p0, q14_p1, q14_p2, q14_p3 : unsigned(11 downto 0) := (others => '0');
     signal q15_qa, q15_qb : unsigned(13 downto 0) := (others => '0');
-    signal q15_src : unsigned(7 downto 0) := (others => '0');
+    signal q15_src : unsigned(13 downto 0) := (others => '0');   -- the held source term, K6 gain applied
     signal q16_aw : unsigned(11 downto 0) := (others => '0');
     signal q16_st, q17_al : unsigned(13 downto 0) := (others => '0');
     signal k13, k14, k15 : unsigned(7 downto 0) := (others => '0');
@@ -357,6 +369,7 @@ begin
         variable v_b  : unsigned(25 downto 0);
         variable v_a27 : unsigned(26 downto 0);
         variable v_g9 : unsigned(16 downto 0);
+        variable v_a15 : unsigned(14 downto 0);
         variable v_sy, v_0y, v_1y : unsigned(9 downto 0);
         variable v_sc, v_0c, v_1c : t_u8;
     begin
@@ -416,8 +429,8 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9); s_sd <= '0';
                 end case;
                 -- Colour: 16 palettes with hysteresis
-                v_d := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(s_pal & "100000", 11));
-                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(5)(9 downto 6)); end if;
+                v_d := signed(resize(unsigned(registers_in(4)), 11)) - signed(resize(s_pal & "100000", 11));
+                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(4)(9 downto 6)); end if;
             end if;
             g_wm1 <= s_w - 1;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
@@ -469,7 +482,7 @@ begin
                         z_fa(12 downto 3) <= unsigned(registers_in(2)); z_fb(12 downto 3) <= unsigned(registers_in(2));
                     when 4  => z_fa(16 downto 0) <= c_p;                  z_fb <= to_unsigned(181, 24);       -- pitch / sqrt 2
                     when 7  =>                                                                                -- spread^2
-                        z_fa(12 downto 3) <= unsigned(registers_in(4)); z_fb(12 downto 3) <= unsigned(registers_in(4));
+                        z_fa(12 downto 3) <= unsigned(C_KFIX_5); z_fb(12 downto 3) <= unsigned(C_KFIX_5);
                     when 12 => z_fa(8 downto 0)  <= s_vm;                 z_fb <= to_unsigned(900, 24);       -- rate exponent
                     when others => z_fa(15 downto 0) <= z_mt;             z_fb <= to_unsigned(1193046, 24);   -- rate (14)
                 end case;
@@ -502,6 +515,21 @@ begin
 
             if s_zone = '1' then
                 case to_integer(s_zc) is
+                    -- K6 Camera: glide (1/8 of the gap per field, +-4 deadband), then the source gain x / 16:
+                    -- Video = 3 K6 / 8 (96 at 25 % = v0.1.0's x6), Osc = K6 (256 at 25 % = v0.1.0's x16)
+                    when 10 => s_k6d <= signed(resize(unsigned(registers_in(5)) & "000", 15)) - signed(resize(s_gk6, 15));
+                    when 11 =>
+                        if C_SIM_SNAP then
+                            null;
+                        elsif s_k6d > 32 or s_k6d < -32 then
+                            s_k6d <= shift_right(s_k6d, 3);
+                        else
+                            s_k6d <= (others => '0');
+                        end if;
+                    when 12 => s_gk6 <= unsigned(signed(s_gk6) + s_k6d(12 downto 0));
+                    when 13 =>
+                        v_a15 := resize(s_gk6 & '0', 15) + resize(s_gk6, 15);
+                        if s_src = '1' then s_cm <= s_gk6(12 downto 3); else s_cm <= '0' & v_a15(14 downto 6); end if;
                     -- wave phase (last field's step): one adder, add or subtract
                     when 20 =>
                         v_b := resize(c_dph, 26);
@@ -690,6 +718,7 @@ begin
         variable v_l  : unsigned(7 downto 0);
         variable v_x  : unsigned(13 downto 0);
         variable v_d1 : signed(14 downto 0);
+        variable v_g18 : unsigned(17 downto 0);
     begin
         if rising_edge(clk) then
             -- oscillator
@@ -731,6 +760,14 @@ begin
                 v_d1 := signed(resize(v_x, 15)) - signed(resize(s_y1, 15));
                 s_y1 <= unsigned(signed(s_y1) + resize(shift_right(v_d1, 6), 14));
             end if;
+
+            -- K6 camera gain on the smeared sample: 8 x 10 as two 8 x 5 products, summed in the next stage;
+            -- / 16 -> the angle term in 14 bits per turn (max 223 x 1023 / 16 = 14258).  The hold RAM stores it,
+            -- so the stored sample is the smear 2 px earlier than before (invisible: the smear is 64 px)
+            s_ygl <= s_y1(13 downto 6) * s_cm(4 downto 0);
+            s_ygh <= s_y1(13 downto 6) * s_cm(9 downto 5);
+            v_g18 := resize(s_ygl, 18) + shift_left(resize(s_ygh, 18), 5);
+            s_yg <= v_g18(17 downto 4);
         end if;
     end process p_src;
 
@@ -857,7 +894,7 @@ begin
         variable v_p   : unsigned(17 downto 0);
         variable v_k   : unsigned(7 downto 0);
         variable v_sel : unsigned(13 downto 0);
-        variable v_st  : unsigned(11 downto 0);
+        variable v_st  : unsigned(13 downto 0);
     begin
         if rising_edge(clk) then
             -- 6: Spread * column and Spread * row; a small square sits half a tile off on both axes
@@ -913,16 +950,16 @@ begin
             k13 <= v_k;
             if s_gav_sr(10) = '1' then sl_ra <= l_top & v_k(6 downto 0); else sl_ra <= l_top & "1000000"; end if;
             k14 <= k13; k15 <= k14;
-            q15_src <= unsigned(sl_q(7 downto 0));
-            sl_wd <= x"00" & std_logic_vector(s_y1(13 downto 6));
+            q15_src <= unsigned(sl_q(13 downto 0));
+            sl_wd <= "00" & std_logic_vector(s_yg);
             sl_wa <= s_wbank & k15(6 downto 0);
             if s_srow = '1' and s_gav_sr(13) = '1' and (s_nw(14) = '1' or s_gav_sr(12) = '0') then sl_we <= '1'; else sl_we <= '0'; end if;
 
-            -- 16: base angle - source term (Video x6: white = 0.08 turn; Osc x16); the small squares take none
+            -- 16: base angle - source term (K6 gain already applied before the hold RAM: at 25 % Video x6,
+            -- white = 0.08 turn; Osc x16); the small squares take none
             if s_sq(15) = '1' then v_st := (others => '0');
-            elsif s_src = '1' then v_st := q15_src & "0000";
-            else v_st := resize(q15_src & "00", 12) + resize(q15_src & '0', 12); end if;
-            q16_st <= c_bang - resize(v_st, 14);
+            else v_st := q15_src; end if;
+            q16_st <= c_bang - v_st;
             -- 17: the state: contact angle (14 bits per turn)
             if s_neg(16) = '1' then q17_al <= q16_st + resize(q16_aw, 14);
             else q17_al <= q16_st - resize(q16_aw, 14); end if;

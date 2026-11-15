@@ -14,10 +14,15 @@
 --
 --   K1  Scale    path size (3:2 ellipse / figure of eight, 0 .. 767 x 511 virtual px), glided
 --   K2  Shape    contour interval: 2 .. 32 bands per blob height (few broad tints .. many fine bands)
---   K3  Depth    radial pulsing of each blob (square law)
+--   K3  Colour   the 16 shared Kinetic palettes (hysteresis)  [K6 camera pass: was K6; the old K3 Depth,
+--                the radial pulsing, is fixed at its default 600 (c_d10 = 600^2 >> 10 = 351)]
 --   K4  Rate     travel along the path, bipolar, centre = still
 --   K5  Spread   phase step per blob (0 = one stacked hill; square law, 0 .. 1/2 cycle)
---   K6  Colour   the 16 shared Kinetic palettes (hysteresis)
+--   K6  Camera   how strongly the source field (camera luma or Osc) raises the terrain: linear gain,
+--                0 = none (the black-input picture), 25 % = the v0.1.0 strength, 50 % (default) = twice it,
+--                100 % = about four times (31 / 8).  Glided in the shared glide (channel 2, +-4 deadband), applied
+--                to the 8-bit source sample as K6 / 32 (32 steps) by one 8 x 5 multiply before the IIRs (Osc keeps
+--                twice the camera's gain)
 --   S7  Wave     Smooth / Snap (the blobs hop between 8 stations with an eased move)
 --   S8  Field    Orbit (the ellipse) / Drift (a figure of eight: the blobs cross and merge)
 --   S9  Look     Tints (filled bands stepping ground -> A -> B -> accent -> B -> A ..) / Lines (contours alone)
@@ -38,13 +43,16 @@
 --   [D] SOURCE FIELD                     Osc lattice, horizontal IIR, vertical IIR line store (16-bit, half res)
 --   [E] TINTS + AA BLEND                 coverage divider, band -> palette colour, 9-level shift-add blend
 --   [F] OUTPUT CONDITIONING              chroma [1 2 2 2 2 2 2 2 1]/16, luma [1 2 1]/4 at the same group delay,
---                                        luma 13/16, blanking gate
+--                                        luma 13/16, blanking gate.  (K6 camera pass: the chroma filter's
+--                                        8-sample delay moved from 160 flip-flops to a block-RAM ring, the
+--                                        fit headroom for the camera gain stage)
 --
 -- Stage numbering: stage 1 is the generated avid's own clock; a register "at stage S" holds pixel n at
 -- T + S + n (T = the g_start clock).  Pixel n sits at x = x0 + n xs half virtual px, pixels 0 .. W + 7 are
 -- rendered, output column j is the 9-tap filter over pixels j .. j + 8.  s_gav_sr(S - 2) flags pixels
 -- 0 .. W - 1 at stage S.  One latency (36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Colour (was K6); K3 Depth fixed at 600 (C_KFIX_3).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -57,13 +65,14 @@ use work.isoline_pkg.all;
 use work.all;
 
 architecture isoline of program_top is
+    constant C_KFIX_3 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(600, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 36;   -- = processing_delay_clks
     constant C_NBL  : integer := 4;    -- blobs
 
     -- TOML defaults: the glides start there
     constant C_DEF_K1  : integer := 520;
     constant C_DEF_K2  : integer := 338;
-    constant C_DEF_K3  : integer := 600;
+    constant C_DEF_K6  : integer := 512;   -- K6 Camera (glide channel 2, formerly K3 Depth)
     constant C_DEF_K5  : integer := 647;
     constant C_DEF_P12 : integer := 540;
 
@@ -172,7 +181,8 @@ architecture isoline of program_top is
     -- [B] knobs: glided (Q3), raw rate, switches, palette
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(C_DEF_K1 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(C_DEF_K2 * 8, 13);
-    signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);
+    signal s_gcam : unsigned(12 downto 0) := to_unsigned(C_DEF_K6 * 8, 13);   -- K6 Camera, glided (Q3)
+    signal s_cm   : unsigned(4 downto 0) := to_unsigned(16, 5);              -- source gain K6 / 32 (x / 16)
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(C_DEF_K5 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
@@ -205,7 +215,7 @@ architecture isoline of program_top is
     -- [C] per-field constants
     signal c_k31  : unsigned(15 downto 0) := to_unsigned(8192, 16);  -- 2^31 / R^2 (R in h)
     signal c_nb   : unsigned(8 downto 0) := to_unsigned(80, 9);      -- bands per unit height, Q4
-    signal c_d10  : unsigned(9 downto 0) := (others => '0');         -- pulse depth
+    constant c_d10 : unsigned(9 downto 0) := to_unsigned(351, 10);   -- pulse depth: Depth fixed at 600 (600^2 >> 10)
     signal c_sp16 : unsigned(15 downto 0) := (others => '0');        -- spread, cycles Q16 per blob
     signal c_rstep : unsigned(27 downto 0) := (others => '0');       -- phase step per field, Q32
     signal c_ph   : unsigned(31 downto 0) := (others => '0');        -- wave phase, Q32 cycles
@@ -256,9 +266,9 @@ architecture isoline of program_top is
     signal s3_m, s4_m : t_u9n := (others => (others => '0'));
     signal sq_q, s4_sq, s5_w : t_u16 := (others => (others => '0'));
     signal s3_in, s4_in : std_logic_vector(0 to C_NBL - 1) := (others => '0');
-    signal s6_a, s6_b, s6_c : unsigned(16 downto 0) := (others => '0');
+    signal s6_a, s6_b : unsigned(16 downto 0) := (others => '0');
+    signal s6_c, s7_c : unsigned(17 downto 0) := (others => '0');
     signal s7_ab : unsigned(17 downto 0) := (others => '0');
-    signal s7_c : unsigned(16 downto 0) := (others => '0');
     signal s8_f : unsigned(15 downto 0) := (others => '0');
     signal s9_p1 : unsigned(19 downto 0) := (others => '0');
     signal s9_p2 : unsigned(20 downto 0) := (others => '0');
@@ -283,12 +293,14 @@ architecture isoline of program_top is
     signal s_oys : unsigned(9 downto 0) := to_unsigned(121, 10);
     signal s_osum : unsigned(7 downto 0) := (others => '0');
     signal s_sl : unsigned(7 downto 0) := (others => '0');
-    signal s_sv, s_svd : std_logic := '0';
+    signal s_slg : unsigned(9 downto 0) := (others => '0');   -- s_sl * K6 gain (Q8.2)
+    signal s_slp : unsigned(12 downto 0) := (others => '0');  -- s_sl * s_cm
+    signal s_sv0, s_sv1, s_sv, s_svd : std_logic := '0';
     signal s_col : unsigned(10 downto 0) := (others => '0');
-    signal s_h : unsigned(12 downto 0) := (others => '0');
+    signal s_h : unsigned(14 downto 0) := (others => '0');
     signal s_bv, s_ev : std_logic := '0';
     signal s_bcol, s_ecol : unsigned(10 downto 0) := (others => '0');
-    signal s_eb : unsigned(12 downto 0) := (others => '0');
+    signal s_eb : unsigned(14 downto 0) := (others => '0');
     type t_lb is array (0 to 1023) of unsigned(15 downto 0);
     signal lb_ram : t_lb := (others => (others => '0'));
     attribute no_rw_check of lb_ram : signal is true;
@@ -323,7 +335,14 @@ architecture isoline of program_top is
 
     -- [F] output conditioning
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
-    signal s_cu, s_cv : t_u10(0 to 7) := (others => to_unsigned(512, 10));
+    -- K6 camera pass: the chroma filter's 8-sample delay in a block-RAM ring instead of 160 flip-flops (the
+    -- same samples; the 8-sums' per-line resync still reloads them, so RAM start-up contents cannot stick)
+    type t_cr is array (0 to 255) of unsigned(31 downto 0);
+    signal cr_ram : t_cr := (others => (others => '0'));
+    attribute no_rw_check of cr_ram : signal is true;
+    signal cr_q, cr_f : unsigned(31 downto 0) := (others => '0');
+    signal cr_wp : unsigned(7 downto 0) := to_unsigned(6, 8);
+    signal cr_rp : unsigned(7 downto 0) := (others => '0');
     signal s_yd : t_u10(1 to 5) := (others => to_unsigned(64, 10));
     signal s_bu, s_bv2, s_bud, s_bvd : unsigned(12 downto 0) := to_unsigned(4100, 13);
     signal s_hist : std_logic_vector(7 downto 0) := (others => '0');
@@ -367,6 +386,18 @@ begin
             if rw_we = '1' then rf_ram(to_integer(rw_a)) <= rw_d; end if;
         end if;
     end process p_rfram;
+
+    -- chroma delay ring: s25_u / s25_v read back 8 clocks later (6 addresses behind the write, the RAM's
+    -- register and a fabric register)
+    p_crram : process(clk)
+    begin
+        if rising_edge(clk) then
+            cr_q <= cr_ram(to_integer(cr_rp));
+            cr_f <= cr_q;
+            cr_ram(to_integer(cr_wp)) <= x"000" & s25_v & s25_u;
+            cr_wp <= cr_wp + 1; cr_rp <= cr_rp + 1;
+        end if;
+    end process p_crram;
 
     -- PHI line store: read ahead of the write, never the same address
     p_phram : process(clk)
@@ -479,11 +510,15 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- palette: 16 steps with hysteresis (leave a step only 8 past its edge)
-                v_k := unsigned(registers_in(5));
+                v_k := unsigned(registers_in(2));
                 v_c := signed(resize(v_k, 11)) - signed(resize(s_pal & "100000", 11));
                 if v_c > 40 or v_c < -40 then s_pal <= v_k(9 downto 6); end if;
             end if;
             g_wm1 <= s_w - 1;
+            -- [B] K6 camera gain: K6 / 32 (0 .. 31; 8 = the v0.1.0 strength, 16 = the default) on the 8-bit source
+            -- sample (32 steps; the Osc takes twice the camera's, as before).  s_gcam only moves in the vblank
+            -- zone, so this is quasi-static.
+            s_cm <= s_gcam(12 downto 8);
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
 
             -- [B] shared glide (1/8 of the gap per field, +-2 deadband): four clocks per channel
@@ -495,7 +530,7 @@ begin
                         case to_integer(z_gc) is
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
-                            when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
+                            when 2      => s_gm <= s_gcam; s_gr <= unsigned(registers_in(5));   -- K6 Camera
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
@@ -504,7 +539,8 @@ begin
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                        -- deadband +-2 knob steps, +-4 on the camera (channel 2) so pot noise cannot shimmer
+                        if (s_gd > 32 or s_gd < -32) or (z_gc /= 2 and (s_gd > 16 or s_gd < -16)) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -514,7 +550,7 @@ begin
                         case to_integer(z_gc) is
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 2      => s_gcam <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
@@ -532,7 +568,7 @@ begin
             if s_zone = '1' then
                 case to_integer(s_zc) is
                     when 30  => z_sel <= to_unsigned(0, 5);  z_pre <= '1';
-                    when 54  => z_sel <= to_unsigned(1, 5);  z_pre <= '1';
+                    -- (slot 1, Depth^2, is gone: Depth is fixed, c_d10 is a constant)
                     when 78  => z_sel <= to_unsigned(2, 5);  z_pre <= '1';
                     when 102 => z_sel <= to_unsigned(3, 5);  z_pre <= '1';
                     when 126 => z_sel <= to_unsigned(4, 5);  z_pre <= '1';
@@ -546,7 +582,6 @@ begin
             if z_pre = '1' then
                 case to_integer(z_sel) is
                     when 0  => z_fa <= resize(s_gp, 40);  z_fb <= to_unsigned(1217, 16);                 -- radius octaves
-                    when 1  => z_fa <= resize(s_g3(12 downto 3), 40); z_fb <= resize(s_g3(12 downto 3), 16);  -- depth^2
                     when 2  => z_fa <= resize(s_g5(12 downto 3), 40); z_fb <= resize(s_g5(12 downto 3), 16);  -- spread^2
                     when 3  => z_fa <= resize(s_vm, 40);  z_fb <= to_unsigned(897, 16);                  -- rate exponent
                     when 4  => z_fa <= resize(r_exf, 40); z_fb <= to_unsigned(9321, 16);                 -- rate step
@@ -600,7 +635,6 @@ begin
                             when "10"   => c_nb <= resize(shift_right(r_exf, 8), 9);
                             when others => c_nb <= resize(shift_right(r_exf, 7), 9);
                         end case;
-                    when 74  => c_d10 <= f_acc(19 downto 10);
                     when 98  => c_sp16 <= f_acc(20 downto 5);
                     when 122 => r_ex_a <= '0' & f_acc(15 downto 8); z_sh4 <= f_acc(18 downto 16);
                     when 146 =>
@@ -887,7 +921,8 @@ begin
             -- 6 .. 8: the field F = sum of the blobs + the source (Q3.16 -> Q3.13)
             s6_a <= resize(s5_w(0), 17) + resize(s5_w(1), 17);
             s6_b <= resize(s5_w(2), 17) + resize(s5_w(3), 17);
-            if s_src = '1' then s6_c <= '0' & s_srcm; else s6_c <= "00" & s_srcm(15 downto 1); end if;   -- Osc at twice the camera's gain
+            -- the source, x 4 (K6 has already scaled it: K6 = 512 on the camera = twice v0.1.0's half gain)
+            s6_c <= s_srcm & "00";
             s7_ab <= resize(s6_a, 18) + resize(s6_b, 18);
             s7_c <= s6_c;
             v_f := resize(s7_ab, 19) + resize(s7_c, 19);
@@ -964,21 +999,27 @@ begin
             if s_src = '1' then s_sl <= s_osum;
             elsif v_l > 80 then s_sl <= v_l - 80;
             else s_sl <= (others => '0'); end if;
-            s_sv <= data_in.avid; s_svd <= s_sv;
+            -- K6 camera pass: the gain, one 8 x 5 multiply in its own stage, then the Osc / camera shift (Q8.2
+            -- out: camera s_sl x K6 / 512, Osc twice that; <= 988).  The avid flag takes two more registers so
+            -- the source path stays aligned (the field moves 2 px right)
+            s_slp <= s_sl * s_cm;
+            if s_src = '1' then s_slg <= resize(s_slp(12 downto 3), 10); else s_slg <= resize(s_slp(12 downto 4), 10); end if;
+            s_sv0 <= data_in.avid; s_sv1 <= s_sv0; s_sv <= s_sv1; s_svd <= s_sv;
             if s_sv = '1' then s_col <= s_col + 1; else s_col <= (others => '0'); end if;
 
-            -- horizontal 1/32 IIR (Q8.5), reloaded with the first sample at every line start
+            -- horizontal 1/32 IIR (Q10.5 of the Q8.2 sample), reloaded with the first sample at every line start
             if s_sv = '1' and s_svd = '0' then
-                s_h <= s_sl & "00000";
+                s_h <= s_slg & "00000";
             elsif s_sv = '1' then
-                s_h <= s_h - shift_right(s_h, 5) + resize(s_sl, 13);
+                s_h <= s_h - shift_right(s_h, 5) + resize(s_slg, 15);
             end if;
             s_bv <= s_sv; s_bcol <= s_col;
 
-            -- vertical IIR on the odd columns: q += (8 h - q + 16) >> 5
+            -- vertical IIR on the odd columns: q += (2 h - q + 16) >> 5  (q = 64 x the Q8.2 sample = 256 x
+            -- the 8-bit sample at unity gain, as before)
             s_eb <= s_h; s_eq <= lb_q1;
             s_ev <= s_bv and s_bcol(0); s_ecol <= s_bcol;
-            v_d := signed(resize(s_eb & "000", 18)) - signed(resize(s_eq, 18)) + 16;
+            v_d := signed(resize(s_eb & "0", 18)) - signed(resize(s_eq, 18)) + 16;
             v_a := signed(resize(s_eq, 18)) + shift_right(v_d, 5);
             lb_wd <= unsigned(v_a(15 downto 0));
             lb_we <= s_ev; lb_wa <= s_ecol(10 downto 1);
@@ -1132,13 +1173,11 @@ begin
         if rising_edge(clk) then
             -- 26: running 8-sums (+ 4: rounds the 9-tap sum); they snap to 8 x ground once 8 samples outside
             -- the picture are in, so a glitched sample can't offset the colours for good
-            s_cu(0) <= s25_u; s_cv(0) <= s25_v;
-            for i in 1 to 7 loop s_cu(i) <= s_cu(i - 1); s_cv(i) <= s_cv(i - 1); end loop;
             if s_hist = "00000000" then
                 s_bu <= (c_pu(0) & "00000") + 4; s_bv2 <= (c_pv(0) & "00000") + 4;
             else
-                s_bu  <= s_bu + s25_u - s_cu(7);
-                s_bv2 <= s_bv2 + s25_v - s_cv(7);
+                s_bu  <= s_bu + s25_u - cr_f(9 downto 0);
+                s_bv2 <= s_bv2 + s25_v - cr_f(19 downto 10);
             end if;
             s_bud <= s_bu; s_bvd <= s_bv2;
             -- luma taps y(n - 3), y(n - 4), y(n - 5)

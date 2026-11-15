@@ -1,6 +1,6 @@
 # Isoline (Kinetic)
 
-**v0.1.0 built 2026-11-14, not flashed.** Flash `out/rev_b/ron/kinetic/isoline.vmprog`.
+**v0.1.1 (K6 camera pass) built 2026-11-15, not flashed** (v0.1.0 built 2026-11-14). Flash `out/rev_b/ron/kinetic/isoline.vmprog`; see the last section.
 
 ## What it draws
 
@@ -31,10 +31,10 @@ pixel in every video mode (9 levels). Lines are 2 pixels wide, index lines 3 to 
 |---|---|---|
 | K1 | Scale | path size: half-axes 0 .. 767 x 511 virtual px (3:2), glided. 0 = every blob at the centre |
 | K2 | Shape | contour interval: 2 .. 32 bands per blob height, exponential. Low = a few broad flat tints, high = many fine bands (they fade to their mean before they alias) |
-| K3 | Depth | radial pulsing of each blob, square law: radius x 0.78 .. 1.6 at the top, four pulses per lap, staggered between blobs |
+| K3 | Colour | the 16 shared Kinetic palettes (ground, A, B, accent), with hysteresis; default Ocean. (Was K6 until the K6 camera pass; the old K3 Depth, the radial pulsing, is fixed at its default 600: radius x 0.78 .. 1.6 at the top would be Depth 100 %) |
 | K4 | Rate | travel along the path, bipolar, centre = still; exponential, 60 s per lap just off the deadband to 2 laps per second |
 | K5 | Spread | phase step per blob, square law, 0 .. 1/2 lap. 0 = all four stacked into one tall hill; the default strings them out over 3/5 of the path; the top puts them in two opposite pairs |
-| K6 | Colour | the 16 shared Kinetic palettes (ground, A, B, accent), with hysteresis; default Ocean |
+| K6 | Camera | how strongly the picture (or the Osc) raises the terrain, linear: 0 % = none (the black-input picture), 25 % = v0.1.0's fixed strength, 50 % (default) = twice it, 100 % = about four times. See "K6 camera pass" |
 | S7 | Wave | Smooth / Snap: the blobs hop between 8 stations on the path, dwelling 3/4 of the time and moving on a sine ease |
 | S8 | Field | Orbit (the ellipse round the centre) / Drift (a figure of eight, so the blobs cross in the middle and merge there) |
 | S9 | Look | Tints (filled bands) / Lines (contours alone, colour A on the ground) |
@@ -132,3 +132,35 @@ under the islands. The source field lags the picture a little to the right and b
   it reads in motion); Depth 0 % against the default is subtle; Lines in the Ocean default is blue on navy,
   so it is faint until Index is on or another palette is chosen.
 - 480i has 243 lines per field: fine bands (K2 high, small radius) fade to their mean sooner than at HD.
+
+## K6 camera pass (2026-11-15), v0.1.1
+
+- **K6 = Camera** (new, 0 .. 100 %, default 50 %): how strongly the source field raises the terrain. The gain is
+  applied to the 8-bit source sample (cored camera luma, or the Osc lattice) before the two IIRs, by one 8 x 5
+  multiply in its own stage: sample x (K6 >> 5) / 16 for the camera, / 8 for the Osc (the Osc keeps twice the
+  camera's gain). Linear law, 32 steps:
+  - 0 % = none: the black-input picture (with Osc as well);
+  - 25 % (K6 256) = x 1/2 = exactly v0.1.0's fixed strength (white adds about 0.34 of a blob's height);
+  - 50 % (K6 512, default) = twice v0.1.0 (white about 0.68 of a blob height, 3.4 contours at the default
+    interval; the Osc up to 1.7);
+  - 100 % (K6 1023) = 31 / 8 = about 3.9 x v0.1.0 (white about 1.3 blob heights; the Osc up to 3.4).
+  K6 is glided in the shared glide (channel 2, the old Depth channel: 1/8 of the gap per field) with a +-4
+  deadband on this channel (the others keep +-2), so pot noise cannot step the gain.
+- Looks (integer-model preview with the selfie, `.kinetic_work/rb_isoline/k6/model/msheet.png`, and the GHDL sheet `.kinetic_work/rb_isoline/k6/k6sheet.png`: 720p60 decimation 2, the top-left quarter, K6 0 / 256 / 512 / 1023 and Osc at 512): 50 % bends the coastlines clearly and stays clean (a little serration where a contour
+  runs along the picture's bright edges); 100 % lifts the picture's mid-grey background over the coring, so the
+  sea breaks into ragged islands with the horizontal IIR's streaks: bold, still a contour map, not washed out.
+  Osc at 50 % is a full lattice of diamond terraces; at 100 % dense concentric diamonds.
+- **Frozen: K3 Depth at its default 600** (the pulse depth c_d10 is now the constant 600^2 >> 10 = 351; serial
+  slot 1 is gone). **K6's old function, Colour, moved to K3** (same 16 palettes, hysteresis, default Ocean); the
+  presets' Colour values moved with it and their old Depth values (Atolls 800, Lava Lamp 850, Continent 700) are
+  dropped, so those presets pulse at the default depth.
+- Fit: freezing Depth freed very little; the gain stage, the wider IIR (the sample is now Q8.2) and the camera
+  deadband cost about +70 LUT standalone. To pay for it, the chroma filter's 8-sample delay moved from 160
+  flip-flops to a block-RAM ring (the "ring" option noted in Status above, ported by hand: same samples, the
+  8-sums' per-line resync unchanged). Standalone yosys: 4,357 LUT / 3,126 FF / 21 EBR (v0.1.0: 4,271 / 3,231 /
+  19); no emulate_transparency.
+- The source field now sits 2 px further right (the gain stage). Latency unchanged (36).
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic isoline`): **router1, every config on seed 1**.
+  Post-route Fmax HD Analog 84.73, HD HDMI 86.74, HD Dual 90.82 MHz (worst HD 84.73, better than v0.1.0's
+  76.96); SD Analog 86.58, SD HDMI 86.14, SD Dual 83.59. 7,339 .. 7,361 / 7,680 LC (96 %, slightly under
+  v0.1.0), 21 / 32 EBR. Not flashed. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic isoline`.

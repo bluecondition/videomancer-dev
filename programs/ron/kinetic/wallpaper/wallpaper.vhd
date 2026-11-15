@@ -18,8 +18,14 @@
 --   K2  Shape    the motif: Pin .. Flag .. Sail .. Dot .. Slab, interpolated
 --   K3  Depth    the wave's swing of the motif's rotation, square law, 0 .. half a turn
 --   K4  Rate     wave travel, bipolar, centre = still
---   K5  Spread   phase step per cell, square law, 0 .. 1/2 cycle
---   K6  Colour   the 16 shared Kinetic palettes (hysteresis)
+--   K5  Colour   the 16 shared Kinetic palettes (hysteresis)  [K6 camera pass: was K6; the old K5 Spread,
+--                the phase step per cell (square law, 0 .. 1/2 cycle), is fixed at its default 500]
+--   K6  Camera   how strongly the held source sets the motif's size: linear gain G = K6 / 256 on the size
+--                code c (g = 31 - c, 16 = the full quadrant).  Video: c = 7 + G 9 L / 16; Osc: c = 7 + G (L - 7)
+--                (twice-ish the camera's swing, as before); c clamped to 0 .. 23 (g 31 .. 8: motifs from about
+--                half a quadrant up to twice it, cropped at the quadrant edge).  0 = none (every motif at the
+--                black-input size, g 24), 25 % = v0.1.0 exactly, 50 % (default) = twice.  Glided in the shared
+--                glide (channel 3, formerly Spread); one 4 x 8 multiply on the source side before the hold RAM.
 --   S7  Wave     Smooth (sine) / Snap (dwell and flip)
 --   S8  Field    Linear (index = i + j) / Radial (|i| + |j| from the screen centre)
 --   S9  Spin     Off / On: the lattice turns and breathes
@@ -37,6 +43,7 @@
 -- over pixels j .. j + 8.  s_gav_sr(S - 2) flags pixels 0 .. W - 1 at stage S.  One latency (35) in every mode.
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 500 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -49,13 +56,14 @@ use work.wallpaper_pkg.all;
 use work.all;
 
 architecture wallpaper of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(500, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 35;   -- = processing_delay_clks
 
     -- TOML defaults: the glides start there
     constant C_DEF_K1  : integer := 850;
     constant C_DEF_K2  : integer := 256;
     constant C_DEF_K3  : integer := 480;
-    constant C_DEF_K5  : integer := 500;
+    constant C_DEF_K6  : integer := 512;   -- K6 Camera (glide channel 3, formerly K5 Spread)
 
     constant C_CY8 : integer := 138240;     -- screen centre y, Q8 virtual lines (540)
 
@@ -144,7 +152,10 @@ architecture wallpaper of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(C_DEF_K1 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(C_DEF_K2 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);
-    signal s_g5 : unsigned(12 downto 0) := to_unsigned(C_DEF_K5 * 8, 13);
+    signal s_gcam : unsigned(12 downto 0) := to_unsigned(C_DEF_K6 * 8, 13);   -- K6 Camera, glided (Q3)
+    signal c_cm   : unsigned(7 downto 0) := to_unsigned(72, 8);               -- size-code gain, x / 64
+    signal c_cb   : signed(5 downto 0) := to_signed(7, 6);                    -- size-code base
+    signal s_kq   : unsigned(7 downto 0) := (others => '0');                  -- 9 K6 / 64 (Video) or 7 K6 / 256 (Osc)
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -187,7 +198,7 @@ architecture wallpaper of program_top is
     signal c_sA, c_sB : std_logic := '0';
     signal c_stu, c_stv : unsigned(22 downto 0) := (others => '0');   -- |step per pixel|, Q6.26 cells (signs: sA, not sB)
     signal c_lu, c_lv : unsigned(23 downto 0) := (others => '0');     -- |step per line| (signs: sB, sA)
-    signal c_sp   : unsigned(15 downto 0) := (others => '0');         -- spread, Q16 cycles per cell
+    constant c_sp : unsigned(15 downto 0) := to_unsigned(7812, 16);   -- spread, Q16 cycles per cell: Spread fixed at 500 (500^2 >> 5)
     signal c_dep  : unsigned(11 downto 0) := (others => '0');         -- swing, 4096ths of a turn
     signal c_rstep : unsigned(27 downto 0) := (others => '0');        -- phase step per field, Q32
     signal c_ph   : unsigned(31 downto 0) := (others => '0');         -- wave phase, Q32 cycles
@@ -234,11 +245,11 @@ architecture wallpaper of program_top is
     signal wt_we : std_logic := '0';
 
     -- hold RAM: the scale level of every quadrant, two banks by field (read the last field's, write this one's)
-    type t_hd is array (0 to 2047) of unsigned(3 downto 0);
+    type t_hd is array (0 to 2047) of unsigned(7 downto 0);   -- K6 pass: the 5-bit size code, padded to 8
     signal h_ram : t_hd := (others => (others => '0'));
     attribute no_rw_check of h_ram : signal is true;
     signal h_ra, h_wa : unsigned(10 downto 0) := (others => '0');
-    signal h_q, h_wd : unsigned(3 downto 0) := (others => '0');
+    signal h_q, h_wd : unsigned(7 downto 0) := (others => '0');
     signal h_we, s_bank : std_logic := '0';
 
     -- [D] source field
@@ -258,6 +269,8 @@ architecture wallpaper of program_top is
     signal s_bcnt : unsigned(5 downto 0) := (others => '0');
     signal s_bsum : unsigned(12 downto 0) := (others => '0');
     signal s_lnow : unsigned(3 downto 0) := (others => '0');
+    signal s_lp   : unsigned(11 downto 0) := (others => '0');   -- level x c_cm
+    signal s_cnow : unsigned(4 downto 0) := to_unsigned(7, 5);  -- size code: c_cb + level x c_cm / 64, 0 .. 23
 
     -- geometry pipeline (stages 3 .. 21)
     signal g3_a, g3_b, g4_a, g4_b, g5_a, g5_b, g6_a, g6_b : signed(9 downto 0) := (others => '0');
@@ -271,6 +284,7 @@ architecture wallpaper of program_top is
     signal g8_wm : unsigned(10 downto 0) := (others => '0');
     signal g9_cm, g20_cm : unsigned(4 downto 0) := (others => '0');
     signal g6_gc, g17_gc : std_logic := '0';
+    signal g6_gp, g17_gp : std_logic := '0';   -- K6 pass: a motif enlarged past 1.41 x takes a half-octave finer AA
     -- delay rings (16 deep, one free-running pointer): mesh coverage + AA code bit (11 stages); filtered chroma (8)
     type t_dl is array (0 to 255) of unsigned(7 downto 0);
     signal dl_ram : t_dl := (others => (others => '0'));
@@ -282,7 +296,7 @@ architecture wallpaper of program_top is
     signal cd_q, cd_f : unsigned(15 downto 0) := (others => '0');
     signal r_wp : unsigned(3 downto 0) := (others => '0');
     signal g5_cs, g6_cs : unsigned(15 downto 0) := (others => '0');
-    signal g5_L : unsigned(3 downto 0) := (others => '0');
+    signal g5_L : unsigned(4 downto 0) := to_unsigned(7, 5);   -- the size code c (g = 31 - c)
     signal g6_g : unsigned(4 downto 0) := to_unsigned(24, 5);
     signal g7_ag, g7_bg : signed(10 downto 0) := (others => '0');
     signal g7_c, g7_s : signed(7 downto 0) := (others => '0');
@@ -370,7 +384,7 @@ begin
     begin
         if rising_edge(clk) then
             dl_q <= dl_ram(to_integer(resize(r_wp - 9, 8)));
-            dl_ram(to_integer(resize(r_wp, 8))) <= unsigned'("00") & g6_gc & g9_cm;
+            dl_ram(to_integer(resize(r_wp, 8))) <= unsigned'("0") & g6_gp & g6_gc & g9_cm;
             cd_q <= cd_ram(to_integer(resize(r_wp - 6, 8)));
             cd_ram(to_integer(resize(r_wp, 8))) <= s25_u & s25_v;
             r_wp <= r_wp + 1;
@@ -421,6 +435,7 @@ begin
         variable v_st : unsigned(4 downto 0);
         variable v_pa : unsigned(7 downto 0);
         variable v_d11 : signed(10 downto 0);
+        variable v_m17 : unsigned(16 downto 0);
     begin
         if rising_edge(clk) then
             -- [A] timing ID -> steps (decoded free-running)
@@ -481,7 +496,7 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- palette: 16 steps with hysteresis (leave a step only 8 past its edge)
-                v_k := unsigned(registers_in(5));
+                v_k := unsigned(registers_in(4));
                 v_c := signed(resize(v_k, 11)) - signed(resize(s_pal & "100000", 11));
                 if v_c > 40 or v_c < -40 then s_pal <= v_k(9 downto 6); end if;
             end if;
@@ -498,14 +513,15 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when others => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
+                            when others => s_gm <= s_gcam; s_gr <= unsigned(registers_in(5));   -- K6 Camera
                         end case;
                         z_gp <= "11";
                     when "11" =>
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                        -- deadband +-2 knob steps, +-4 on the camera (channel 3) so pot noise cannot shimmer
+                        if (s_gd > 32 or s_gd < -32) or (z_gc /= 3 and (s_gd > 16 or s_gd < -16)) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -516,7 +532,7 @@ begin
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when others => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when others => s_gcam <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
                         if z_gc = 3 then z_grun <= '0'; end if;
@@ -542,7 +558,7 @@ begin
                     when 246 => z_sel <= to_unsigned(9, 4);  z_pre <= '1';
                     when 270 => z_sel <= to_unsigned(10, 4); z_pre <= '1';
                     when 294 => z_sel <= to_unsigned(11, 4); z_pre <= '1';
-                    when 318 => z_sel <= to_unsigned(12, 4); z_pre <= '1';
+                    -- (slot 12, Spread^2, is gone: Spread is fixed, c_sp is a constant)
                     when 342 => z_sel <= to_unsigned(13, 4); z_pre <= '1';
                     when 366 => z_sel <= to_unsigned(14, 4); z_pre <= '1';
                     when 390 => z_sel <= to_unsigned(15, 4); z_pre <= '1';
@@ -564,7 +580,6 @@ begin
                     when 9  => f_a <= resize(c_B, 40);   f_b <= resize(s_xs, 16);
                     when 10 => f_a <= resize(c_B, 40);   f_b <= resize(s_ys, 16);                      -- steps per line (* 128)
                     when 11 => f_a <= resize(c_A, 40);   f_b <= resize(s_ys, 16);
-                    when 12 => f_a <= resize(s_g5(12 downto 3), 40); f_b <= resize(s_g5(12 downto 3), 16);  -- spread^2
                     when 13 => f_a <= resize(s_g3(12 downto 3), 40); f_b <= resize(s_g3(12 downto 3), 16);  -- depth^2
                     when 14 => f_a <= resize(s_vm, 40);  f_b <= to_unsigned(897, 16);                  -- rate exponent
                     when others => f_a <= resize(r_exf, 40); f_b <= to_unsigned(9321, 16);             -- rate step
@@ -620,6 +635,17 @@ begin
                     when 5 => z_cm <= sn_q(13 downto 0);
                     when 6 => z_sm <= sn_q(13 downto 0);
 
+                    -- K6 camera: size-code gain c_cm (x / 64) and base c_cb, G = K6 / 256:
+                    -- Video c = 7 + L 36 G / 64 (= 9 K6 / 64 x L / 64); Osc c = 7 - 7 G + L 64 G / 64
+                    when 30 =>                        -- one adder: Video 9 x (8 K6), Osc 7 x (8 K6)
+                        v_m17 := f_addsub(resize(s_gcam & "000", 17), resize(s_gcam, 17), s_src);
+                        if s_src = '1' then s_kq <= "000" & v_m17(15 downto 11); else s_kq <= v_m17(16 downto 9); end if;
+                    when 31 =>
+                        if s_src = '1' then
+                            c_cm <= s_gcam(12 downto 5); c_cb <= to_signed(7, 6) - signed(resize(s_kq(4 downto 0), 6));
+                        else
+                            c_cm <= s_kq; c_cb <= to_signed(7, 6);
+                        end if;
                     when 20 =>                        -- motion (last field's step)
                         c_ph <= f_addsub(c_ph, resize(c_rstep, 32), s_vneg);
                     when 21 =>
@@ -675,7 +701,6 @@ begin
                     when 266 => c_stv <= f_acc(22 downto 0);
                     when 290 => c_lu <= f_acc(30 downto 7);
                     when 314 => c_lv <= f_acc(30 downto 7);
-                    when 338 => c_sp <= f_acc(20 downto 5);
                     when 362 => c_dep <= f_acc(20 downto 9);
                     when 386 => r_ex_a <= "00" & f_acc(15 downto 8); z_sh4 <= f_acc(18 downto 16);
                     when 410 =>
@@ -891,7 +916,6 @@ begin
         variable v_s11 : signed(10 downto 0);
         variable v_ua, v_ub : unsigned(8 downto 0);
         variable v_ad : unsigned(9 downto 0);
-        variable v_L9 : unsigned(7 downto 0);
         variable v_g6 : signed(5 downto 0);
         variable v_p16 : signed(15 downto 0);
         variable v_sum : signed(19 downto 0);
@@ -944,27 +968,24 @@ begin
             v_ua := f_absx(g3_a); v_ub := f_absx(g3_b);
             if v_ua(8 downto 6) = "000" and v_ub(8 downto 6) = "000" and s_gav_sr(1) = '1' then h_we <= '1'; else h_we <= '0'; end if;
             h_wa <= s_bank & g3_ij;
-            h_wd <= s_lnow;
+            h_wd <= "000" & s_cnow;
             if v_ua > v_ub then g4_dm <= not v_ua; else g4_dm <= not v_ub; end if;
             if s_grp = 11 then g4_t <= resize(g3_a, 11) - resize(g3_b, 11);
             else g4_t <= v_s11 + 1; end if;
 
             -- 5: fabric copies of the wave table and the hold RAM
-            g5_cs <= wt_q; g5_L <= h_q;
+            g5_cs <= wt_q; g5_L <= h_q(4 downto 0);
             g5_a <= g4_a; g5_b <= g4_b;
             v_ad := f_absx(g4_t);
             g5_dg <= shift_right(v_ad, 1) + shift_right(v_ad, 3) + shift_right(v_ad, 4);
             g5_dm <= g4_dm;
 
-            -- 6: the scale factor (16 = full size): Video 24 - 9 L / 16, Osc 31 - L
-            if s_src = '1' then
-                g6_g <= to_unsigned(31, 5) - resize(g5_L, 5);
-                if g5_L <= 8 then g6_gc <= '1'; else g6_gc <= '0'; end if;
-            else
-                v_L9 := resize(g5_L & "000", 8) + resize(g5_L, 8);
-                g6_g <= to_unsigned(24, 5) - resize(v_L9(7 downto 4), 5);
-                if g5_L <= 3 then g6_gc <= '1'; else g6_gc <= '0'; end if;
-            end if;
+            -- 6: the scale factor (16 = full size) g = 31 - c (the K6 gain is already in the stored size code:
+            -- at K6 = 25 % Video 24 - 9 L / 16, Osc 31 - L, as v0.1.0); the AA code a half-octave coarser for a
+            -- small motif (g >= 23), finer for a big one (g <= 11)
+            g6_g <= not g5_L;
+            if g5_L <= 8 then g6_gc <= '1'; else g6_gc <= '0'; end if;
+            if g5_L >= 20 then g6_gp <= '1'; else g6_gp <= '0'; end if;
             g6_a <= g5_a; g6_b <= g5_b; g6_cs <= g5_cs;
             if (s_grp = 10 or s_grp = 11) and resize(g5_dg, 10) < resize(g5_dm, 10) then
                 if g5_dg(9 downto 8) /= "00" then g6_dm <= (others => '1'); else g6_dm <= g5_dg(7 downto 0); end if;
@@ -999,7 +1020,7 @@ begin
             elsif g8_wm <= 12 then g9_cm <= to_unsigned(16, 5);
             else g9_cm <= to_unsigned(28, 5) - g8_wm(4 downto 0); end if;
             -- the delay ring's fabric copies: g9_cm 11 stages on (stage 20), g6_gc 11 stages on (stage 17)
-            g20_cm <= dl_q(4 downto 0); g17_gc <= dl_q(5);
+            g20_cm <= dl_q(4 downto 0); g17_gc <= dl_q(5); g17_gp <= dl_q(6);
 
             -- 10: offsets to the primitives
             g10_dx <= resize(g9_x, 13) - resize(c_par(9), 13);
@@ -1065,7 +1086,9 @@ begin
             if v_e12 > 255 then g18_de <= to_signed(255, 9);
             elsif v_e12 < -256 then g18_de <= to_signed(-256, 9);
             else g18_de <= v_e12(8 downto 0); end if;
-            if g17_gc = '1' then v_e4 := c_elat - 1; else v_e4 := c_elat; end if;
+            if g17_gc = '1' then v_e4 := c_elat - 1;
+            elsif g17_gp = '1' and c_elat < 5 then v_e4 := c_elat + 1;
+            else v_e4 := c_elat; end if;
             g18_q <= v_e4(3 downto 1); g18_r <= v_e4(0);
             g18_id <= g17_id;
 
@@ -1104,6 +1127,7 @@ begin
         variable v_s : unsigned(7 downto 0);
         variable v_tap : unsigned(7 downto 0);
         variable v_b : unsigned(8 downto 0);
+        variable v_c8 : signed(7 downto 0);
     begin
         if rising_edge(clk) then
             -- oscillator: 2-D triangle lattice, 640 x 540 virtual px, drifting
@@ -1141,6 +1165,14 @@ begin
             -- level 0 .. 15 = box * 5 / 64
             v_b := resize(s_bsum(12 downto 5), 9) + resize(s_bsum(12 downto 7), 9);
             if v_b(8) = '1' then s_lnow <= (others => '1'); else s_lnow <= v_b(7 downto 4); end if;
+
+            -- K6 camera: the size code c = c_cb + level x c_cm / 64, clamped to 0 .. 23 (g 31 .. 8).  One 4 x 8
+            -- multiply in its own stage, then the add and clamp (the held sample moves 2 px right: invisible)
+            s_lp <= s_lnow * c_cm;
+            v_c8 := resize(c_cb, 8) + signed(resize(s_lp(11 downto 6), 8));
+            if v_c8 < 0 then s_cnow <= (others => '0');
+            elsif v_c8 > 23 then s_cnow <= to_unsigned(23, 5);
+            else s_cnow <= unsigned(v_c8(4 downto 0)); end if;
         end if;
     end process p_src;
 

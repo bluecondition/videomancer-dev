@@ -1,6 +1,6 @@
 # Girih (Kinetic)
 
-v0.1.0 built 2026-11-14, all six configs, not flashed.
+v0.1.0 built 2026-11-14, all six configs, not flashed. **v0.1.1 (K6 camera pass, 2026-11-15) built, not flashed**: see the last section.
 
 ## What it draws
 
@@ -34,8 +34,8 @@ the tiles, so the stars on one side of the screen are sharp while those on the o
 | K2 | Shape | strap half-width: hairline (1.5 px; 2.5 px on SD) .. broad bands (+ 3/32 of the pitch) |
 | K3 | Depth | angle swing 0 .. +-90 degrees, square law (default about +-20 degrees) |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
-| K5 | Spread | phase step per tile 0 .. 1/2 cycle, square law |
-| K6 | Colour | the 16 shared palettes with hysteresis |
+| K5 | Colour | the 16 shared palettes with hysteresis (was K6 until the K6 camera pass; the old K5 Spread, the phase step per tile, is fixed at its default 330) |
+| K6 | Camera | how far the picture (or the Osc) closes each tile's angle, linear: 0 % = none (the black-input picture), 25 % = v0.1.0's fixed x6 (white = 29 degrees), 50 % (default) = twice it, 100 % = four times. See "K6 camera pass" |
 | S7 | Wave | Smooth / Snap (tiles dwell and flip quickly) |
 | S8 | Field | Linear (diagonal sweep) / Radial (rings from the centre) |
 | S9 | Lattice | Square (four-pointed stars and crosses) / Octagon (4.8.8: eight-pointed stars); default Octagon |
@@ -136,3 +136,31 @@ register before arithmetic; no RAM ever reads the address it is writing (no_rw_c
   kinks at the shared edge and its ends are cut square by the tile edge (the centre lines stay joined). With
   the wave alone the step is small; with Source = Osc (or a contrasty camera picture), broad straps and angles
   near zero it shows as flat cuts along tile edges. Not fixed: it needs the neighbour tile's ray per pixel.
+
+## K6 camera pass (2026-11-15), v0.1.1
+
+- **K6 = Camera** (new, 0 .. 100 %, default 50 %): how far the held source closes each tile's contact angle.
+  The gain is applied to the smeared sample before it is written to the per-tile hold RAM (which now stores the
+  finished 14-bit angle term), as one 8 x 10 multiply split into two 8 x 5 halves and a sum, each in its own
+  stage: term = sample x m / 16, m = 3 K6 / 8 for the camera, m = K6 for the Osc (the Osc keeps its 16 / 6 of
+  the camera's gain). Linear law:
+  - 0 % = none: the black-input picture (with Osc as well);
+  - 25 % (K6 256) = Video x6 / Osc x16 = exactly v0.1.0 (white closes the angle by 29 degrees);
+  - 50 % (K6 512, default) = twice (white 63 degrees: bright tiles pass through the zero angle);
+  - 100 % (K6 1023) = four times (white 126 degrees: the angle folds back, bright tiles cycle through the whole
+    star family; the Osc sweeps about 313 degrees).
+  K6 has its own glide in the vblank zone (1/8 of the gap per field, +-4 deadband; it honours C_SIM_SNAP).
+- Looks (integer-model preview, `.kinetic_work/rb_girih/k6/model/msheet.png`, and the GHDL sheet
+  `.kinetic_work/rb_girih/k6/k6sheet.png`: 720p60 decimation 2, the top-left quarter, K6 0 / 256 / 512 / 1023
+  and Osc at 512): 25 % is the old subtle shift; 50 % reshapes the stars across the picture (thin stars to
+  crosses and octagons where it is bright); 100 % turns most tiles into fat rosettes with small stars between,
+  still a girih pattern, not washed out. Every tile stays rigid (one value per tile), so there is no per-line
+  noise at any gain; the tile-edge cuts noted below (neighbouring tiles at very different angles) show more often.
+- **Frozen: K5 Spread at its default 330** (the serial spread^2 slot now reads the constant). **K6's old
+  function, Colour, moved to K5** (same 16 palettes with hysteresis, default Bauhaus); the presets' Colour
+  values moved with it and their old Spread values (Ripple Rosette 420, Hairline Screen 600) are dropped.
+- The stored sample is the smear 2 px earlier than before (invisible: the smear is 64 px). Latency unchanged (36).
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic girih`): **router1, every config on seed 1**.
+  Post-route Fmax HD Analog 96.16, HD HDMI 102.01, HD Dual 102.01 MHz (worst HD 96.16); SD Analog 91.99, SD
+  HDMI 98.29, SD Dual 99.65. 6,274 .. 6,287 / 7,680 LC (82 %), 15 / 32 EBR. Not flashed.
+  Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic girih`.
