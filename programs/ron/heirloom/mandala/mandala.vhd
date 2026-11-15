@@ -48,6 +48,7 @@
 -- Generated colours in the hardware convention (U carries Cr, V carries Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Melt (camera strength, was K5), K5 = Breathe (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -164,7 +165,8 @@ architecture mandala of program_top is
     signal f_wl    : unsigned(3 downto 0) := to_unsigned(9, 4);
     signal f_eyes  : signed(10 downto 0) := (others => '0');     -- K3: eye offset, Q7 stripes (+ = shut)
     signal f_red   : signed(9 downto 0) := (others => '0');      -- Q7 key units
-    signal f_melt  : unsigned(8 downto 0) := to_unsigned(100, 9);
+    signal f_melt0 : unsigned(8 downto 0) := to_unsigned(100, 9);
+    signal f_melt  : unsigned(9 downto 0) := to_unsigned(125, 10);   -- f_melt0 x 1.25 (0 .. 608)
     signal f_d8    : unsigned(7 downto 0) := to_unsigned(96, 8);
     signal f_p8    : unsigned(7 downto 0) := to_unsigned(128, 8);
     signal f_gain  : unsigned(9 downto 0) := to_unsigned(256, 10); -- Q8
@@ -497,11 +499,12 @@ begin
             f_red <= resize(shift_right(v_k3, 2), 10);                         -- +-384 Q7 = +-3 units
             -- Melt: the v0.5 line up to 100 (the default), then 2.5x steeper: 2.5 k - 150 (x1.9 at the top)
             if s_g(3)(12 downto 5) <= 100 then
-                f_melt <= resize(s_g(3)(12 downto 5), 9);
+                f_melt0 <= resize(s_g(3)(12 downto 5), 9);
             else
                 v_md := shift_left(resize(s_g(3)(12 downto 5), 11), 1) + resize(s_g(3)(12 downto 6), 11);
-                f_melt <= resize(v_md - 150, 9);
+                f_melt0 <= resize(v_md - 150, 9);
             end if;
+            f_melt <= resize(f_melt0, 10) + resize(f_melt0(8 downto 2), 10);   -- K6 camera top +25 %
             f_d8 <= s_g(4)(12 downto 5);
             if s_g(4)(12 downto 5) > 96 then f_sd <= s_g(4)(12 downto 5) - 96; else f_sd <= (others => '0'); end if;
             f_p8 <= s_g(5)(12 downto 5);

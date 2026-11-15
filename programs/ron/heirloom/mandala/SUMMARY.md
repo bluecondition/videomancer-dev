@@ -223,3 +223,11 @@ For a further round, start a new diag version from `.heirloom_work/rb_mandala/di
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Breathe** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.1, rebuilt with router1: HD Dual seed 2; HD worst 84.52 MHz (HD Analog 88.51, HD HDMI 84.52, HD Dual 93.32), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh mandala`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Ron:** the camera effect at K6 = 100 % 25 % stronger (bend / element programs); the orchestrator set K6's default to 100 % (initial value 1023) and the version to v0.6.2.
+- **Classification.** **BEND**: K6 Melt bends the contours by the camera luma (or the Osc).
+- **Change.** f_melt = the old knob curve + 1/4: one more register after the curve, 10 bits, 0 .. 608 (was 0 .. 487). The melt product is one bit wider. Melt now reaches +-4.8 stripes (was +-3.8). The offset sum stays within its 13 bits (max 3471). The Osc shares the gain. Per-field arithmetic only; the latency is unchanged.
+- **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_mandala/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
+- **Build (v0.6.2):** router1, seed 1 except SD HDMI seed 2 (`.kinetic_work/tools/k6build.sh heirloom mandala`). Post-route Fmax: HD Analog 91.76, HD HDMI 92.59, HD Dual 95.05 (worst HD 91.76), SD Analog 94.63, SD HDMI 89.78, SD Dual 91.17 MHz. Up to 7411 / 7680 LC. SD HDMI's seed 1 stalled router1 (timeout). A standalone synth has 0 `CARRY I0==I1` (`dupin.py`), so the stall is not a self-add in the new melt sum.

@@ -324,3 +324,11 @@ Ron's notes 2026-10-30 (on v0.5.0):
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 340 -> 512 (v0.6.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Ron:** the camera effect at K6 = 100 % 25 % stronger (bend / element programs); the orchestrator set K6's default to 100 % (initial value 1023) and the version to v0.6.3.
+- **Classification.** **BEND**: K6 Bend sets how far the camera luma (or the Osc) bends the X oscillator's phase.
+- **Change.** The per-field gain c_g6 (zone slot 20) is g + g/4: 9 bits, 0 .. 318 (was 0 .. 255). The bend product's high partial takes a 5-bit nibble. At full white the X phase now bends 0.31 period (was 0.25). The Osc shares the gain, so it is x1.25 too (it stays small: +-32 luma). Per-field arithmetic only; the latency is unchanged.
+- **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_bunting/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
+- **Build (v0.6.3):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom bunting`). Post-route Fmax: HD Analog 92.95, HD HDMI 94.22, HD Dual 92.95 (worst HD 92.95), SD Analog 94.85, SD HDMI 92.46, SD Dual 82.05 MHz. Up to 6841 / 7680 LC.

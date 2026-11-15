@@ -37,6 +37,7 @@
 -- checker oscillators), a 20-stage pixel path.  Virtual 1080-line coordinates (SD shows the centre 4:3).  Generated
 -- avid; output conditioning (Y, U and V through one [1 2 2 2 2 2 2 2 1]/16 box, its taps and the syncs in
 -- block-RAM rings) and luma 13/16 before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -596,8 +597,9 @@ begin
                     when 410 => z_t <= f_acc(20 downto 0);
                     when 434 =>                       -- etch gain (Q8 per luma step): camera k6^2 / 2048 (a gentle bend at
                                                       -- the default, the same tear at full); the Osc 2 k6 (as v0.1.0)
+                                                      -- 2026-11-15: the camera x1.25 (k6^2 / 2048 + k6^2 / 8192)
                         if s_src = '1' then c_eg <= resize(s_g6(12 downto 3) & '0', 14);
-                        else c_eg <= resize(z_t(20 downto 11), 14); end if;
+                        else c_eg <= resize(z_t(20 downto 11), 14) + resize(z_t(20 downto 13), 14); end if;
                         c_ee <= (others => '0');
                     when 436 | 437 | 438 | 439 | 440 | 441 | 442 =>   -- normalise the etch gain to 7 bits << ee
                         if c_eg(13 downto 7) /= "0000000" then c_eg <= shift_right(c_eg, 1); c_ee <= c_ee + 1; end if;

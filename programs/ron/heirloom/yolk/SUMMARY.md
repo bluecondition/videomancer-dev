@@ -182,3 +182,11 @@ Glides (1/8 of the gap per field) on K1, K2, K3, K5, K6 and P12.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 380 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Ron:** the camera effect at K6 = 100 % 25 % stronger (bend / element programs); the orchestrator set K6's default to 100 % (initial value 1023) and the version to v0.1.2.
+- **Classification.** **BEND**: K6 Etch adds camera luma x gain to the fields.
+- **Change.** Slot 434: the camera's c_eg = old + old / 4, max 2095 (was 1676). E reaches 2071; the Osc already reaches 5655, so the downstream widths hold it. The Osc keeps its x6 (now 4.8x the camera). Per-field arithmetic only; the latency is unchanged.
+- **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_yolk/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
+- **Build (v0.1.2):** router1, seed 1 except SD HDMI seed 4 (`.kinetic_work/tools/k6build.sh heirloom yolk`). Post-route Fmax: HD Analog 80.17, HD HDMI 85.97, HD Dual 83.10 (worst HD 80.17), SD Analog 75.24, SD HDMI 76.56, SD Dual 79.16 MHz. Up to 6902 / 7680 LC. SD HDMI stalled router1 on seeds 1-3 (timeout); seed 4 routed. The build netlist has 0 `CARRY I0==I1` (`dupin.py`; one LUT with a doubled input, `p5_n[8]`, which is old and also in HD HDMI, which routed on seed 1). v0.1.0 also stalled once, on router2.

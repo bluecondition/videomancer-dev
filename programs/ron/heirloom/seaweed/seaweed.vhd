@@ -40,6 +40,7 @@
 -- 1080-line coordinates (SD shows the centre 4:3 of the picture).  Generated avid; output conditioning (U and V
 -- through two [1 2 2 2 2 2 2 2 1]/16 boxes, Y through one, with the running-sum resync, luma 13/16) before the
 -- blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -559,8 +560,10 @@ begin
                         if s_vneg = '1' then c_t <= c_t - f_acc(31 downto 8); else c_t <= c_t + f_acc(31 downto 8); end if;
                     when 242 => z_b2 <= f_acc(19 downto 0);
                     when 266 =>                       -- bend = k6^2 * 821 >> 12; the Osc generator is patched in at
-                                                      -- four times the camera's level
-                        if s_src = '1' then c_bg <= f_acc(29 downto 10); else c_bg <= f_acc(31 downto 12); end if;
+                                                      -- four times the camera's level (2026-11-15: the camera
+                                                      -- x1.25, max 262212; the Osc unchanged, it fills c_bg)
+                        if s_src = '1' then c_bg <= f_acc(29 downto 10);
+                        else c_bg <= f_acc(31 downto 12) + resize(f_acc(31 downto 14), 20); end if;
                     when 290 => c_dps <= f_acc(25 downto 8);
                     when 314 => c_dpr <= f_acc(25 downto 8);
                     when 338 => c_dvr <= f_acc(25 downto 8);

@@ -43,6 +43,7 @@
 -- a 20-stage pixel path.  Virtual 1080-line coordinates (SD shows the centre 4:3).  Generated
 -- avid; soft [1 2 .. 2 1] box on Y/U/V; output conditioning (chroma [1 2 .. 2 1]/16, luma [1 2 1],
 -- luma 13/16) before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -194,7 +195,7 @@ architecture bunting of program_top is
     signal c_H     : unsigned(13 downto 0) := (others => '0');
     signal c_F0    : signed(33 downto 0) := (others => '0');
     signal c_G0    : signed(25 downto 0) := (others => '0');
-    signal c_g6    : unsigned(7 downto 0) := to_unsigned(85, 8);
+    signal c_g6    : unsigned(8 downto 0) := to_unsigned(106, 9);   -- K6 gain x1.25 (0 .. 318)
 
     -- field serial multiplier (a 20 x b 18 bits, 18 iterations) and divider (35 / 20 bits)
     signal f_a   : unsigned(37 downto 0) := (others => '0');
@@ -586,7 +587,7 @@ begin
                     -- motion (last field's step)
                     when 20 =>
                         if s_vneg = '1' then c_dr <= c_dr - resize(c_drs, 24); else c_dr <= c_dr + resize(c_drs, 24); end if;
-                        c_g6 <= s_g6(12 downto 5);
+                        c_g6 <= resize(s_g6(12 downto 5), 9) + resize(s_g6(12 downto 7), 9);   -- g + g/4
                     -- K4 glyph slide: glide 1/32 of the gap per field (+-2 deadband), then |offset| and sign
                     when 21 =>
                         s_g4d <= signed(shift_left(resize(s_k4, 17), 6)) - signed(resize(s_g4, 17));
@@ -963,7 +964,7 @@ begin
             p3_gc <= (p2_kp and mk_q2(to_integer(p2_ip))) and (p2_km and mk_q2(to_integer(p2_im)));
             -- 3: bend partial products (bend input x gain nibbles)
             p3_pl <= resize(p2_bin * signed('0' & c_g6(3 downto 0)), 15);
-            p3_ph <= resize(p2_bin * signed('0' & c_g6(7 downto 4)), 15);
+            p3_ph <= resize(p2_bin * signed('0' & c_g6(8 downto 4)), 15);
             p3_phi <= p2_phi;
             -- 4: bend product
             p4_bp <= resize(p3_pl, 19) + shift_left(resize(p3_ph, 19), 4);

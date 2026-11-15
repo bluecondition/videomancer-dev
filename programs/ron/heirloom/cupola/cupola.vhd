@@ -4,6 +4,7 @@
 -- Cupola v0.1.1 -- Heirloom (video phase), from the clip WIN_20230907_00_18_59 at 5.5 s.
 -- v0.1.1: the camera's etch gain is 1/16 (was 1/4) and its luma box 8 px (was 4), so the default Etch bends the X's
 -- smoothly instead of fraying them line by line; the Osc keeps its v0.1.0 strength (now 16x the camera).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The still: an RGB patch of the old modular synth.  Red / orange field of tall ovals ("pillars", 5.9 across) with
 -- round bottoms, a dark-green band, a yellow band of circles with white arcs, a green floor; two big cupola cells
@@ -174,7 +175,7 @@ architecture cupola of program_top is
     signal c_m2   : unsigned(17 downto 0) := (others => '0');           -- roll^2
     signal c_gd   : unsigned(9 downto 0) := to_unsigned(128, 10);       -- dome gain (128 = x1)
     signal c_e2   : unsigned(19 downto 0) := (others => '0');           -- etch^2
-    signal c_g6   : unsigned(5 downto 0) := to_unsigned(2, 6);          -- etch gain
+    signal c_g6   : unsigned(6 downto 0) := to_unsigned(2, 7);          -- etch gain (0 .. 72)
     signal c_lp12 : signed(10 downto 0) := (others => '0');
     signal c_lt46 : unsigned(7 downto 0) := (others => '0');
     signal c_lev  : signed(10 downto 0) := (others => '0');             -- the X level (+ = pulled apart)
@@ -484,7 +485,7 @@ begin
                     when 7  => z_fa <= resize(s_vm, 32);   z_fb <= resize(s_vm, 16);                             -- roll^2
                     when 8  => z_fa <= resize(c_m2, 32);   z_fb <= to_unsigned(1942, 16);
                     when 9  => z_fa <= resize(s_g6(12 downto 3), 32); z_fb <= resize(s_g6(12 downto 3), 16);    -- etch^2
-                    when 10 => z_fa <= resize(c_e2(19 downto 4), 32); z_fb <= to_unsigned(117, 16);
+                    when 10 => z_fa <= resize(c_e2(19 downto 4), 32); z_fb <= to_unsigned(146, 16);   -- 117 x 1.25
                     when 11 => z_fa <= resize(z_dp, 32);   z_fb <= to_unsigned(205, 16);                         -- the X level
                     when 12 => z_fa <= resize(z_tri, 32);  z_fb <= to_unsigned(46, 16);                          -- breath
                     when others => z_fa <= resize(z_tri, 32); z_fb <= to_unsigned(110, 16);
@@ -570,7 +571,7 @@ begin
                         if s_vneg = '1' then c_droll <= -signed(resize(f_acc(28 downto 10), 20));
                         else c_droll <= signed(resize(f_acc(28 downto 10), 20)); end if;
                     when 266 => c_e2 <= f_acc(19 downto 0);
-                    when 290 => c_g6 <= f_acc(22 downto 17);
+                    when 290 => c_g6 <= f_acc(23 downto 17);
                     when 314 =>
                         if z_dpn = '1' then c_lp12 <= -signed(resize(f_acc(18 downto 9), 11));
                         else c_lp12 <= signed(resize(f_acc(18 downto 9), 11)); end if;

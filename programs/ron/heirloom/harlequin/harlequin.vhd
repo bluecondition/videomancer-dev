@@ -6,6 +6,7 @@
 -- v0.1.1: Etch on a square law (default 320 = a quarter of v0.1.0's bend, full = the same flood), the camera luma
 -- through an 8-pixel box and a vertical smoothing, the Osc fed at 16x the camera gain (the same flip as v0.1.0);
 -- the per-pixel camera product is a 4-bit mantissa times the luma, shifted (timing).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The still: two tall orange "lemon" diamonds (olive centre band, red-orange shoulders) in a field of violet / red
 -- vertical stripes.  The stripes are cut by each diamond's left side and hug its right side, compressed there and
@@ -553,11 +554,12 @@ begin
                         else c_vv0 <= unsigned(z_d(18 downto 0)); end if;
                     when 165 =>
                         -- Etch, square law: et = k6^2 >> 12 (default 320 -> 25, full -> 255); Osc 16x, capped
+                        -- (2026-11-15: the camera's et x1.25, full -> 318; the Osc is capped at 511 as before)
                         if s_src = '1' then
                             if f_acc(19 downto 17) /= 0 then c_et <= to_unsigned(511, 9);
                             else c_et <= f_acc(16 downto 12) & "0000"; end if;
                         else
-                            c_et <= resize(f_acc(19 downto 12), 9);
+                            c_et <= resize(f_acc(19 downto 12), 9) + resize(f_acc(19 downto 14), 9);
                         end if;
                     when 166 =>
                         -- the pixel path multiplies by a 4-bit mantissa and shifts (no 10 x 10 product per pixel)

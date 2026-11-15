@@ -264,3 +264,11 @@ Working files are in `.heirloom_work/rb_seaweed/`; `notes.md` has the steps.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 150 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Ron:** the camera effect at K6 = 100 % 25 % stronger (bend / element programs); the orchestrator set K6's default to 100 % (initial value 1023) and the version to v0.1.2.
+- **Classification.** **BEND**: K6 Bend adds camera luma x gain to the band oscillator's phase.
+- **Change.** Slot 266: the camera gain c_bg = k6^2 x 821 / 4096 + k6^2 x 821 / 16384, max 262212 (was 209770). That is 3.75 cycles per full luma (was 3). The Osc keeps its 4x level: x1.25 there would overflow c_bg. Per-field arithmetic only; the latency is unchanged.
+- **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_seaweed/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
+- **Build (v0.1.2):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom seaweed`). Post-route Fmax: HD Analog 89.34, HD HDMI 81.35, HD Dual 84.33 (worst HD 81.35), SD Analog 88.89, SD HDMI 88.68, SD Dual 82.48 MHz. Up to 7107 / 7680 LC.

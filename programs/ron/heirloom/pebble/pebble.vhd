@@ -39,6 +39,7 @@
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Rows (was K6); K3 Origin fixed at 512 (C_KFIX_3).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -140,7 +141,7 @@ architecture pebble of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(671 * 8, 13);
     signal s_gc : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 Camera (glided, Q3)
-    signal c_cg : unsigned(7 downto 0) := to_unsigned(128, 8);         -- camera gain, Q6 (64 = the v0.1.0 gain)
+    signal c_cg : unsigned(8 downto 0) := to_unsigned(160, 9);         -- camera gain, Q6 (64 = the v0.1.0 gain; 0 .. 318)
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(314 * 8, 13);
@@ -243,7 +244,7 @@ architecture pebble of program_top is
     signal p2_u, p3_u, p4_u, p5_u : unsigned(23 downto 0) := (others => '0');
     signal p3_m, p4_m : unsigned(9 downto 0) := (others => '0');
     signal p3_s   : unsigned(7 downto 0) := (others => '0');
-    signal p4_sg  : unsigned(15 downto 0) := (others => '0');
+    signal p4_sg  : unsigned(16 downto 0) := (others => '0');
     signal p4_m1a, p4_m1b, p4_m2a, p4_m2b, p4_mca, p4_mcb : unsigned(15 downto 0) := (others => '0');
     signal p4_maa, p4_mab : unsigned(10 downto 0) := (others => '0');
     signal p5_m1, p5_m2, p5_mc : unsigned(15 downto 0) := (others => '0');
@@ -509,7 +510,7 @@ begin
                         if v_k >= 520 then z_d <= resize(v_k - 520, 9); c_bneg <= '0';
                         elsif v_k <= 504 then z_d <= resize(504 - v_k, 9); c_bneg <= '1';
                         else z_d <= (others => '0'); c_bneg <= '0'; end if;
-                    when 41 => c_cg <= resize(shift_right(s_gc(12 downto 3), 2), 8);   -- K6 Camera: G = k / 4 (Q6)
+                    when 41 => c_cg <= resize(s_gc(12 downto 5), 9) + resize(s_gc(12 downto 7), 9);   -- K6 Camera: G = 1.25 k / 4 (Q6)
                     when 42 => z_mt <= r_ex_q;
                     when 93 =>                       -- a = 21935 mt >> (15 - sh), sh = -2 .. 1
                         case to_integer(z_sh) is
@@ -828,7 +829,7 @@ begin
         variable v_t18 : unsigned(17 downto 0);
         variable v_m  : unsigned(15 downto 0);
         variable v_s  : unsigned(14 downto 0);
-        variable v_g  : unsigned(9 downto 0);
+        variable v_g  : unsigned(10 downto 0);
         variable v_s12 : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
@@ -852,7 +853,7 @@ begin
             p4_mcb <= shift_left(v_m, 4) + shift_left(v_m, 3) + shift_left(v_m, 1); --        + 16 + 8 + 2
             p4_maa <= resize(p3_m, 11) + resize(p3_m(9 downto 3), 11);           -- m 1.1953 = 1 + 1/8
             p4_mab <= resize(p3_m(9 downto 4), 11) + resize(p3_m(9 downto 7), 11); --          + 1/16 + 1/128
-            p4_sg <= p3_s * c_cg;                                                  -- s' = s G >> 6 (0 .. 1016)
+            p4_sg <= p3_s * c_cg;                                                  -- s' = s G >> 6 (0 .. 1267)
             p4_m <= p3_m; p4_u <= p3_u;
             if p3_m >= l_si then q_out(4) <= '1'; else q_out(4) <= '0'; end if;
             if p3_m < l_se then q_ine(4) <= '1'; else q_ine(4) <= '0'; end if;
@@ -863,8 +864,8 @@ begin
             p5_m2 <= p4_m2a + p4_m2b;
             p5_mc <= p4_mca + p4_mcb;
             p5_ma <= p4_maa + p4_mab;
-            v_g := p4_sg(15 downto 6);
-            v_s12 := shift_left(resize(v_g, 12), 2) - resize(v_g(9 downto 1), 12);   -- s' 3.5 (mod 1024: a palette cycle)
+            v_g := p4_sg(16 downto 6);
+            v_s12 := shift_left(resize(v_g, 12), 2) - resize(v_g(10 downto 1), 12);   -- s' 3.5 (mod 1024: a palette cycle)
             p5_s35 <= v_s12(9 downto 0);
             p5_s72 <= shift_left(resize(v_g, 17), 6) + shift_left(resize(v_g, 17), 3);   -- s' 72 (crown drip)
             p5_ue <= shift_left(resize(v_g, 24), 12) + shift_left(resize(v_g, 24), 11);  -- s' 6144 (ripple phase)

@@ -35,6 +35,7 @@
 -- slip bands), a beam DDA (|acc| = the mirrored H phase), a 20-stage pixel path.  Virtual 1080-line coordinates
 -- (SD shows the centre 4:3).  Generated avid; output conditioning (Y, U and V through one [1 2 2 2 2 2 2 2 1]/16
 -- box, its taps and the syncs in block-RAM rings) and luma 13/16 before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -589,8 +590,9 @@ begin
                     when 386 => c_ki3r <= signed(resize(f_acc(21 downto 8), 16)) + 3892;     -- KIr + 2 c0 + 3072
                     when 410 => z_t <= f_acc(19 downto 0);
                     when 434 =>                       -- etch gain (Q8 per luma step); the Osc x6
+                        -- (2026-11-15: the camera x1.25, max 2095; the Osc unchanged)
                         if s_src = '1' then c_eg <= resize(f_acc(23 downto 11), 14) + shift_left(resize(f_acc(23 downto 11), 14), 1);
-                        else c_eg <= resize(f_acc(23 downto 12), 14); end if;
+                        else c_eg <= resize(f_acc(23 downto 12), 14) + resize(f_acc(23 downto 14), 14); end if;
                         c_ee <= (others => '0');
                         -- bands: k5 <= 512 scales the still's bands, above grows them
                         if s_g5(12 downto 3) > 512 then z_a <= s_g5(12 downto 3) - 512; z_hi <= '1';

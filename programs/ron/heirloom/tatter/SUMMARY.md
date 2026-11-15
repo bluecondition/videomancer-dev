@@ -199,3 +199,11 @@ Glides (1/8 of the gap per field) on K1, K2, K3, K5, K6 and P12.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Ron:** the camera effect at K6 = 100 % 25 % stronger (bend / element programs); the orchestrator set K6's default to 100 % (initial value 1023) and the version to v0.1.3.
+- **Classification.** **BEND**: K6 Etch adds camera luma x gain to the tube field.
+- **Change.** Slot 434: the camera's c_eg = k6^2 / 2048 + k6^2 / 8192, 0 .. 638 (was 0 .. 511). The mantissa normalisation and the +-2047 clamp already hold it. The Osc keeps its linear 2 k6. Per-field arithmetic only; the latency is unchanged.
+- **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_tatter/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
+- **Build (v0.1.3):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom tatter`). Post-route Fmax: HD Analog 77.51, HD HDMI 84.28, HD Dual 84.93 (worst HD 77.51), SD Analog 82.15, SD HDMI 74.12, SD Dual 83.84 MHz. Up to 6736 / 7680 LC.

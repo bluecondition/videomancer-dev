@@ -240,3 +240,11 @@ Working files are in `.heirloom_work/rb_cupola/` (`notes.md`, `chans.py`, `conto
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Ron:** the camera effect at K6 = 100 % 25 % stronger (bend / element programs); the orchestrator set K6's default to 100 % (initial value 1023) and the version to v0.1.3.
+- **Classification.** **BEND**: K6 Etch bends every contour (pillars, X, floor, domes) by the camera luma.
+- **Change.** The etch gain's constant in the serial product is 146 (was 117), so c_g6 = k6^2 x 146 >> 21 runs 0 .. 72 (was 0 .. 58). c_g6 is 7 bits; the etch product stays within its 15 bits (max 9144). The Osc shares the gain (still 16x the camera). Per-field arithmetic only; the latency is unchanged.
+- **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_cupola/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
+- **Build (v0.1.3):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom cupola`). Post-route Fmax: HD Analog 85.72, HD HDMI 85.68, HD Dual 79.74 (worst HD 79.74), SD Analog 83.86, SD HDMI 83.91, SD Dual 82.18 MHz. Up to 6688 / 7680 LC.
