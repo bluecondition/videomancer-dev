@@ -85,6 +85,9 @@ Chassis sections lifted from louver.vhd, marked [A] .. [F] in pinwheel.vhd.
 
 ## Status
 
+**Shipped vmprog: the ROUTER1 rebuild of 2026-11-14** (same sources). Post-route Fmax: HD Analog 83.91 MHz; SD Analog 86.51 MHz; HD HDMI 80.59 MHz; SD HDMI 81.75 MHz; HD Dual 89.14 MHz; SD Dual 94.13 MHz. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic pinwheel`. The router2 figures below are the first build, kept for the record; it was timing-marginal.
+
+
 - v0.1.0 built 2026-11-14 through the shared queue with router2 (the builder default). Not flashed.
 
 | Config | Seed | Post-route Fmax | LC |
