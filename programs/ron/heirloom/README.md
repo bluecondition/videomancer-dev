@@ -14,6 +14,13 @@ Flash from `out/rev_b/ron/heirloom/<name>.vmprog`; rebuild one with `./build_hei
   per-element parameters and bolder switches, while the defaults still give the photo. Ron's intentions, the
   per-tab workflow, the known issues and each program's LC/EBR headroom and rebuild command are in
   [PHASE2.md](PHASE2.md). Read it before starting any program.
+- **K6 default 100 % and camera top +25 % (2026-11-15, Ron, after looking at fern / kiln renders).** Every program now
+  loads with K6 (the camera) at 100 %. In the bend / element programs (K6 bends, displaces, sizes or recolours the drawing)
+  the camera effect at the top of K6 is 25 % stronger; picture-type programs (kiln, idol, ticker, triplicate, cutout, vase,
+  radiant, rorschach, ribboncandy, crenel, argus, beacon, lattice, tapers), where K6 sets how strongly the camera image
+  itself shows, keep their range (repacked). Mixed programs boost only the bend part. All rebuilt with router1 where it
+  closed; each SUMMARY has a "K6 top +25 % and default 100 %" section with seeds. Three hidden overflows were fixed on the
+  way (cathedral depth sum, lotus etch above the photo Rings, velvet axis fold).
 - **K6 camera pass (2026-11-15, Ron): K6 is the camera strength in every Heirloom program, default 50 %.**
   - 89 programs already had the camera on K6 (Etch, Camera, Picture, Bend, Warp, Melt, Dye ...): only the default changed
     (-> 512), repacked from the same bitstreams. arcade, gable, horizon and pods were already above 50 % and were left alone.

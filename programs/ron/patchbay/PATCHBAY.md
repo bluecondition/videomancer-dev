@@ -36,8 +36,8 @@ The index of patches is in [README.md](README.md). The set is open-ended: new pa
   enough that the flip is unmistakable. `program_type = "processing"`.
 
 - **K6 is the camera strength** (Ron, 2026-11-15, the same rule as every Heirloom and Kinetic program): 0 % = no camera
-  (or Osc) effect, 25 % = the strength the patch was designed with, **50 % = the default** (about twice that, or the strongest
-  clean level), 100 % = a bold climax that does not wash out. A patch whose own colour or mode control would have lived on K6
+  (or Osc) effect, 25 % = the strength the patch was designed with, 50 % = about twice that (or the strongest clean level), **100 % = the
+  default**, a bold climax that does not wash out (the top was raised a further 25 % on 2026-11-15 in bend / element patches). A patch whose own colour or mode control would have lived on K6
   puts it on its weakest other control.
 
 ## The bar
