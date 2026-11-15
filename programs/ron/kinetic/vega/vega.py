@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+# Copyright (C) 2026 czartroniks
+# SPDX-License-Identifier: GPL-3.0-only
+"""
+VEGA v0.1.0 - build hook.  Writes vega_pkg.vhd next to this file (pure python: the builder runs it with the
+system python3).  The integer model (.kinetic_work/rb_vega/imodel.py) imports the same table functions.
+
+Package contents:
+  C_VG_EXP2  256 x 16   round(32768 * 2^(i/256))                      (pitch mantissa, its reciprocal, rate)
+  C_VG_SIN   512 x 12   round(1023 * sin(pi/2 * (i + 1/2) / 512))     the wave, one quarter cycle
+  C_VG_LENS  2048 x 12  lens profile h(s), s = r^2 / R^2 in 1024 steps, 12 bits:
+                        0 .. 1023  Bulge  0.70 * sqrt(1 - s)   (the height of a hemisphere)
+                        1024 ..    Pinch  0.68 * (1 - s)^3     (used doubled)
+  C_VG_AA    1024 x 8   {pinch, bulge amount / 32 (3 bits), s (6 bits)} -> -4 log2(rms local stretch), signed:
+                        the anti-aliasing ramp follows the lens's local magnification
+  C_VG_PAL   256 x 32   {Y, U, V, 00} (64 used): the 16 shared Kinetic palettes x (ground, A, B, accent), hardware
+                        convention (U register = Cr, V register = Cb), exactly as kpalette.hw10() gives them
+"""
+import math
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+H_BULGE, H_PINCH = 0.70, 0.68
+
+# The 16 shared Kinetic palettes (.kinetic_work/tools/kpalette.py): label, ground, A, B, accent
+PALETTES = [
+    ("Ink",        "#0E0E10", "#F2EFE6", "#8C8C8C", "#E23B2E"),
+    ("Paper",      "#F2EFE6", "#141414", "#9A9A94", "#1F4E9E"),
+    ("Bauhaus",    "#EDE4CF", "#D1362F", "#1F4E9E", "#F0B81C"),
+    ("Vega",       "#0B1E5B", "#1BB5E8", "#D81E8C", "#F5D90A"),
+    ("Outrun",     "#12002B", "#FF2E97", "#00D9F5", "#FFB000"),
+    ("Ultra",      "#0D0221", "#7B2CBF", "#E0AAFF", "#3CF2C0"),
+    ("Ocean",      "#03045E", "#0096C7", "#90E0EF", "#F4F1DE"),
+    ("Ice",        "#06141B", "#9BD1E5", "#F1F7FA", "#4A7C9B"),
+    ("Moss",       "#0F2A1D", "#7FB069", "#E6F0A3", "#F18F01"),
+    ("Citrus",     "#14213D", "#FCA311", "#E5E5E5", "#E63946"),
+    ("Terra",      "#2B1A12", "#C8553D", "#F2D0A4", "#588B8B"),
+    ("Ember",      "#1A0A00", "#FF4500", "#FFB347", "#8C1C13"),
+    ("Gold",       "#0A0A0A", "#D4A017", "#F6E7B0", "#7A5C00"),
+    ("Candy",      "#FFF1E6", "#FF6B9D", "#56CBF9", "#FFD23F"),
+    ("Mint",       "#F7F3E9", "#2EC4B6", "#FF6B6B", "#1D3557"),
+    ("Plum",       "#2D1E2F", "#F7B2AD", "#9ABCA7", "#F2E94E"),
+]
+
+
+def hw10(h):
+    """sRGB hex -> (y, u, v) 10-bit, hardware convention (u = Cr, v = Cb), BT.601, Y = 64 + 876 y."""
+    h = h.lstrip("#")
+    r, g, b = [int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    cb = (b - y) / 1.772
+    cr = (r - y) / 1.402
+    return (int(round(64 + y * 876)), int(round(512 + cr * 896)), int(round(512 + cb * 896)))
+
+
+def pal_table():
+    return [[hw10(c) for c in p[1:]] for p in PALETTES]
+
+
+def exp2_rom():
+    return [int(round(32768 * 2 ** (i / 256.0))) for i in range(256)]
+
+
+def sin_rom():
+    return [int(round(1023 * math.sin(math.pi / 2 * (i + 0.5) / 512))) for i in range(512)]
+
+
+def lens_rom():
+    out = []
+    for i in range(1024):
+        s = (i + 0.5) / 1024.0
+        out.append(int(round(4095 * H_BULGE * math.sqrt(1 - s))))
+    for i in range(1024):
+        s = (i + 0.5) / 1024.0
+        out.append(int(round(4095 * H_PINCH * (1 - s) ** 3)))
+    return out
+
+
+def aa_rom():
+    """-4 log2 of the rms of the lens's tangential (g) and radial (g + 2 s dg/ds) stretch, clamped -16 .. 8."""
+    out = []
+    for pinch in (0, 1):
+        for bq in range(8):
+            b = 0.0 if bq == 0 else (bq + 0.5) / 8.0
+            for i in range(64):
+                s = (i + 0.5) / 64.0
+                if pinch:
+                    g = 1 + 2 * b * H_PINCH * (1 - s) ** 3
+                    gr = g + 2 * s * (-6 * b * H_PINCH * (1 - s) ** 2)
+                else:
+                    g = 1 - b * H_BULGE * math.sqrt(1 - s)
+                    gr = g + 2 * s * (b * H_BULGE * 0.5 / math.sqrt(1 - s))
+                rho = math.sqrt((g * g + gr * gr) / 2)
+                v = int(round(-4 * math.log2(rho)))
+                out.append(max(-16, min(8, v)) & 255)
+    return out
+
+
+def pal_rom():
+    out = []
+    for p in pal_table():
+        for (y, u, v) in p:
+            out.append((y << 22) | (u << 12) | (v << 2))
+    return out + [0] * (256 - len(out))      # padded to 256 words so it maps to block RAM
+
+
+def vhd_table(name, typ, depth, width, vals):
+    lines = ["    type %s is array (0 to %d) of %s(%d downto 0);" % ("t_" + name.lower(), depth - 1, typ, width - 1),
+             "    constant %s : %s := (" % (name, "t_" + name.lower())]
+    items = ['x"%0*X"' % (width // 4, v) for v in vals]
+    for i in range(0, len(items), 16):
+        lines.append("        " + ", ".join(items[i:i + 16]) + ("," if i + 16 < len(items) else ""))
+    lines.append("    );")
+    return "\n".join(lines)
+
+
+def main():
+    parts = ["-- Generated by vega.py -- DO NOT EDIT.",
+             "library ieee;", "use ieee.std_logic_1164.all;", "use ieee.numeric_std.all;", "",
+             "package vega_pkg is",
+             vhd_table("C_VG_EXP2", "unsigned", 256, 16, exp2_rom()),
+             vhd_table("C_VG_SIN", "unsigned", 512, 12, sin_rom()),
+             vhd_table("C_VG_LENS", "unsigned", 2048, 12, lens_rom()),
+             vhd_table("C_VG_AA", "unsigned", 1024, 8, aa_rom()),
+             vhd_table("C_VG_PAL", "std_logic_vector", 256, 32, pal_rom()),
+             "end package vega_pkg;", ""]
+    with open(os.path.join(HERE, "vega_pkg.vhd"), "w") as f:
+        f.write("\n".join(parts))
+
+
+if __name__ == "__main__":
+    main()

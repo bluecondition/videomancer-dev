@@ -1,0 +1,167 @@
+# Vega - Kinetic set, 2026-11-14.
+# A grid of inset shapes swelling over a sphere (Vasarely's Vega series); the cells swell and shrink in waves.
+# See vega.vhd, vega.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 33
+program_id = "com.czartroniks.vega"
+program_name = "Vega"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Illusion", "Shape"]
+program_type = "processing"
+description = "A grid of shapes swelling over a globe, after Vasarely's Vega; the cells pulse in travelling waves."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 450
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Shape"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Depth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 620
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 274
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 16
+initial_value = 224
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Smooth", "Snap"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Linear", "Radial"]
+initial_value_label = "Linear"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Lens"
+value_labels = ["Bulge", "Pinch"]
+initial_value_label = "Bulge"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Grade"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Bulge"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Vega"
+
+[[preset]]
+name = "Vega-Nor"
+rotary_potentiometer_1 = 380
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 500
+rotary_potentiometer_5 = 180
+rotary_potentiometer_6 = 160
+toggle_switch_8 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Ink Globe"
+rotary_potentiometer_1 = 250
+rotary_potentiometer_3 = 620
+rotary_potentiometer_5 = 420
+rotary_potentiometer_6 = 32
+toggle_switch_10 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Funnel"
+rotary_potentiometer_1 = 330
+rotary_potentiometer_2 = 560
+rotary_potentiometer_5 = 350
+rotary_potentiometer_6 = 288
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Flip Dots"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 760
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 608
+toggle_switch_7 = 1
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Halftone Lens"
+rotary_potentiometer_1 = 120
+rotary_potentiometer_3 = 0
+rotary_potentiometer_6 = 96
+toggle_switch_10 = 0
+linear_potentiometer_12 = 760
