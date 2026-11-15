@@ -25,7 +25,7 @@ Flash from `out/rev_b/ron/kinetic/<name>.vmprog`; rebuild one with `./build_set.
 | 7 | [horologe](horologe/) | A wall of clock hands sweeping in phase patterns | Spread: chaos to synchronized figures | v0.1.0 built 2026-11-14 (router2; HD Analog seed 2, HD HDMI seed 4, HD Dual seed 3, SD seed 1; HD 77.1-81.4 MHz, seed-marginal; 6,972 LC, 91 %, 18 EBR); not flashed |
 | 8 | [cogwork](cogwork/) | A lattice of meshed gears counter-rotating | Speed and tooth count | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 86.4-89.0 MHz; 6,937 LC, 90 %, 18 EBR); not flashed |
 | 9 | [pendula](pendula/) | Dots orbiting per cell; phase gradients make them read as rolling rings | Phase gradient | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 92.4-98.7 MHz; 6,564 LC, 86 %, 21 EBR); not flashed |
-| 10 | pinwheel | Fan cells whose blade count and twist morph | Twist | in progress |
+| 10 | [pinwheel](pinwheel/) | Fan cells whose blade count and twist morph | Twist | v0.1.0 built 2026-11-14 (router2; HD HDMI seed 4, SD Analog seed 2, others seed 1; HD 78.1-81.4 MHz; 6,616 LC, 86 %, 23 EBR); not flashed |
 | 11 | [hexbloom](hexbloom/) | A honeycomb of concentric hexagons breathing per cell | Bloom depth | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 97.1-104.2 MHz; 6,604-6,622 LC, 86 %, 10 EBR); not flashed |
 | 12 | [tumbler](tumbler/) | Rhombille cubes whose shading flips in waves (reversible-cube illusion) | Flip wave | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 82.1-83.0 MHz; 6,638-6,656 LC, 87 %, 16 EBR); not flashed |
 | 13 | bauhaus | Cells of quarter-arcs, half-discs, bars and dots re-rolled by a wave | Re-roll rate | in progress |
