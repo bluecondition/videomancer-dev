@@ -1,0 +1,176 @@
+# Bauhaus (Kinetic)
+
+v0.1.0 built 2026-11-14, all six configs, not flashed. Flash `out/rev_b/ron/kinetic/bauhaus.vmprog`.
+
+## What it draws
+
+A grid of shape tiles, after Bauhaus geometric posters and the generative "shape tile" grids that descend from
+them: every cell holds one primitive in two flat palette colours (a cell colour and a figure colour). At the
+defaults (Bauhaus palette, about 14 x 8 cells, full-bleed) it is a cream / red / blue / yellow poster of quarter
+discs, quarter targets, half discs, discs, donuts, dots, triangles, half rectangles, bars, diamonds and squares.
+A diagonal wave travels through the grid: where it passes, a figure shrinks to nothing, is swapped for another
+(new motif, orientation and colours) and grows back, so the poster re-rolls in bands, never with a pop.
+
+Figures (all = one anchor in the figure box + one radius):
+- curved: quarter disc (4 corners), quarter target (ring + core, 4 corners), half disc (4 edges), and centred
+  disc / donut / dot / target;
+- straight: diagonal half (4 corners), half rectangle (4 edges), bar (across / down, thin / thick), and centred
+  diamond / square.
+Half the cells take the palette's ground as their cell colour, the rest A, B or the accent; the figure is always
+a different colour.
+
+## Element and state
+
+- Element: a cell of pitch P; a cell boundary sits on the screen centre, so Scale zooms about the centre.
+- State: its generation, a fixed-point number (10 fraction bits).
+- theta = Spread x index - phase. Linear: index = column + row (a diagonal sweep). Radial: index = max + min / 2
+  of (|column|, |row|) (an octagonal ripple from the centre). Layout = Mirrored uses |column|, |row| for the
+  wave as well, so the motion stays four-fold symmetric (Linear then gives diamonds from the centre).
+- state = 1/2 + Shuffle x wave(theta); wave = sine, or Snap (the first sixteenth of the sine stretched over the
+  quarter cycle: 75 % dwell, quick eased flips).
+- hash(column, row, floor(state)) picks curved / straight (against Mix), the motif, its orientation and the two
+  colours. The hash is four add-and-xorshift rounds on 18 bits; its output bits were checked on a 64 x 64 x 16
+  grid: bit means 0.499 .. 0.503, worst bit-pair correlation between neighbours 0.034 (rows), 0.010 (columns),
+  0.012 (diagonals), 0.011 (successive generations); equal neighbouring motifs 6.5 % / 6.2 % (ideal 6.25 %).
+- Figure size = min(1, 4 x distance of frac(state) from the re-roll): full for the middle half of a generation,
+  shrinking to nothing at the swap.
+
+## Controls
+
+| Control | Name | What it does |
+|---|---|---|
+| K1 | Scale | cell pitch 38 .. 332 virtual lines, exponential, glided (default 135: 14 x 8 cells) |
+| K2 | Shape | figure inset: 0 % = full-bleed (default) .. 100 % = figures at 40 % of the cell with margins of the cell colour |
+| K3 | Mix | share of straight motifs, 0 (all curved) .. 16 sixteenths (all straight); default 5/16 |
+| K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
+| K5 | Spread | phase step per cell 0 .. 1/2 cycle, square law |
+| K6 | Colour | the 16 shared palettes with hysteresis (ground, A, B, accent: all four are used as cell and figure colours) |
+| S7 | Wave | Smooth / Snap (the grid dwells, then re-rolls in bursts) |
+| S8 | Field | Linear (diagonal sweep) / Radial (octagonal ripple from the centre) |
+| S9 | Gutters | Off / On: ground-colour lines between the cells, 4 px + 1/8 of the cell wide |
+| S10 | Layout | Random / Mirrored (four-fold mirrored composition, figures and wave) |
+| S11 | Source | Video / Osc |
+| P12 | SHUFFLE | the headline: how many generations the wave spans, square law, glided. 0 % = a still poster whose figures only breathe (+-0.44 generation, never a re-roll) .. 32 % (default) = each cell re-rolls about twice per half cycle .. 100 % = +-4.4 generations, the whole grid re-rolling in waves |
+
+Depth is the headline, so it sits on P12 and K3 became Mix (the spec's rule for this program).
+Presets: Poster (defaults), Mirror Quilt, Flip Board, Slot Machine, Shape Halftone, Diamond Drift.
+
+## Video
+
+`program_type = "processing"`. The picture's luma picks the motif by coverage, so the picture shows as a
+halftone of shapes:
+- luma (>> 2, less 16) is smeared along x (1/16 one-pole) and HELD per cell: one sample per cell per line at
+  mid-cell runs through a 1/8 filter down the lines in a block-RAM word per cell column, and a cell row uses
+  the filter value of the line before the row (the field's first line: the smear at the cell start). Every
+  cell is rigid: one level per cell, no per-line edges.
+- level = held x 5 / 64 (0 .. 15). Level 0 (black, under about 6 % luma) leaves the hash poster untouched, so
+  with a black input or nothing plugged in the wave alone runs. Levels 1 .. 13 replace the cell with a disc
+  (or a square, by Mix) on the ground colour that grows with the level: dot at the centre (3 sizes) -> quarter
+  at a corner (3 sizes) -> half at an edge (3 sizes) -> full at the centre (3 sizes) -> the whole box. The
+  orientation and the figure colour (A, B or accent) still come from the hash, and the figure still shrinks
+  and swaps with the wave.
+- On the light-ground palettes (Paper, Bauhaus, Candy, Mint) the level is inverted, so bright picture areas
+  always show more of the lighter colour.
+- Source = Osc substitutes the shell's drifting 640 x 540 triangle lattice at full swing at the same point:
+  diamonds of graded dots / quarters / halves / full tiles drift across the poster.
+The picture does not colour the cells (no Face switch here: both own switches are spent on Gutters and Layout).
+
+## Engine
+
+Chassis from louver.vhd ([A] timing / zone / glides / sequencer, [B] generated avid, [F] output conditioning);
+[C], [D], [E] are this program's.
+
+- Per field (vblank zone, "no avid for 1024 clocks"): glides (K1, P12), one 24-step serial multiplier in 10
+  slots (pitch exponent, spread^2, cells per line, first pixel, first line, spread x first column / row,
+  shuffle^2, rate), 2^-e and the pitch through the 2^(i/256) ROM, the wave phase step, and the blend table
+  T(colour a, colour b, coverage 0 .. 8) = 144 words refilled by adders straight from the palette ROM.
+- Per line: the row accumulator (cells, Q20), Spread x row by one adder at each row crossing, the three |dy|
+  anchor distances, the box and gutter y distances, the row's phase terms.
+- Per pixel (35 stages): column accumulator -> Spread x |column| -> Linear / Radial combine -> quarter-wave
+  sine ROM -> Shuffle x wave (gated sums) -> state -> hash (4 stages) and size x box -> motif decode -> |dx|,
+  |dy| -> two square ROMs + an R^2 / log2 R ROM -> edge function (disc, ring, core, diamond, rectangle) ->
+  x (8 - k) / 8 and a two-step shift by the scale exponent (quarter octaves: cell px / 2R) -> coverage in
+  eighths -> clipped to the figure box, gutter coverage (two small gated-sum multiplies by the cell size) ->
+  blend table -> output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two resynced 8-sums, luma [1 2 1]/4
+  delayed to the same group delay, luma 13/16 toward black) -> blanking gate.
+- One latency in every mode: C_LAT = 42 = processing_delay_clks. Generated avid (parity-locked start), virtual
+  1080-line coordinates from the timing ID (SD shows the centre 4:3). Colours in the hardware convention
+  (U register = Cr); chroma is carried at 8 bits up to the output filter.
+- No per-pixel multiplier wider than 8 x 10 bits, no square root, no divider; every block RAM has no_rw_check
+  (0 emulate_transparency in a standalone yosys run of the first RTL; the RAMs did not change after it).
+
+## Status
+
+- Built 2026-11-14 through the shared queue with router2 (the builder default); rebuild with
+  `./build_set.sh kinetic bauhaus`. Never flashed.
+
+| Config | Seed | Post-route Fmax | LC |
+|---|---|---|---|
+| HD Analog | **4** (seed 1 stalled the router, 2 and 3 missed) | 78.17 MHz | 6722 |
+| SD Analog | 1 | 75.84 MHz | 6723 |
+| HD HDMI | **3** (1 and 2 missed) | 74.34 MHz | 6728 |
+| SD HDMI | 1 | 61.90 MHz | 6724 |
+| HD Dual | **3** (1 and 2 missed) | 80.43 MHz | 6731 |
+| SD Dual | **2** (seed 1 stalled the router) | 70.36 MHz | 6718 |
+
+- HD needs 74.25 MHz, SD 27. 6,731 LC at most (88 %), 23 of 32 block RAMs.
+- **Timing is seed-marginal on HD**: HD HDMI passes by 0.09 MHz. This is the second build. The first build
+  (sources and vmprog kept in `.kinetic_work/rb_bauhaus/build1_backup/`) closed HD Analog 78.04 (seed 1),
+  HD HDMI 81.11 (seed 1), HD Dual 76.98 (seed 2) at 6,701 LC; the only RTL difference is the rectangle
+  coverage rule in stage 31 (four compares after the 4-way shift instead of two) plus one ROM word, added to
+  remove a one-row seam (see below). If a rebuild misses, the fix is to register the stage-31 shift first and
+  do the clamp in a stage of its own (latency + 1), or try router1; the critical path was not profiled.
+- The two router "stalls" were ended by hand, not by the builder's 900 s timeout: the seed-1 router sat at
+  `overused=2` (HD Analog, 7 min) and `overused=4` (SD Dual, 3 min; a normal run takes under 2), so its make
+  was killed and the builder went on to the next seed.
+- GHDL render = integer model, black input, pixel diff 0, on the RTL as built:
+  - 720p60 640 x 360 window, defaults: 0 of 228,960;
+  - 720p60 640 x 360 window, Mix 900, Shape 200, Gutters On: 0 of 228,960.
+- The same, on the first build's RTL (before the rectangle rule changed; the model was changed with it):
+  - 720p60 full frame (1280 x 720), defaults: 0 of 918,720;
+  - 720p60 640 x 360 window, Snap + Radial + Gutters + Mirrored, Shape 400, Mix 800, Spread 600, Rate 900,
+    Vega: 0 of 228,960;
+  - NTSC (480i, 720 x 243, both fields), a sim-only copy with the glides bypassed, Scale 300, Shuffle 800,
+    Shape 300, Gutters On, Rate at centre: 0 of 173,988 on each field.
+  The full 720p frame, NTSC and the Snap / Radial / Mirrored combination were NOT re-rendered after the change.
+- The GHDL frame is the model's shifted 4 columns right with 4 blank columns at the left (the generated avid
+  starts 4 clocks after the source's); the geometry is offset to match, so the grid's centre sits on the
+  screen centre.
+- Source = Osc and Video = selfie.jpg were rendered in GHDL (640 x 360 window): the same picture as the model
+  with some cells one halftone level apart (7 % / 9 % of pixels differ on the first build's renders): the
+  model does not reproduce the hold's exact sample phase (pipeline offset of the smear, the lattice's drift
+  count).
+- Rasters rendered in GHDL: 720p60 and NTSC 480i. No 1080i and no 1080p frame was rendered (time). The integer
+  model draws the same picture at 1080p, 720p, 480p and NTSC (the centre 4:3 on SD): `modes_model.png`.
+- Scale and Shuffle were simulated at two values each (defaults; 300 / 800 in the glide-bypassed copy); the
+  glide itself is louver's code and was not exercised in a sim.
+- Single-row check on the model (1-row-tall hard runs, 5 phases each): defaults 17 px, Gutters 4, Shape 600 2,
+  Scale 0 % 11, Scale 100 % 11, Shuffle 100 % 15, Mirrored + Radial 22, Mix 100 % 43 (see the deviations).
+- Renders: `.kinetic_work/rb_bauhaus/cmp_final.png`, `sheet.png` (control sheet, model), `strip.png` (motion, model).
+
+## Cut / deviations
+
+- Radial uses the octagonal cell metric max + min / 2, not a true distance.
+- The concentric quarter rings are one ring (R/2 .. R) plus a core (R/4), radii in powers of two, not three
+  equal bands.
+- The "bar" shrinks along its length as well as its width while it re-rolls (so it can never become a
+  1-px-tall full-width line).
+- Source: level 0 keeps the hash poster instead of drawing the smallest dot, so black picture areas show the
+  poster (needed so a black input is not a dead field of dots). Source-driven changes of a cell's level are
+  immediate (no shrink-swap-grow, no hysteresis): a cell sitting on a level threshold can flip with camera
+  noise. The held luma is taken just above each cell row (about 8 lines of filter), not at the cell centre.
+- The halftone is coarse at the default Scale (14 x 8 cells); the Shape Halftone preset uses small cells.
+- Edge softness is quantised: the coverage scale is rounded to quarter octaves (ramp width within about +-9 %
+  of one pixel), and the box / gutter edges use the x pixel size, so on SD (non-square virtual pixels) the
+  horizontal edges are slightly softer or harder than the vertical ones.
+- Only Scale and Shuffle are glided; Shape, Mix and Spread read the knob directly.
+- Cell edges with Shape = 0 and Gutters Off are hard (pixel-snapped), not anti-aliased: the figure box clip
+  and the rectangles' own edges ramp on the OUTSIDE (full coverage at the edge), which at full-bleed belongs
+  to the next cell. Ramping inside left a one-row lighter seam where a full-size bar or half rectangle met a
+  neighbour of its own colour (42-px runs at the defaults); that is what the second build fixed. Rectangles
+  are therefore half a pixel larger per side than their nominal size.
+- Known thin features that remain: (a) while a rectangle shrinks or grows, its end passes within a pixel of
+  the cell edge for a frame or two, a one-row gap up to half a cell wide (the 43-px run at Mix 100 %);
+  (b) where a disc is tangent to its cell edge and the neighbour has the disc's colour, the wedge between
+  them is one row tall over about 2 sqrt(2R) px (17 px at the defaults, more at large Scale).
+- The picture's 8 filter columns at the left / right edge blend into the ground colour (louver's chassis).

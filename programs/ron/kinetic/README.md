@@ -28,7 +28,7 @@ Flash from `out/rev_b/ron/kinetic/<name>.vmprog`; rebuild one with `./build_set.
 | 10 | [pinwheel](pinwheel/) | Fan cells whose blade count and twist morph | Twist | v0.1.0 built 2026-11-14 (router2; HD HDMI seed 4, SD Analog seed 2, others seed 1; HD 78.1-81.4 MHz; 6,616 LC, 86 %, 23 EBR); not flashed |
 | 11 | [hexbloom](hexbloom/) | A honeycomb of concentric hexagons breathing per cell | Bloom depth | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 97.1-104.2 MHz; 6,604-6,622 LC, 86 %, 10 EBR); not flashed |
 | 12 | [tumbler](tumbler/) | Rhombille cubes whose shading flips in waves (reversible-cube illusion) | Flip wave | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 82.1-83.0 MHz; 6,638-6,656 LC, 87 %, 16 EBR); not flashed |
-| 13 | bauhaus | Cells of quarter-arcs, half-discs, bars and dots re-rolled by a wave | Re-roll rate | in progress |
+| 13 | [bauhaus](bauhaus/) | Cells of quarter-arcs, half-discs, bars and dots re-rolled by a wave | Re-roll rate | v0.1.0 built 2026-11-14 (router2; HD Analog seed 4, HD HDMI seed 3 at 74.34 MHz (0.09 margin), HD Dual seed 3, SD Dual seed 2; 6,718-6,731 LC, 88 %, 23 EBR); not flashed |
 | 14 | [quasi](quasi/) | Quasicrystal: 5 to 8 plane waves summed into shimmering Penrose-like contours | Symmetry order | v0.1.0 built 2026-11-14 (router2, all six seed 1; HD 80.6-88.0 MHz; 6,779-6,803 LC, 89 %, 24 EBR); not flashed |
 | 15 | rippletank | 2 to 4 orbiting point sources, circular-wave interference | Wavelength | in progress |
 | 16 | isoline | Metaballs drawn as clean topographic bands | Merge | in progress |
