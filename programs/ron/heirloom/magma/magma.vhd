@@ -38,6 +38,7 @@
 -- Generated colours in the hardware convention (U carries Cr, V carries Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Melt (camera strength, was K5), K5 = Sky (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -199,7 +200,7 @@ architecture magma of program_top is
     signal f_drift : unsigned(15 downto 0) := (others => '0');
     signal f_k4    : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal f_po    : signed(8 downto 0) := (others => '0');            -- pocket offset, Q7
-    signal f_m5    : unsigned(4 downto 0) := to_unsigned(12, 5);
+    signal f_m5    : unsigned(5 downto 0) := to_unsigned(15, 6);   -- Melt gain, 1.25 K6 / 32 (0 .. 39)
     signal f_b9    : unsigned(10 downto 0) := to_unsigned(512, 11);  -- band slope ks * fan, Q9
     signal f_qq    : unsigned(9 downto 0) := (others => '0');
     signal f_al    : signed(18 downto 0) := (others => '0');          -- band offset, Q24
@@ -469,6 +470,7 @@ begin
     p_ctrl : process(clk)
         variable v_x  : signed(10 downto 0);
         variable v_u  : unsigned(10 downto 0);
+        variable v_m  : unsigned(10 downto 0);
         variable v_ng : signed(13 downto 0);
         variable v_p  : integer range 0 to 31;
         variable v_ph : integer range 0 to 31;
@@ -524,7 +526,8 @@ begin
                 elsif v_x < -8 then f_sneg <= '1'; v_u := unsigned(-v_x) - 8; f_spm <= v_u(8 downto 0);
                 else f_sneg <= '0'; f_spm <= (others => '0'); end if;
                 f_k4  <= unsigned(registers_in(3));
-                f_m5  <= unsigned(registers_in(5)(9 downto 5));                   -- K5 Melt
+                v_m   := resize(unsigned(registers_in(5)), 11) + resize(unsigned(registers_in(5)(9 downto 2)), 11);
+                f_m5  <= v_m(10 downto 5);                                        -- K6 Melt x 1.25
                 f_ssh <= signed(resize(unsigned(registers_in(4)), 11)) - 512;    -- K6 Sky
                 f_flat  <= registers_in(6)(0);
                 f_norip <= registers_in(6)(1);
@@ -1036,7 +1039,7 @@ begin
             q4_bp <= resize(q3_b1 * signed('0' & q3_s4), 15);
             q4_cp <= resize(q3_c1 * signed('0' & q3_s4), 14);
             q4_a0 <= q3_a0; q4_b0 <= q3_b0; q4_c0 <= q3_c0;
-            q4_m <= q3_src * signed('0' & f_m5);
+            q4_m <= resize(q3_src * signed('0' & f_m5), 16);   -- |258 x 39| fits
             v_ys := l_sl + resize(q3_ro, 13);
             q4_fy <= v_ys(7 downto 0);
             r_pa <= q3_n5 & v_ys(12 downto 8);

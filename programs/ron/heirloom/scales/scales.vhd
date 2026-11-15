@@ -41,6 +41,7 @@
 -- avid; output conditioning (Y, U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes, their 8-back taps in two
 -- block-RAM rings, with the running-sum resync; luma 13/16) before the blanking gate.  Colours in the
 -- hardware convention (u = Cr).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -174,7 +175,7 @@ architecture scales of program_top is
     signal c_wph   : unsigned(23 downto 0) := to_unsigned(16#E28F6F#, 24); -- wave phase at line 0 (the still's)
     signal c_wrate : unsigned(23 downto 0) := to_unsigned(52264, 24);     -- wave phase per field (Q24)
     signal c_kc    : signed(19 downto 0) := to_signed(69927, 20);          -- key level, Q16
-    signal c_gw    : unsigned(11 downto 0) := (others => '0');            -- warp per luma step, Q24 >> 5
+    signal c_gw    : unsigned(11 downto 0) := (others => '0');            -- warp per luma step, Q24 >> 5 (x1.25: 0 .. 3592)
     signal c_xsh   : unsigned(11 downto 0) := (others => '0');            -- x' at pixel 0 (h)
     signal c_xsp   : unsigned(12 downto 0) := to_unsigned(C_X0H, 13);     -- x' + X0 at pixel 0 (h)
     signal c_kx0, c_px0 : signed(23 downto 0) := (others => '0');         -- H ramps at pixel 0 (Q20)
@@ -252,8 +253,8 @@ architecture scales of program_top is
     signal p7_op  : signed(18 downto 0) := (others => '0');         -- 3 x that
     signal p3_lm  : unsigned(7 downto 0) := (others => '0');
     signal p4_ea, p4_eb : unsigned(15 downto 0) := (others => '0');
-    signal p5_lw  : unsigned(24 downto 0) := (others => '0');
-    signal p6_lk  : unsigned(13 downto 0) := (others => '0');
+    signal p5_lw  : unsigned(25 downto 0) := (others => '0');   -- 26 bits: Osc 223 x 3592 << 6 < 2^26 (the key term must not wrap)
+    signal p6_lk  : unsigned(14 downto 0) := (others => '0');
     signal p7_s, p8_s : unsigned(11 downto 0) := (others => '0');
     signal p7_par : std_logic := '0';
     signal p8_k12 : signed(16 downto 0) := (others => '0');
@@ -570,7 +571,7 @@ begin
                             c_kc <= to_signed(69927, 20) - signed(resize(f_acc(18 downto 0), 20));
                         end if;
                     when 362 => z_aw <= f_acc(19 downto 0);                                -- warp^2
-                    when 386 => c_gw <= f_acc(28 downto 17);                              -- warp^2 * 360 >> 17
+                    when 386 => c_gw <= f_acc(28 downto 17) + resize(f_acc(28 downto 19), 12);   -- warp^2 * 360 >> 17, x 1.25
                     when 410 => c_kx0 <= signed(resize(f_acc(22 downto 0), 24));
                     when 434 => c_px0 <= -signed(resize(f_acc(22 downto 0), 24));
                     when others => null;
@@ -856,13 +857,13 @@ begin
             p4_eb <= p3_lm(7 downto 4) * c_gw;
             -- 5: luma x warp (Q24 cycles)
             if s_src = '1' then          -- Osc: twice the depth, so the generator's bends read at any Warp setting
-                p5_lw <= shift_left(resize(p4_ea, 25) + shift_left(resize(p4_eb, 25), 4), 6);
+                p5_lw <= shift_left(resize(p4_ea, 26) + shift_left(resize(p4_eb, 26), 4), 6);
             else
-                p5_lw <= shift_left(resize(p4_ea, 25) + shift_left(resize(p4_eb, 25), 4), 5);
+                p5_lw <= shift_left(resize(p4_ea, 26) + shift_left(resize(p4_eb, 26), 4), 5);
             end if;
             -- 6: the camera bends the phase (the DDAs are the stage-5 beam); 1.5 x the same amount opens the key
-            p6_ph <= b_ph + p5_lw;
-            p6_lk <= resize(p5_lw(24 downto 12), 14) + resize(p5_lw(24 downto 13), 14);
+            p6_ph <= b_ph + p5_lw(24 downto 0);                               -- the phase wraps by design
+            p6_lk <= resize(p5_lw(25 downto 12), 15) + resize(p5_lw(25 downto 13), 15);
             p6_k <= b_k(23 downto 8); p6_p <= b_p(23 downto 12);
             p6_e <= resize(b_e, 17) - resize(b_k(23 downto 8), 17);          -- opacity = 3 (E - k), from the key ramp
             -- 7: saw (Tri: folded into a lens), key, opacity x 3

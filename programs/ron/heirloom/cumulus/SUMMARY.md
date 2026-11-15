@@ -155,3 +155,10 @@ All 679 frames re-extracted (`fr/`), kymographs at three columns, column-run tra
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **Bend type**: K6 Etch swells the clouds (luma × gain into the chord test) and bends the band edges (a quarter of it into Psi); both reshape the drawing, the picture itself is never shown.
+- The per-field Etch gain (etch² >> 10, sequencer slot 11) is now g + g / 4: c_ge widened 10 → 11 bits (0 .. 1,277, was 0 .. 1,022), so every K6 position is ×1.25. The luma × gain pixel product and its pipe (stages 4–8) gained one bit (19 bits, 255 × 1,277 < 2^19) and the chord / Psi terms one bit each (p9_eb 12, p9_ez 10 bits), so nothing wraps; Psi stays a cyclic 11-bit coordinate, as designed. Latency unchanged.
+- The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.1.2).
+- Build (router1, 2026-11-15): all six seed 1; HD worst 95.57 MHz (HD Analog 95.57, HD HDMI 98.45, HD Dual 103.33); 7,032 / 7,680 LC max.

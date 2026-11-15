@@ -40,6 +40,7 @@
 -- alpha, the red fall-off), a 19-stage pixel path, the shell's output conditioning (Y, U, V through two
 -- [1 2 2 2 2 2 2 2 1]/16 boxes with block-RAM taps and the resync, luma 13/16) and the blanking gate.
 -- Generated avid; one latency (24) in every mode; colours in the hardware convention (u = Cr).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -183,7 +184,7 @@ architecture bunsen of program_top is
     signal c_ov   : signed(8 downto 0) := (others => '0');             -- V sway, V-table entries (4 lines)
     signal c_g    : signed(9 downto 0) := (others => '0');             -- key grow, virtual px
     signal c_nt   : signed(11 downto 0) := to_signed(975, 12);         -- fade notch, virtual line
-    signal c_cg   : unsigned(5 downto 0) := to_unsigned(20, 6);        -- camera gain, Q4 per luma step
+    signal c_cg   : unsigned(6 downto 0) := to_unsigned(25, 7);        -- camera gain, Q4 per luma step (x1.25: 0 .. 78)
 
     -- generated avid
     signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
@@ -496,7 +497,7 @@ begin
                         -- fade notch: -150 + 1.75 p12
                         v_p := resize(s_gp(12 downto 3), 12);
                         c_nt <= signed(v_p + shift_right(v_p, 1) + shift_right(v_p, 2)) - 150;
-                        c_cg <= s_g6(12 downto 7);
+                        c_cg <= resize(s_g6(12 downto 7), 7) + resize(s_g6(12 downto 9), 7);   -- g + g / 4
                     when others => null;
                 end case;
             end if;
@@ -829,7 +830,7 @@ begin
             p5_x <= p4_x;
             p5_bt <= f_beta(p4_dt); p5_bl <= f_beta(p4_dl); p5_br <= f_beta(p4_dr);
             if s_src = '1' then v_l := shift_left(signed(resize(p4_lm, 10)) - 120, 1); else v_l := signed(resize(p4_lm, 10)); end if;
-            p5_cam <= resize(v_l * signed('0' & c_cg), 16);
+            p5_cam <= resize(v_l * signed('0' & c_cg), 16);   -- |270 x 78| = 21060 fits
             q_h(5) <= p4_h;
             -- 6: V index (Q8 lines); beta = the strongest pool; camera / 16
             p6_vi <= signed(resize(l_vb, 21)) + resize(p5_ew, 21);

@@ -4,6 +4,7 @@
 -- Halo v0.6.0 -- Heirloom #47, rebuilt from the photo WIN_20230801_00_19_00.
 -- Phase 2 (v0.6.0): K1 / K2 / K3 / K5 / K6 reach twice as far on each side of the photo setting;
 -- S9 Ember flips the red from the crescent to red-hot ring cores.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The photo: a lattice of 2.02 cells across (949 px) by 542 lines.  Every cell
 -- holds a glowing yellow-white ellipse (164 x 185 px, 71 px right of the cell
@@ -104,7 +105,8 @@ architecture halo of program_top is
     signal k_pneg  : std_logic := '0';
     signal k_tear  : unsigned(9 downto 0) := to_unsigned(256, 10);   -- |tear| Q8 (0 .. 767); K5 - 256
     signal k_tneg  : std_logic := '0';
-    signal k_warp  : signed(7 downto 0) := to_signed(9, 8);          -- 2 (K6 / 16) - 9 (-9 .. 117)
+    signal k_warp0 : signed(7 downto 0) := to_signed(9, 8);          -- 2 (K6 / 16) - 9 (-9 .. 117)
+    signal k_warp  : signed(8 downto 0) := to_signed(11, 9);         -- k_warp0 x 1.25 (-12 .. 146)
     signal k_hi    : unsigned(7 downto 0) := to_unsigned(118, 8);    -- Halo table index (P12 / 4)
     signal r_p12   : std_logic_vector(31 downto 0) := (others => '0');
 
@@ -219,7 +221,7 @@ architecture halo of program_top is
     signal p2_ws : signed(13 downto 0) := (others => '0');
     signal p3_sh : signed(7 downto 0) := (others => '0');
     signal p3_gw : signed(8 downto 0) := (others => '0');
-    signal p3_ew : signed(9 downto 0) := (others => '0');
+    signal p3_ew : signed(10 downto 0) := (others => '0');
     signal p4_d  : signed(20 downto 0) := (others => '0');
     signal p5_hb : unsigned(15 downto 0) := (others => '0');
     signal p6_ax : unsigned(8 downto 0) := (others => '0');
@@ -267,7 +269,7 @@ architecture halo of program_top is
     type t_u16 is array (natural range <>) of unsigned(15 downto 0);
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
     type t_s9a is array (natural range <>) of signed(8 downto 0);
-    type t_s10 is array (natural range <>) of signed(9 downto 0);
+    type t_s10 is array (natural range <>) of signed(10 downto 0);   -- p_ew: 11 bits (|32 x 146| / 8 = 584)
     type t_sl is array (natural range <>) of std_logic;
     signal p_hm : t_u16(2 to 4) := (others => (others => '0'));
     signal p_gw : t_s9a(4 to 8) := (others => (others => '0'));
@@ -471,7 +473,8 @@ begin
             v_k := s_g(3)(12 downto 3);
             if v_k >= 256 then k_tear <= v_k - 256; k_tneg <= '0';
             else k_tear <= 256 - v_k; k_tneg <= '1'; end if;
-            k_warp  <= signed(shift_left(resize(s_g(4)(12 downto 7), 8), 1)) - 9;
+            k_warp0 <= signed(shift_left(resize(s_g(4)(12 downto 7), 8), 1)) - 9;
+            k_warp  <= resize(k_warp0, 9) + resize(shift_right(k_warp0, 2), 9);     -- K6 top +25 %
             k_hi    <= s_g(5)(12 downto 5);
 
             -- serial products: slot p = zc/32 (2..9), phase 0 load, 1..18 step, 20 store
@@ -776,7 +779,7 @@ begin
             -- 3: tear shape; warp terms
             p3_sh <= signed(r_tq);
             p3_gw <= resize(shift_right(p2_ws, 5) + shift_right(p2_ws, 7), 9);
-            p3_ew <= resize(shift_right(p2_ws, 3), 10);
+            p3_ew <= resize(shift_right(p2_ws, 3), 11);
 
             -- 4: tear product (shape * amp)
             p4_d <= resize(p3_sh * signed('0' & l_amp), 21);
@@ -838,7 +841,7 @@ begin
 
             -- 12: E2 = dx^2 + dy^2 + warp
             p12_e2 <= signed(resize(shift_left(resize(p11_sq, 20), 4), 23)) + signed(resize(l_dyn2, 23))
-                      + resize(shift_left(resize(p_ew(11), 16), 6), 23);
+                      + resize(shift_left(resize(p_ew(11), 17), 6), 23);
             if p11_m < 0 then p12_m2 <= (others => '0'); else p12_m2 <= unsigned(p11_m(10 downto 1)); end if;
 
             -- 13: e = (E2 - 1) / 128, clamped

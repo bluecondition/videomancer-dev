@@ -159,3 +159,10 @@ knots.py, imodel.py).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 160 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **Bend type**: K6 Etch adds camera luma × gain to the V oscillator's phase, so the flames bend; the picture itself is never shown.
+- The per-field Etch gain is now g + g / 4 (c_etq widened 6 → 7 bits: 0 .. 78, was 0 .. 63), so every K6 position is ×1.25: 0 .. ~4.9 cycles per full luma (was 3.9). The etch partials gained a bit (11 bits) and the sum p4_e is 15 bits (255 × 78 < 2^15); only its low 12 bits (the phase, cyclic by design) are added, as before. Latency unchanged.
+- The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.1.3).
+- Build (router1, 2026-11-15): **HD Analog and SD Analog seed 2** (seed 1 stalled router1, as SD Analog did once on v0.1.0; dupin: no CARRY I0 == I1), the rest seed 1; HD worst 89.60 MHz (HD Analog 89.60, HD HDMI 93.62, HD Dual 95.98); 7,096 / 7,680 LC max.

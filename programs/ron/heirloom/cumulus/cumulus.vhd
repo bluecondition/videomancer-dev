@@ -39,6 +39,7 @@
 -- a palette ROM).  Virtual 1080-line coordinates (SD shows the centre 4:3).  Generated avid; output
 -- conditioning (Y, U and V through one [1 2 2 2 2 2 2 2 1]/16 box, its 8-back tap in a block-RAM ring, with the
 -- running-sum resync; luma 13/16) before the blanking gate.  Colours in the hardware convention (u = Cr).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -167,7 +168,7 @@ architecture cumulus of program_top is
     signal c_G     : unsigned(9 downto 0) := to_unsigned(256, 10);         -- Billow gain, Q8
     signal c_O     : signed(9 downto 0) := (others => '0');                -- Billow offset (hq)
     signal c_S     : signed(10 downto 0) := to_signed(255, 11);            -- Scallop, Q8
-    signal c_ge    : unsigned(9 downto 0) := to_unsigned(144, 10);         -- Etch gain
+    signal c_ge    : unsigned(10 downto 0) := to_unsigned(180, 11);        -- Etch gain (x1.25: 0 .. 1277)
     signal c_rstep : unsigned(15 downto 0) := to_unsigned(5041, 16);       -- ripple phase per line
     signal c_cx0   : unsigned(15 downto 0) := (others => '0');             -- comb phase at pixel 0 (x0h * 205)
     signal c_rx0   : unsigned(15 downto 0) := (others => '0');             -- ripple phase at pixel 0 (x0h * 30)
@@ -267,8 +268,8 @@ architecture cumulus of program_top is
 
     -- pixel path
     signal p3_lm  : unsigned(7 downto 0) := (others => '0');
-    signal p4_ea, p4_eb : unsigned(13 downto 0) := (others => '0');
-    signal p5_le, p6_le, p7_le, p8_le : unsigned(17 downto 0) := (others => '0');
+    signal p4_ea, p4_eb : unsigned(14 downto 0) := (others => '0');
+    signal p5_le, p6_le, p7_le, p8_le : unsigned(18 downto 0) := (others => '0');   -- 255 x 1277 < 2^19
     signal p6_hq  : unsigned(9 downto 0) := (others => '0');
     signal p7_a1, p7_a2, p7_ab : unsigned(12 downto 0) := (others => '0');
     signal p7_hs  : signed(10 downto 0) := (others => '0');
@@ -280,8 +281,8 @@ architecture cumulus of program_top is
     signal p9_lv  : signed(13 downto 0) := (others => '0');
     signal p9_sp  : signed(21 downto 0) := (others => '0');
     signal p9_t2  : unsigned(11 downto 0) := (others => '0');
-    signal p9_eb  : unsigned(10 downto 0) := (others => '0');
-    signal p9_ez  : unsigned(8 downto 0) := (others => '0');
+    signal p9_eb  : unsigned(11 downto 0) := (others => '0');
+    signal p9_ez  : unsigned(9 downto 0) := (others => '0');
     signal p10_dd : signed(14 downto 0) := (others => '0');
     signal p10_lv : unsigned(5 downto 0) := (others => '0');
     signal p10_k0, p10_k1, p10_k2 : unsigned(13 downto 0) := (others => '0');
@@ -588,7 +589,7 @@ begin
                     when 290 =>
                         if z_n3 = '1' then c_S <= -signed(resize(f_acc(17 downto 8), 11));
                         else c_S <= signed(resize(f_acc(17 downto 8), 11)); end if;
-                    when 314 => c_ge <= f_acc(19 downto 10);
+                    when 314 => c_ge <= resize(f_acc(19 downto 10), 11) + resize(f_acc(19 downto 12), 11);   -- g + g / 4
                     when 338 => c_rstep <= f_acc(23 downto 8);
                     when 362 => c_cx0 <= f_acc(15 downto 0);
                     when 386 => c_rx0 <= f_acc(15 downto 0);
@@ -910,7 +911,7 @@ begin
             p4_ea <= p3_lm(3 downto 0) * c_ge;
             p4_eb <= p3_lm(7 downto 4) * c_ge;
             -- 5: luma x etch
-            p5_le <= resize(p4_ea, 18) + shift_left(resize(p4_eb, 18), 4);
+            p5_le <= resize(p4_ea, 19) + shift_left(resize(p4_eb, 19), 4);
             -- 6: fold the tile phase into hq; comb pattern, ripple level
             if b_ph(23) = '1' then v_hq := not b_ph(22 downto 13); else v_hq := b_ph(22 downto 13); end if;
             p6_hq <= v_hq;
@@ -943,8 +944,8 @@ begin
             if p8_g < 0 then p9_lv <= (others => '0'); end if;
             p9_sp <= resize(p8_s0, 22) + shift_left(resize(p8_s1, 22), 4) + shift_left(resize(p8_s2, 22), 8);
             p9_t2 <= unsigned(r_t2_q);
-            p9_eb <= p8_le(17 downto 7);
-            p9_ez <= p8_le(17 downto 9);
+            p9_eb <= p8_le(18 downto 7);
+            p9_ez <= p8_le(18 downto 9);
             q_cr(9) <= q_cr(8);
             -- 10: d + luma, level clamp, spike ROM address, K x t^2 partials, Yz + luma
             p10_dd <= resize(p9_d, 15) + signed(resize(p9_eb, 15));

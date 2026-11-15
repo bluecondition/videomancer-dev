@@ -166,3 +166,11 @@ Bow Tie (Mirror); Lens Eyes (Tri); Reef; Reversed (K2 40); Fast Tide (K3 700, K4
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **Bend type**: K6 Warp adds camera luma × gain to the VCO phase (the scales bend) and 1.5× the same amount opens the cyan key; both reshape the drawing, the picture itself is never shown.
+- The per-field warp gain (warp² × 360 >> 17) is now g + g / 4 (c_gw: 0 .. 3,592, was 0 .. 2,874, still 12 bits), so every K6 position is ×1.25: 0 .. 1.5 cycles at white (was 1.2).
+- The luma × warp term p5_lw widened 25 → 26 bits and the key term p6_lk 14 → 15 bits, so the key opening never wraps: in Osc mode (twice the depth) 223 × 2,874 << 6 already exceeded 2^25 at the old top (Video mode stays under it: 239 × 3,592 << 5). The phase add uses the low 25 bits of p5_lw (whole cycles, cyclic by design). Side effect: the Osc picture at high Warp no longer shows that wrapped key (it opens further instead). Latency unchanged.
+- The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.1.2).
+- Build (router1, 2026-11-15): **HD HDMI seed 2** (seed 1 stalled router1), the rest seed 1; HD worst 78.11 MHz (HD Analog 78.11, HD HDMI 89.90, HD Dual 80.03); 6,947 / 7,680 LC max.

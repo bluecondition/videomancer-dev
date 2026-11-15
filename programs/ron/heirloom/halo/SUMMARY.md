@@ -200,3 +200,10 @@ bpal3.py, glowfit.py, proto4.py, imodel.py).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 153 -> 512 (v0.6.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **Bend type**: K6 Warp adds the source (camera luma or the Osc) to the contour field and dents the rings, so the drawing bends; the picture itself is never shown.
+- The per-field warp gain is now k_warp0 + k_warp0 / 4 (k_warp0 = the old 2 (K6 / 16) − 9, held one clock in a new register), 9 bits: −12 .. 146 (was −9 .. 117), so every K6 position is ×1.25: −19 .. 231 % (was −15 .. 185 %). The old photo setting (K6 153) now gives warp 11 instead of 9. The ring (E2) warp term p3_ew / p_ew widened 10 → 11 bits and its × 64 operand 16 → 17 bits (|32 × 146| / 8 = 584, × 64 = 37,376 would have overflowed 16 bits); the contour term (≤ 182) still fits its 9 bits. Latency unchanged.
+- The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.6.2).
+- Build (router1, 2026-11-15): all six seed 1; HD worst 88.98 MHz (HD Analog 88.98, HD HDMI 90.36, HD Dual 93.52); 7,127 / 7,680 LC max. (Router1 closed every config on seed 1 here, where v0.6.0 used router2 with HD HDMI on seed 3.)

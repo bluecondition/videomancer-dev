@@ -42,6 +42,7 @@
 -- knot tables with exact DDAs.  Generated avid; output conditioning (Y, U, V through two
 -- [1 2 2 2 2 2 2 2 1]/16 boxes, luma 13/16) before the blanking gate.  Colours in the hardware
 -- convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -196,7 +197,7 @@ architecture wildfire of program_top is
     signal c_aw273 : signed(15 downto 0) := (others => '0');
     signal c_lake : signed(10 downto 0) := (others => '0');            -- lake shift (virtual lines, + = down)
     signal c_thr  : signed(9 downto 0) := to_signed(-114, 10);         -- colouriser threshold (1/127 F)
-    signal c_etq  : unsigned(5 downto 0) := to_unsigned(10, 6);        -- etch gain
+    signal c_etq  : unsigned(6 downto 0) := to_unsigned(12, 7);        -- etch gain, x 1.25 (0 .. 78)
     signal c_sv, c_sh, c_sw, c_sp : signed(15 downto 0) := (others => '0');   -- flow steps per field
     signal c_dv, c_dh, c_dw, c_dp : unsigned(15 downto 0) := (others => '0'); -- flow accumulators (Q12)
     signal c_wx0  : unsigned(19 downto 0) := (others => '0');          -- W phase at x0 (SD)
@@ -310,8 +311,8 @@ architecture wildfire of program_top is
     -- pixel path
     signal p2_v, p2_h : unsigned(11 downto 0) := (others => '0');
     signal p2_w : unsigned(8 downto 0) := (others => '0');
-    signal p3_ea, p3_eb : unsigned(9 downto 0) := (others => '0');
-    signal p4_e   : unsigned(13 downto 0) := (others => '0');
+    signal p3_ea, p3_eb : unsigned(10 downto 0) := (others => '0');
+    signal p4_e   : unsigned(14 downto 0) := (others => '0');   -- 255 x 78 < 2^15 (only the low 12 bits, the phase, are used)
     signal p7_cv, p7_ch, p7_cw : signed(7 downto 0) := (others => '0');
     signal p8_pa  : signed(12 downto 0) := (others => '0');
     signal p8_pb  : signed(11 downto 0) := (others => '0');
@@ -703,7 +704,7 @@ begin
                         c_lake <= resize(shift_right(v_s * 3, 2), 11) + signed(resize(c_lu, 11));
                         c_thr <= -114 + resize(shift_right(signed(resize(s_g5(12 downto 3), 11)) - 512, 2), 10)
                                  + signed(resize(unsigned(m_p(18 downto 12)), 10));
-                        c_etq <= s_g6(12 downto 7);
+                        c_etq <= resize(s_g6(12 downto 7), 7) + resize(s_g6(12 downto 9), 7);   -- g + g / 4
                     when 39 =>
                         c_awq <= unsigned(m_p(16 downto 10));
                     when 40 =>
@@ -1136,9 +1137,9 @@ begin
             rg_ra <= rg_wa - 3;                          -- written from stage 2, rg_r read at stage 9 (label p11)
             rg_r  <= rg_q;
             -- 1: etch partials (the luma of the stage-1 pixel is in s_lb_q); 2: etch
-            p3_ea <= resize(unsigned(s_lb_q(3 downto 0)) * c_etq, 10);
-            p3_eb <= resize(unsigned(s_lb_q(7 downto 4)) * c_etq, 10);
-            p4_e <= resize(p3_ea, 14) + shift_left(resize(p3_eb, 14), 4);
+            p3_ea <= resize(unsigned(s_lb_q(3 downto 0)) * c_etq, 11);
+            p3_eb <= resize(unsigned(s_lb_q(7 downto 4)) * c_etq, 11);
+            p4_e <= resize(p3_ea, 15) + shift_left(resize(p3_eb, 15), 4);
             -- 3: cosine addresses
             v_u := p2_v + p4_e(11 downto 0);
             r_cv_a <= v_u(11 downto 3);

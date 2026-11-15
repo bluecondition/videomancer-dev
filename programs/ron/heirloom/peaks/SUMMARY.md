@@ -194,3 +194,10 @@ Presets: Clip, Glassy Dusk (Tears off, Storm 0), Mirror Lake, Four Moons (Four +
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K4 (Picture), so K4 and K6 swapped: **K6 = Picture** (the camera strength, default now 512 = 50 %), **K4 = Tint** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.1.1, rebuilt with router1: HD Dual seed 2; HD worst 81.26 MHz (HD Analog 84.03, HD HDMI 81.26, HD Dual 83.89), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh peaks`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **Bend type**: K6 Picture sets how far the camera (or the Osc) displaces the oscillators' phases, so the drawing moves; the picture is never shown directly.
+- The per-field displacement depth is now c_dep + c_dep / 4 (sequencer slot result at zc 386, saturated at 8191; the largest value reached is ~6,500 at K1 = K6 = 100 %), so every K6 position is ×1.25: 0 .. ~375 px per full luma (was 0 .. 300). The phase add in the pixel path wraps by whole cycles, as before. Pixel path and latency unchanged.
+- The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.1.2).
+- Build (router1, 2026-11-15): all six seed 1; HD worst 80.61 MHz (HD Analog 82.77, HD HDMI 80.61, HD Dual 84.28); 7,049 / 7,680 LC max.

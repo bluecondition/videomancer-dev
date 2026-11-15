@@ -201,3 +201,10 @@ and the kymographs (the motion); `proto2.py` (float proto), `imodel.py` (integer
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **Bend type**: K6 Camera bends the contours (luma × gain added to F) and pushes the bat's edges out over bright areas; both move the drawing, neither shows the picture.
+- The per-field camera gain is now g + g / 4 (c_cg widened 6 → 7 bits: 0 .. 78, was 0 .. 63, Q4 per luma step), so every K6 position is ×1.25: 0 .. ~4.9 bands per full luma (was 3.9). It feeds both the contour bend and the bat push, as before. Worst case |luma × gain| = 270 × 78 = 21,060 still fits the 16-bit product, the 12-bit camera term (1,316) and the 14-bit F sum. Latency unchanged.
+- The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.1.2).
+- Build (router1, 2026-11-15): all six seed 1; HD worst 77.33 MHz (HD Analog 82.60, HD HDMI 77.33, HD Dual 83.77); 6,986 / 7,680 LC max.

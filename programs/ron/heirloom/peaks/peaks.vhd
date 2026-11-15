@@ -46,6 +46,7 @@
 -- the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Picture (camera strength, was K4), K4 = Tint (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -384,6 +385,7 @@ begin
         variable v_e  : signed(11 downto 0);
         variable v_p  : unsigned(19 downto 0);
         variable v_tr : unsigned(6 downto 0);
+        variable v_dp : unsigned(13 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -628,7 +630,9 @@ begin
                     when 314 => c_lwv <= f_acc(33 downto 14); c_lwn <= z_k3n;
                     when 338 => z_a <= f_acc(19 downto 0);                       -- k4^2
                     when 362 => z_a <= f_acc(35 downto 16);                      -- k4^2 fb / 2^20
-                    when 386 => c_dep <= f_acc(24 downto 12);                    -- x 602 / 4096 (Q20)
+                    when 386 =>                                                  -- x 602 / 4096 (Q20), x 1.25 (K6 top +25 %)
+                        v_dp := resize(f_acc(24 downto 12), 14) + resize(f_acc(24 downto 14), 14);
+                        if v_dp(13) = '1' then c_dep <= (others => '1'); else c_dep <= v_dp(12 downto 0); end if;
                     when 410 => c_hw0 <= -signed(resize(f_acc(17 downto 0), 19));
                     when 434 =>
                         if z_k6n = '1' then c_tcb <= f_acc(18 downto 11); c_tcr <= (others => '0');

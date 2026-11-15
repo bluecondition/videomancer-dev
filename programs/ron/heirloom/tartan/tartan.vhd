@@ -37,6 +37,7 @@
 -- coordinates (SD shows the centre 4:3).  Generated avid; output conditioning (Y/U/V
 -- [1 2 .. 2 1]/32 at 1080, /16 at 720p and SD; luma 13/16) before the blanking gate.  Colours in
 -- the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -139,7 +140,7 @@ architecture tartan of program_top is
     signal c_ast   : unsigned(11 downto 0) := to_unsigned(512, 12);
     signal c_b20   : unsigned(15 downto 0) := to_unsigned(11888, 16);
     signal c_c20   : unsigned(20 downto 0) := to_unsigned(969108, 21);
-    signal c_cb    : unsigned(9 downto 0) := (others => '0');
+    signal c_cb    : unsigned(10 downto 0) := (others => '0');   -- Bend gain, x 1.25 (0 .. 1050)
     signal c_sp    : unsigned(19 downto 0) := (others => '0');
     signal c_rs    : unsigned(11 downto 0) := (others => '0');
     signal c_rr    : unsigned(15 downto 0) := (others => '0');
@@ -210,11 +211,11 @@ architecture tartan of program_top is
     signal p1_dot : std_logic := '0';
     signal p2_sel : unsigned(20 downto 0) := (others => '0');
     signal p2_dd  : unsigned(7 downto 0) := (others => '0');
-    signal p2_q0, p2_q1 : unsigned(13 downto 0) := (others => '0');
+    signal p2_q0, p2_q1 : unsigned(14 downto 0) := (others => '0');
     signal p2_bn  : std_logic := '0';
     signal p3_u   : unsigned(20 downto 0) := (others => '0');
     signal p3_cu  : unsigned(15 downto 0) := (others => '0');
-    signal p3_b   : unsigned(17 downto 0) := (others => '0');
+    signal p3_b   : unsigned(18 downto 0) := (others => '0');   -- 255 x 1050 < 2^19
     signal p3_bn  : std_logic := '0';
     signal p4_u   : unsigned(20 downto 0) := (others => '0');
     signal p4_b   : unsigned(20 downto 0) := (others => '0');
@@ -416,7 +417,7 @@ begin
                     when 242 => c_b20 <= to_unsigned(2913, 16) + resize(f_acc(35 downto 20), 16);
                     when 266 => c_c20 <= f_acc(20 downto 0);
                     when 290 => c_sq  <= f_acc(19 downto 0);
-                    when 314 => c_cb  <= f_acc(29 downto 20);
+                    when 314 => c_cb  <= resize(f_acc(29 downto 20), 11) + resize(f_acc(29 downto 22), 11);   -- K6 top +25 %
                     when 338 => c_sp  <= f_acc(19 downto 0);
                     when 362 => if s_vstill = '1' then c_rs <= (others => '0'); else c_rs <= f_acc(27 downto 16); end if;
                     when 386 => if s_vstill = '1' then c_rr <= (others => '0'); else c_rr <= f_acc(31 downto 16); end if;
@@ -668,7 +669,7 @@ begin
             -- 3: u = A + line term; curl product; bend sum
             p3_u <= p2_sel + l_l9;
             p3_cu <= p2_dd * p2_dd;
-            p3_b <= resize(p2_q0, 18) + shift_left(resize(p2_q1, 18), 4);
+            p3_b <= resize(p2_q0, 19) + shift_left(resize(p2_q1, 19), 4);
             p3_bn <= p2_bn;
 
             -- 4: + curl; bend sign

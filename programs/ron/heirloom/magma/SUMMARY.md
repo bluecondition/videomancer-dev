@@ -172,3 +172,11 @@ Working files: `.heirloom_work/rb_magma/` (`notes.txt` has every number).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Sky** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 83.17 MHz (HD Analog 85.34, HD HDMI 86.93, HD Dual 83.17), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh magma`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **Bend type**: K6 Melt adds camera luma × gain to the band phase and the lava field, so the bands bend and the lava swells; the picture itself is never shown.
+- The field-latched Melt gain is now (K6 + K6 / 4) / 32: f_m5 widened 5 → 6 bits (0 .. 39, was 0 .. 31), so every K6 position is ×1.25 (×1.26 at the top). The melt product is resized to its 16-bit register (|258 × 39| = 10,062 fits); the melt term (≤ 157) and the band / lava sums keep their headroom. Latency unchanged.
+- The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.5.3).
+- Build (router1, 2026-11-15): all six seed 1; HD worst 84.30 MHz (HD Analog 85.52, HD HDMI 84.30, HD Dual 89.90); 7,156 / 7,680 LC max.
+- The diag copy (.heirloom_work/rb_magma/diag/magma_diag/) got the same change on its own Melt curve (see its SUMMARY).

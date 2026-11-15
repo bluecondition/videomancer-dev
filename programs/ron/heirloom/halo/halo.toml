@@ -7,7 +7,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.halo"
 program_name = "Halo"
-program_version = "0.6.1"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -71,9 +71,9 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_6"
 name_label = "Warp"
 control_mode = "linear"
-display_min_value = -15
-display_max_value = 185
-initial_value = 512
+display_min_value = -19
+display_max_value = 231
+initial_value = 1023
 display_float_digits = 0
 suffix_label = "%"
 

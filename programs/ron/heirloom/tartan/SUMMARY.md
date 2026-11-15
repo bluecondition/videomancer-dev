@@ -172,3 +172,11 @@ down.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 341 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **Bend type**: K6 Bend adds camera (or Osc lattice) luma × gain to the A-frame coordinate u, so the stripes bend; the picture itself is never shown.
+- The per-field Bend gain (K6² × 842 >> 20) is now g + g / 4: c_cb widened 10 → 11 bits (0 .. 1,050, was 0 .. 840), so every K6 position is ×1.25: 0 .. 450 px per full luma (was 360). The bend partials gained a bit (15 bits) and the bend sum p3_b is 19 bits (255 × 1,050 < 2^19); u stays its cyclic 21-bit coordinate. Latency unchanged.
+- The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.5.3).
+- Build (router1, 2026-11-15): all six seed 1; HD worst 85.65 MHz (HD Analog 85.65, HD HDMI 88.46, HD Dual 86.74); 5,764 / 7,680 LC max.
+- The diag copy (.heirloom_work/rb_tartan/diag/tartan_diag/) got the identical change (see its SUMMARY).
