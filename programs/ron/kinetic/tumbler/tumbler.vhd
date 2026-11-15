@@ -44,6 +44,7 @@
 --   [F] output conditioning: luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1] with resync, luma 13/16, blanking gate
 -- One latency (C_LAT = 30) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 520 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -56,6 +57,7 @@ use work.tumbler_pkg.all;
 use work.all;
 
 architecture tumbler of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(520, 10));   -- K6 camera pass: fixed knob
     constant C_LAT      : integer := 30;      -- = processing_delay_clks
     constant C_NF       : integer := 20;      -- s_gav_sr index read by the final colour stage (23)
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
@@ -208,6 +210,11 @@ architecture tumbler of program_top is
     signal z_gp  : std_logic_vector(1 downto 0) := "00";
     signal z_gc  : unsigned(2 downto 0) := (others => '0');
     signal z_grun : std_logic := '0';
+    -- K6 Camera: knob (deadband +-4), glided gain k/256 in Q3 (k = 256: the shipped 1x; 512: 2x; 1023: 4x)
+    signal s_kr  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_kt  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_kgd : signed(13 downto 0) := (others => '0');
+    signal s_kg  : unsigned(12 downto 0) := to_unsigned(4096, 13);
 
     -- field serial multiplier (24 iterations), serial shifter, sequencer scratch
     signal f_a, f_acc, z_fa : unsigned(47 downto 0) := (others => '0');
@@ -299,13 +306,19 @@ architecture tumbler of program_top is
     signal q6_asx, q6_asy : unsigned(14 downto 0) := (others => '0');
     signal q5_lin, q6_lin, q7_xa, q7_xb, q8_th : unsigned(13 downto 0) := (others => '0');
     signal q6_cs, q6_fs, q6_cv, q6_fv : unsigned(3 downto 0) := (others => '0');
-    signal q6_src, q7_src : unsigned(7 downto 0) := (others => '0');
+    signal q6_src : unsigned(7 downto 0) := (others => '0');
+    -- K6 Camera: the held source x the glided gain, three stages of gated sums (8 x 10 bits, stages 7 .. 9)
+    -- -> 10 bits (1.0 = 256); the {face, source} ring is written at stage 9 (it was 7)
+    signal m7_p0, m7_p1, m7_p2, m7_p3 : unsigned(11 downto 0) := (others => '0');
+    signal m8_a, m8_b : unsigned(13 downto 0) := (others => '0');
+    signal q9_src : unsigned(9 downto 0) := (others => '0');
+    signal q8_face, q9_face : unsigned(1 downto 0) := "00";
     signal q7_wt  : unsigned(4 downto 0) := (others => '0');
     signal s_neg  : std_logic_vector(9 to 14) := (others => '0');
     signal q11_w  : unsigned(9 downto 0) := (others => '0');
     signal q12_p0, q12_p1, q12_p2, q12_p3 : unsigned(11 downto 0) := (others => '0');
     signal q13_qa, q13_qb : unsigned(13 downto 0) := (others => '0');
-    signal q13_fs : std_logic_vector(9 downto 0) := (others => '0');
+    signal q13_fs : std_logic_vector(11 downto 0) := (others => '0');
     signal q14_aw : unsigned(14 downto 0) := (others => '0');
     signal q14_st, q15_psi : unsigned(13 downto 0) := (others => '0');
 
@@ -369,7 +382,7 @@ begin
     p_ring : process(clk)
     begin
         if rising_edge(clk) then
-            fr(to_integer(rc + 4)) <= "000000" & std_logic_vector(q7_face) & std_logic_vector(q7_src);
+            fr(to_integer(rc + 2)) <= "0000" & std_logic_vector(q9_face) & std_logic_vector(q9_src);   -- stage 9 -> 13
             fr_q <= fr(to_integer(rc));
             wr(to_integer(rc + 12)) <= "00000000000" & std_logic_vector(q7_wt);
             wr_q <= wr(to_integer(rc));
@@ -454,8 +467,8 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9); s_sd <= '0';
                 end case;
                 -- Colour: 16 palettes with hysteresis
-                v_d := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(s_pal & "100000", 11));
-                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(5)(9 downto 6)); end if;
+                v_d := signed(resize(unsigned(registers_in(4)), 11)) - signed(resize(s_pal & "100000", 11));
+                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(4)(9 downto 6)); end if;
             end if;
             g_wm1 <= s_w - 1;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
@@ -506,7 +519,7 @@ begin
                     when 2  => z_fa(9 downto 0)  <= c_m8;                 z_fb <= to_unsigned(540, 24);       -- v at the top line
                     when 3  => z_fa(12 downto 0) <= s_gp;                 z_fb <= resize(s_gp, 24);           -- flip^2
                     when 4  =>                                                                                -- spread^2
-                        z_fa(12 downto 3) <= unsigned(registers_in(4)); z_fb(12 downto 3) <= unsigned(registers_in(4));
+                        z_fa(12 downto 3) <= unsigned(C_KFIX_5); z_fb(12 downto 3) <= unsigned(C_KFIX_5);
                     when 5  => z_fa(16 downto 0) <= c_p;                  z_fb <= resize(unsigned(registers_in(2)), 24);  -- inset
                     when 6  => z_fa(9 downto 0)  <= c_in3;                z_fb <= resize(c_sig, 24);          -- inset, slanted units
                     when 7  => z_fa(6 downto 0)  <= c_hw3;                z_fb <= resize(c_sig, 24);          -- line, slanted units
@@ -581,6 +594,17 @@ begin
                         r_pl_a <= "00" & s_pal & "11";
                     when 34 =>
                         c_cy <= unsigned(r_pl_q(31 downto 22)); c_cc(1) <= unsigned(r_pl_q(21 downto 14)); c_cc(2) <= unsigned(r_pl_q(11 downto 4));
+                    -- K6 Camera: knob with a +-4 deadband (ends snap to 0 / 1023), then ease 1/8 of the gap
+                    when 40 => s_kr <= unsigned(registers_in(5));
+                    when 41 =>
+                        v_d := signed(resize(s_kr, 11)) - signed(resize(s_kt, 11));
+                        if s_kr < 4 then s_kt <= (others => '0');
+                        elsif s_kr > 1019 then s_kt <= (others => '1');
+                        elsif v_d > 4 or v_d < -4 then s_kt <= s_kr; end if;
+                    when 42 => s_kgd <= signed(resize(s_kt & "000", 14)) - signed(resize(s_kg, 14));
+                    when 43 =>
+                        if C_SIM_SNAP or (s_kgd < 8 and s_kgd > -8) then s_kg <= s_kt & "000";
+                        else s_kg <= unsigned(signed(s_kg) + resize(shift_right(s_kgd, 3), 13)); end if;
                     when 36 =>                       -- the line colour: black hairline, or the accent
                         if s_edge = '1' then c_ky <= c_cy; c_kc <= c_cc;
                         else c_ky <= to_unsigned(64, 10); c_kc <= (others => to_unsigned(128, 8)); end if;
@@ -858,6 +882,7 @@ begin
         variable v_pos : unsigned(11 downto 0);
         variable v_p   : unsigned(17 downto 0);
         variable v_st  : unsigned(13 downto 0);
+        variable v_m18 : unsigned(17 downto 0);
         variable v_al  : signed(15 downto 0);
         variable v_py  : signed(14 downto 0);
         variable v_pc  : signed(12 downto 0);
@@ -953,7 +978,18 @@ begin
             v_lw := v_cl & '0';
             v_fw := resize(v_cf(3 downto 1), 5) + resize(v_cf(3 downto 2), 5);
             if v_lw > v_fw then q7_wt <= v_lw; else q7_wt <= v_fw; end if;
-            q7_face <= q6_face; q7_src <= q6_src;
+            q7_face <= q6_face;
+            -- 7 .. 9: K6 Camera: held source x the glided gain (k / 256)
+            m7_p0 <= f_gu(s_kg(12 downto 3), q6_src(0), 12) + shift_left(f_gu(s_kg(12 downto 3), q6_src(1), 12), 1);
+            m7_p1 <= f_gu(s_kg(12 downto 3), q6_src(2), 12) + shift_left(f_gu(s_kg(12 downto 3), q6_src(3), 12), 1);
+            m7_p2 <= f_gu(s_kg(12 downto 3), q6_src(4), 12) + shift_left(f_gu(s_kg(12 downto 3), q6_src(5), 12), 1);
+            m7_p3 <= f_gu(s_kg(12 downto 3), q6_src(6), 12) + shift_left(f_gu(s_kg(12 downto 3), q6_src(7), 12), 1);
+            m8_a <= resize(m7_p0, 14) + shift_left(resize(m7_p1, 14), 2);
+            m8_b <= resize(m7_p2, 14) + shift_left(resize(m7_p3, 14), 2);
+            q8_face <= q7_face;
+            v_m18 := resize(m8_a, 18) + shift_left(resize(m8_b, 18), 4);
+            q9_src <= v_m18(17 downto 8);
+            q9_face <= q8_face;
             -- index: column + row / 2 (Linear) or octagonal max + min / 2 (Radial), less the phase
             if s_rad = '0' then
                 v_sel := q6_lin; q7_xb <= (others => '0');
@@ -982,13 +1018,14 @@ begin
             q12_p3 <= f_gu(q11_w, c_d(6), 12) + shift_left(f_gu(q11_w, c_d(7), 12), 1);
             q13_qa <= resize(q12_p0, 14) + shift_left(resize(q12_p1, 14), 2);
             q13_qb <= resize(q12_p2, 14) + shift_left(resize(q12_p3, 14), 2);
-            q13_fs <= fr_q(9 downto 0);
+            q13_fs <= fr_q(11 downto 0);
             v_p := resize(q13_qa, 18) + shift_left(resize(q13_qb, 18), 4);
             q14_aw <= v_p(17 downto 3);
             -- 14: source term (Video x48: white = 0.64 turn; Osc x96) + the face's third of a turn
-            v_st := shift_left(resize(unsigned(q13_fs(7 downto 0)), 14), 5) + shift_left(resize(unsigned(q13_fs(7 downto 0)), 14), 4);
+            -- (the held source is 10 bits since the K6 camera gain: 256 = the shipped 1x; psi wraps mod a turn)
+            v_st := shift_left(resize(unsigned(q13_fs(9 downto 0)), 14), 5) + shift_left(resize(unsigned(q13_fs(9 downto 0)), 14), 4);
             if s_src = '1' then v_st := v_st(12 downto 0) & '0'; end if;
-            case q13_fs(9 downto 8) is
+            case q13_fs(11 downto 10) is
                 when "01"   => q14_st <= v_st + 5461;
                 when "10"   => q14_st <= v_st + 10922;
                 when others => q14_st <= v_st;

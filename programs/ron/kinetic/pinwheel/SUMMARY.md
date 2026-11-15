@@ -33,8 +33,8 @@ round as a wave of rotation crosses the field on the diagonal.
 | K2 | Shape | blade pairs: 2, 3, 4, 5, 6, 8, 10, 12 (eight steps with hysteresis; default 4) |
 | K3 | Depth | rotation swing 0 .. 1.25 turns, square law (default a quarter turn; near the top the rotors spin right round and back) |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
-| K5 | Spread | phase step per cell 0 .. 1/2 cycle, square law (0 = all in unison; top = neighbours in antiphase) |
-| K6 | Colour | the 16 shared palettes with hysteresis: ground, A and B = blades, accent = hub and marker blade |
+| K5 | Colour | the 16 shared palettes with hysteresis: ground, A and B = blades, accent = hub and marker blade (was K6 until v0.1.1) |
+| K6 | Camera | camera strength 0 .. 100 %, default 50 %: gain k / 256 on the held source (0 = as with a black input, 25 % = the v0.1.0 strength, 50 % = twice it, 100 % = four times); scales Osc too. Spread (K5 until v0.1.1) is fixed at 409 (0.08 cycle per cell) |
 | S7 | Wave | Smooth / Snap (rotors dwell and flip) |
 | S8 | Field | Linear (diagonal wave) / Radial (octagonal ripple from the centre) |
 | S9 | Hand | Alternate (neighbours are mirror images) / Same (every rotor winds and turns the same way) |
@@ -82,6 +82,36 @@ Chassis sections lifted from louver.vhd, marked [A] .. [F] in pinwheel.vhd.
   twist's radial gradient takes over, so tight spirals stay soft instead of aliasing.
 - Generated avid (parity-locked start), virtual 1080-line coordinates from the timing ID, colours in the
   hardware convention (U register = Cr), luma 10 bits and chroma 8 bits up to the output filter.
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. K6 is now **Camera**, the camera strength (Ron's rule for the Heirloom / Kinetic / Patchbay sets).
+
+- What it does: K6 scales the per-cell source value (smeared luma, or the Osc lattice) before it is held, so it
+  scales both things the source drives: the extra rotation (10 x source, 13 bits per turn) and the disc swell
+  (75 % + 25 % x source, clamped at the full disc). Source = Osc keeps its 2x on top.
+- Gain law: linear, gain = k / 256 (k = the knob, 0 .. 1023). Decoded per field in the vblank sequencer (zone
+  clocks 96 .. 99): the knob is latched with a +-4 deadband (the ends snap to 0 / 1023), then the gain eases 1/8
+  of the gap per field. Applied with one 8 x 10 gated-sum multiply over three stages on the smeared sample just
+  before it is written into the hold RAM (now 10-bit values; the write lands 3 px later, invisible against the
+  64 px smear). The rotation term wraps modulo a turn; the radius index clamps at 255.
+  - 0 % = gain 0: the picture is bit-identical to a black input (checked in GHDL: 0 differing pixels);
+  - 25 % (256) = 1x, the v0.1.0 strength;
+  - 50 % (512, default) = 2x: mid-grey and brighter cells reach the full disc, the rotation offset doubles
+    (white = 0.53 turn); still clean, rigid rotors;
+  - 100 % (1023) = 4x: nearly every lit cell is a full disc and the markers fan through up to 1.1 turns;
+    the camera shows as rotation. No washout (the palette is untouched).
+- Frozen: K5 Spread at 409 (its default: 0.08 cycle per cell). Spread was the weakest knob on the control
+  sheet (min / default / max look alike in a still; Rate, the only speed control, was not touchable).
+- K6's old function (Colour, all 16 palettes) moved to K5 with its hysteresis. Presets: Colour values moved
+  to K5; the Spread values of Quilt (0), Flip Dots (600) and Spiral Field (250) are gone, so those presets
+  now run at Spread 0.08 (Quilt's square blocks no longer move in unison).
+- Renders: `.kinetic_work/rb_pinwheel/k6sheet.png` (selfie, 720p60 at decimation 2: K6 0 / 256 / 512 / 1023
+  and Source = Osc at 512).
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic pinwheel`): router1, every config on seed 1.
+  Post-route Fmax HD Analog 90.84, HD HDMI 84.29 (worst HD), HD Dual 84.60, SD Analog 84.20, SD HDMI 83.51,
+  SD Dual 86.66 MHz; 6,948 / 7,680 LC (90.5 %, was 6,616), 23 / 32 EBR. vmprog:
+  out/rev_b/ron/kinetic/pinwheel.vmprog (v0.1.1; this supersedes the v0.1.0 builds under Status). Not flashed.
 
 ## Status
 

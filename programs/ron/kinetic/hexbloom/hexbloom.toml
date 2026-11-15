@@ -6,7 +6,7 @@
 processing_delay_clks = 40
 program_id = "com.czartroniks.hexbloom"
 program_name = "Hexbloom"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -58,19 +58,19 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Spread"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 560
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Colour"
 value_labels = ["Ink", "Paper", "Bauhaus", "Vega", "Outrun", "Ultra", "Ocean", "Ice", "Moss", "Citrus", "Terra", "Ember", "Gold", "Candy", "Mint", "Plum"]
 initial_value_label = "Vega"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -120,8 +120,7 @@ name = "Star Field"
 rotary_potentiometer_1 = 760
 rotary_potentiometer_2 = 0
 rotary_potentiometer_3 = 520
-rotary_potentiometer_5 = 420
-rotary_potentiometer_6 = 288
+rotary_potentiometer_5 = 288
 toggle_switch_8 = 1
 linear_potentiometer_12 = 600
 
@@ -130,8 +129,7 @@ name = "Flip Tiles"
 rotary_potentiometer_1 = 560
 rotary_potentiometer_3 = 362
 rotary_potentiometer_4 = 800
-rotary_potentiometer_5 = 640
-rotary_potentiometer_6 = 160
+rotary_potentiometer_5 = 160
 toggle_switch_7 = 1
 linear_potentiometer_12 = 0
 
@@ -139,8 +137,7 @@ linear_potentiometer_12 = 0
 name = "Wire Nests"
 rotary_potentiometer_1 = 820
 rotary_potentiometer_3 = 700
-rotary_potentiometer_5 = 300
-rotary_potentiometer_6 = 32
+rotary_potentiometer_5 = 32
 toggle_switch_9 = 1
 toggle_switch_10 = 1
 linear_potentiometer_12 = 700
@@ -151,8 +148,7 @@ rotary_potentiometer_1 = 600
 rotary_potentiometer_2 = 1023
 rotary_potentiometer_3 = 600
 rotary_potentiometer_4 = 300
-rotary_potentiometer_5 = 500
-rotary_potentiometer_6 = 608
+rotary_potentiometer_5 = 608
 linear_potentiometer_12 = 560
 
 [[preset]]
@@ -160,7 +156,6 @@ name = "Full Bloom"
 rotary_potentiometer_1 = 900
 rotary_potentiometer_3 = 900
 rotary_potentiometer_4 = 780
-rotary_potentiometer_5 = 380
-rotary_potentiometer_6 = 480
+rotary_potentiometer_5 = 480
 toggle_switch_8 = 1
 linear_potentiometer_12 = 1023

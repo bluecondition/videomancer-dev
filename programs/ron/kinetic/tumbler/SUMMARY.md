@@ -32,8 +32,8 @@ a lattice diagonal, shading each cube through the blends on its way to the next 
 | K2 | Shape | cube proportion: flat tiles (lattice slope 3) .. tall blocks (1.125); default 69 % = regular hexagons |
 | K3 | Inset | a framed panel inside every rhombus: frame width 0 .. 0.31 Hc, drawn 6/16 toward the line colour |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
-| K5 | Spread | phase step per column 0 .. 1/2 cycle, square law |
-| K6 | Colour | the 16 shared palettes with hysteresis: ground, A, B = the three face tones; accent = the edge line |
+| K5 | Colour | the 16 shared palettes with hysteresis: ground, A, B = the three face tones; accent = the edge line (was K6 until v0.1.1) |
+| K6 | Camera | camera strength 0 .. 100 %, default 50 %: gain k / 256 on the held luma (0 = as with a black input, 25 % = the v0.1.0 strength, 50 % = twice it, 100 % = four times); scales Osc too. Spread (K5 until v0.1.1) is fixed at 520 (0.13 cycle per column) |
 | S7 | Wave | Smooth / Snap |
 | S8 | Field | Linear (diagonal fronts) / Radial (octagonal rings from the centre cube) |
 | S9 | Edges | Off (black hairline seam, 2 virtual px) / On (accent-colour line, Hc/8 + 3 px wide) |
@@ -79,6 +79,34 @@ Chassis lifted from louver ([A] timing / zone / glides / serial-multiplier seque
 - One latency in every mode: C_LAT = 30 = processing_delay_clks (23 pixel stages + 4 output stages + 4 px of
   filter delay). 16 block RAMs; no RAM reads the address it is writing (no_rw_check on all, 0
   emulate_transparency in the yosys log).
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. K6 is now **Camera**, the camera strength (Ron's rule for the Heirloom / Kinetic / Patchbay sets).
+
+- What it does: K6 scales the per-cube held source (the smeared luma, or the Osc lattice) that turns each
+  cube's light angle psi (48 x source, 14 bits per turn). Source = Osc keeps its 2x on top.
+- Gain law: linear, gain = k / 256 (k = the knob, 0 .. 1023). Decoded per field in the vblank sequencer (zone
+  clocks 40 .. 43): the knob is latched with a +-4 deadband (the ends snap to 0 / 1023), then the gain eases 1/8
+  of the gap per field. Applied with one 8 x 10 gated-sum multiply over pixel stages 7 .. 9 on the value read
+  from the hold RAM; the {face, source} delay ring is now written at stage 9 (rc + 2 instead of rc + 4) so it
+  still lands at stage 13. Same latency (30); the hold RAM is unchanged; psi wraps modulo a turn.
+  - 0 % = gain 0: exactly what a black input draws (the wave alone);
+  - 25 % (256) = 1x, the v0.1.0 strength (white = 0.64 turn, two tone steps);
+  - 50 % (512, default) = 2x (white = 1.28 turns): the picture spreads over every orientation of the cube;
+    every cube stays rigid and clean;
+  - 100 % (1023) = 4x (white = 2.5 turns): the luma range runs round the colour wheel two and a half times,
+    so the cubes read as a contour map of the picture; in a still it looks orientation-scattered. No washout.
+- Frozen: K5 Spread at 520 (its default: 0.13 cycle per column). Spread was the weakest knob on the control
+  sheet (min / default / max look alike in a still; Rate, the only speed control, was not touchable).
+- K6's old function (Colour, all 16 palettes) moved to K5 with its hysteresis. Presets: Colour values moved
+  to K5; their Spread values (300, 480, 620) are gone, so every preset now runs at Spread 0.13.
+- Renders: `.kinetic_work/rb_tumbler/k6sheet.png` (selfie, 720p60 at decimation 2: K6 0 / 256 / 512 / 1023
+  and Source = Osc at 512).
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic tumbler`): router1, every config on seed 1. Post-route
+  Fmax HD Analog 87.40, HD HDMI 86.74, HD Dual 78.46 (worst HD), SD Analog 85.72, SD HDMI 79.16, SD Dual
+  85.98 MHz; 6,983 / 7,680 LC (90.9 %, was 6,656), 16 / 32 EBR. vmprog: out/rev_b/ron/kinetic/tumbler.vmprog
+  (v0.1.1). Not flashed.
 
 ## Status
 

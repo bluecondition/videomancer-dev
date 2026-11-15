@@ -42,6 +42,7 @@
 -- over pixels j .. j + 8.  s_gav_sr(S - 2) flags pixels 0 .. W - 1 at stage S.  One latency (40) in every
 -- mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 560 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -54,7 +55,9 @@ use work.hexbloom_pkg.all;
 use work.all;
 
 architecture hexbloom of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(560, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 40;   -- = processing_delay_clks
+    constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: the K6 camera glide jumps straight to the knob
 
     -- TOML defaults: the glides start there
     constant C_DEF_K1  : integer := 640;
@@ -102,6 +105,13 @@ architecture hexbloom of program_top is
         v_r := v_a + v_b;
         return v_r(a'length downto 1);
     end function;
+    -- K6 Camera: gated operand for the gain multiply (a sum of these)
+    function f_gu(x : unsigned; b : std_logic; w : natural) return unsigned is
+        variable r : unsigned(w - 1 downto 0) := (others => '0');
+    begin
+        if b = '1' then r := resize(x, w); end if;
+        return r;
+    end function;
 
     attribute no_rw_check : boolean;
 
@@ -146,6 +156,11 @@ architecture hexbloom of program_top is
     signal z_gp : std_logic_vector(1 downto 0) := "00";
     signal z_gc : unsigned(2 downto 0) := (others => '0');
     signal z_grun : std_logic := '0';
+    -- K6 Camera: knob (deadband +-4), glided gain k/256 in Q3 (k = 256: the shipped 1x; 512: 2x; 1023: 4x)
+    signal s_kr  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_kt  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_kgd : signed(13 downto 0) := (others => '0');
+    signal s_kg  : unsigned(12 downto 0) := to_unsigned(4096, 13);
     signal s_k4 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_vm : unsigned(8 downto 0) := (others => '0');
     signal s_vneg : std_logic := '0';
@@ -262,7 +277,12 @@ architecture hexbloom of program_top is
     attribute no_rw_check of lm_ram : signal is true;
     signal lm_q, lm_wd, lm_wa : unsigned(7 downto 0) := (others => '0');
     signal lm_we : std_logic := '0';
-    type t_ld is array (7 to 13) of unsigned(7 downto 0);
+    signal s_ld7 : unsigned(7 downto 0) := (others => '0');
+    -- K6 Camera: the held luma x the glided gain, three stages of gated sums (8 x 10 bits, stages 8 .. 10)
+    -- -> 10 bits (1.0 = 256), then delayed to stage 13
+    signal m8_p0, m8_p1, m8_p2, m8_p3 : unsigned(11 downto 0) := (others => '0');
+    signal m9_a, m9_b : unsigned(13 downto 0) := (others => '0');
+    type t_ld is array (10 to 13) of unsigned(9 downto 0);
     signal s_ld : t_ld := (others => (others => '0'));
 
     -- [E] coverage and blend
@@ -422,7 +442,7 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- palette: 16 steps with hysteresis (leave a step only 8 past its edge)
-                v_k := unsigned(registers_in(5));
+                v_k := unsigned(registers_in(4));
                 v_c := signed(resize(v_k, 11)) - signed(resize(s_pal & "100000", 11));
                 if v_c > 40 or v_c < -40 then s_pal <= v_k(9 downto 6); end if;
             end if;
@@ -439,7 +459,7 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
+                            when 3      => s_gm <= s_g5; s_gr <= unsigned(C_KFIX_5);
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -537,6 +557,17 @@ begin
                             c_be <= (others => '0');
                         end if;
                         c_al <= to_unsigned(16, 5) - v_t(4 downto 0);
+                    -- K6 Camera: knob with a +-4 deadband (ends snap to 0 / 1023), then ease 1/8 of the gap
+                    when 24 => s_kr <= unsigned(registers_in(5));
+                    when 25 =>
+                        v_c := signed(resize(s_kr, 11)) - signed(resize(s_kt, 11));
+                        if s_kr < 4 then s_kt <= (others => '0');
+                        elsif s_kr > 1019 then s_kt <= (others => '1');
+                        elsif v_c > 4 or v_c < -4 then s_kt <= s_kr; end if;
+                    when 26 => s_kgd <= signed(resize(s_kt & "000", 14)) - signed(resize(s_kg, 14));
+                    when 27 =>
+                        if C_SIM_SNAP or (s_kgd < 8 and s_kgd > -8) then s_kg <= s_kt & "000";
+                        else s_kg <= unsigned(signed(s_kg) + resize(shift_right(s_kgd, 3), 13)); end if;
                     when 22 =>
                         if s_goff = '1' then c_gth <= to_signed(1024, 13); else c_gth <= to_signed(1024 - C_GW, 13); end if;
                     -- pitch: cells per h = 2^17 * 2^-oct
@@ -757,6 +788,7 @@ begin
         variable v_q   : unsigned(9 downto 0);
         variable v_fw  : unsigned(21 downto 0);
         variable v_src : unsigned(15 downto 0);
+        variable v_m18 : unsigned(17 downto 0);
     begin
         if rising_edge(clk) then
             -- 3: cell column and the position across the cell (Q11)
@@ -796,8 +828,17 @@ begin
             s7_P <= s6_P; s7_sgn <= s6_sgn;
             if s_rad = '1' and s6_aj > s6_ah then s7_m <= s6_aj; else s7_m <= s6_ah; end if;
             s7_aj <= unsigned(s6_aj(11 downto 0));
-            if l_first = '1' then s_ld(7) <= (others => '0'); else s_ld(7) <= lm_q; end if;   -- line 0 is being sampled: no hold yet
-            for i in 8 to 13 loop s_ld(i) <= s_ld(i - 1); end loop;
+            if l_first = '1' then s_ld7 <= (others => '0'); else s_ld7 <= lm_q; end if;   -- line 0 is being sampled: no hold yet
+            -- 8 .. 10: K6 Camera: held luma x the glided gain (k / 256); 11 .. 13: delay
+            m8_p0 <= f_gu(s_kg(12 downto 3), s_ld7(0), 12) + shift_left(f_gu(s_kg(12 downto 3), s_ld7(1), 12), 1);
+            m8_p1 <= f_gu(s_kg(12 downto 3), s_ld7(2), 12) + shift_left(f_gu(s_kg(12 downto 3), s_ld7(3), 12), 1);
+            m8_p2 <= f_gu(s_kg(12 downto 3), s_ld7(4), 12) + shift_left(f_gu(s_kg(12 downto 3), s_ld7(5), 12), 1);
+            m8_p3 <= f_gu(s_kg(12 downto 3), s_ld7(6), 12) + shift_left(f_gu(s_kg(12 downto 3), s_ld7(7), 12), 1);
+            m9_a <= resize(m8_p0, 14) + shift_left(resize(m8_p1, 14), 2);
+            m9_b <= resize(m8_p2, 14) + shift_left(resize(m8_p3, 14), 2);
+            v_m18 := resize(m9_a, 18) + shift_left(resize(m9_b, 18), 4);
+            s_ld(10) <= v_m18(17 downto 8);
+            for i in 11 to 13 loop s_ld(i) <= s_ld(i - 1); end loop;
             -- 8: T1 (the triangle metric), D = T2 - T1, M = the hexagon metric; the wave index
             if s7_sgn = '1' then
                 s8_T1 <= s7_P;
@@ -852,7 +893,8 @@ begin
             -- 13: rings (Q16); Depth * (low half), Depth * (high half) from the tables
             s13_pr <= resize(s12_pl, 22) + (s12_ph & "000000");
             -- 14: minus the held luma
-            if s_src = '1' then v_src := "00" & s_ld(13) & "000000"; else v_src := "000" & s_ld(13) & "00000"; end if;
+            -- (the held source is 10 bits since the K6 camera gain: 256 = the shipped 1x; PHI wraps mod 16 rings)
+            if s_src = '1' then v_src := s_ld(13) & "000000"; else v_src := '0' & s_ld(13) & "00000"; end if;
             s14_pp <= s13_pr(19 downto 4) - v_src;
             s14_lo <= fl_q; s14_hi <= fh_q;
             -- 15: the displacement (rings, Q12)

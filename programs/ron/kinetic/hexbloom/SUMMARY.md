@@ -35,8 +35,8 @@ max(T1, T2) is also the distance to the cell edge, which draws the grout.
 | K2 | Shape | the nest's metric: hexagram (star of David) at the bottom, hexagon at the centre (with a dead band), triangle at the top; 16 steps each way |
 | K3 | Depth | how far the rings pump, 0 .. 4 rings, square law (default 0.74 ring) |
 | K4 | Rate | wave travel, bipolar, centre = still; exponential, 60 s per cycle just off the dead band to 2 cycles per second at either end |
-| K5 | Spread | phase step per cell, 0 .. 1/2 cycle, square law (default 0.15 cycle: a wave about 7 cells long). 0 = every cell in unison, top = neighbours in antiphase |
-| K6 | Colour | the 16 shared Kinetic palettes (ground, ring A, ring B, grout = accent), with hysteresis; default Vega |
+| K5 | Colour | the 16 shared Kinetic palettes (ground, ring A, ring B, grout = accent), with hysteresis; default Vega (was K6 until v0.1.1) |
+| K6 | Camera | camera strength 0 .. 100 %, default 50 %: gain k / 256 on the held luma (0 = as with a black input, 25 % = the v0.1.0 strength, 50 % = twice it, 100 % = four times); scales Osc too. Spread (K5 until v0.1.1) is fixed at 560 (0.15 cycle per cell) |
 | S7 | Wave | Smooth (sine) / Snap (3/4 of the cycle dwells at the extremes, eased flips between) |
 | S8 | Field | Linear (the wave crosses the lattice; cells along one lattice axis move together) / Radial (the wave radiates from the centre cell in hexagonal rings of cells) |
 | S9 | Rings | Bands (filled half-period rings) / Lines (thin outline rings on the ground) |
@@ -78,6 +78,38 @@ point at twice the gain (up to about 3.5 rings), so broad diamonds of shifted ne
   coordinates from the timing ID (SD shows the centre 4:3). Colours in the hardware convention (U = Cr).
 - Chassis from `riley.vhd` ([A] timing, [B] controls, [C] sequencer, [D] Osc + box, [E] divider + blend,
   [F] output); the line engine, beam, cell geometry, wave index and luma hold are new.
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. K6 is now **Camera**, the camera strength (Ron's rule for the Heirloom / Kinetic / Patchbay sets).
+
+- What it does: K6 scales the per-cell held source (the luma box, or the Osc lattice) that is subtracted from
+  the ring phase, so it sets how far a bright cell's rings sit out from a dark cell's. Source = Osc keeps its
+  2x on top.
+- Gain law: linear, gain = k / 256 (k = the knob, 0 .. 1023). Decoded per field in the vblank sequencer (zone
+  clocks 24 .. 27): the knob is latched with a +-4 deadband (the ends snap to 0 / 1023), then the gain eases 1/8
+  of the gap per field. Applied with one 8 x 10 gated-sum multiply over three pixel stages on the value read
+  back from the hold RAM (stages 8 .. 10, in place of the old s_ld delay; same latency, the RAM is unchanged).
+  The ring phase wraps modulo 16 rings as before.
+  - 0 % = gain 0: exactly what a black input draws;
+  - 25 % (256) = 1x, the v0.1.0 strength (white = 1.7 rings of offset);
+  - 50 % (512, default) = 2x (white = 3.4 rings): neighbouring cells' nests sit at clearly different phases;
+    every nest stays rigid and clean;
+  - 100 % (1023) = 4x (white = 6.8 rings): the luma range runs through more than three A / B colour cycles, so
+    the cells look phase-scattered in a still and flicker through their rings as the picture moves. Still
+    hexagonal nests; no washout.
+- Frozen: K5 Spread at 560 (its default: 0.15 cycle per cell, a wave about 7 cells long). Spread was the
+  weakest knob on the control sheet (min / default / max look alike in a still; Rate, the only speed control,
+  was not touchable).
+- K6's old function (Colour, all 16 palettes, value labels, default Vega) moved to K5 with its hysteresis.
+  Presets: Colour values moved to K5; their Spread values (420, 640, 300, 500, 380) are gone, so every preset
+  now runs at Spread 0.15.
+- Renders: `.kinetic_work/rb_hexbloom/k6sheet.png` (selfie, 720p60 at decimation 2: K6 0 / 256 / 512 / 1023
+  and Source = Osc at 512; the labelled K5 Colour sims at 512 = Moss there, not the hardware default Vega).
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic hexbloom`): router1, every config on seed 1.
+  Post-route Fmax HD Analog 81.56 (worst HD), HD HDMI 88.37, HD Dual 95.20, SD Analog 82.88, SD HDMI 83.71,
+  SD Dual 94.45 MHz; 6,914 / 7,680 LC (90.0 %, was 6,622), 10 / 32 EBR. vmprog:
+  out/rev_b/ron/kinetic/hexbloom.vmprog (v0.1.1). Not flashed.
 
 ## Status
 
