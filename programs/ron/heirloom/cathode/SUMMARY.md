@@ -343,3 +343,16 @@ so K6 is new (**v0.6.3**).
 - `cmp_final.png`: photo / proto / RTL Osc / RTL Video.
 - `ys/pack.sh`: a 75-s LC count (full yosys + `nextpnr --pack-only`).
 - `old_v010_*`: the replaced v0.1.0.
+
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 % (initial 1023, v0.6.4).
+- **Classification: mixed.** The K6 gain on L8 feeds the mosaic's red bit and the tubes' red (the camera picture)
+  and the flame warp (the camera bending the tube outlines). Only the warp is boosted.
+- **Change.** The flame warp is ×1.25 at every K6 position (0 stays 0): `s_pfd2 = 2 pf + g dv + (g dv)/4`, one
+  adder in the existing s_pfd2 register (no new stage, no multiplier). The worst warp is now ±956 (was ±765) in
+  14 bits. The mosaic bit and the tubes' red keep the old camera gain law.
+- **Look check** (bear, 720p60 / 4, K6 1023): `.heirloom_work/rb_cathode/k6b/k6b_cmp.png`: the same picture with
+  more ragged, further-pushed flame outlines; mosaic and tube colours unchanged; no wrap.
+- **Build:** router1; HD Analog s1 82.93, SD Analog s1 78.83, HD HDMI s1 79.47, SD HDMI s1 84.01, HD Dual s1 90.04, SD Dual s1 82.25 MHz; worst HD 79.47 MHz; 7535-7560 / 7680 LC; all seed 1. vmprog: out/rev_b/ron/heirloom/cathode.vmprog.

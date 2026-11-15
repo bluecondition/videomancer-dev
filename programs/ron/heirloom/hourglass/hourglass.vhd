@@ -36,6 +36,8 @@
 -- ROMs, the glow ROM through a per-pixel scale, RGB -> YUV matrix), the shell's output conditioning (Y, U, V
 -- through two [1 2 2 2 2 2 2 2 1]/16 boxes whose 8-back taps sit in block-RAM rings, luma 13/16) and the
 -- blanking gate.  Generated avid; one latency (24) in every mode; colours in the hardware convention (u = Cr).
+-- 2026-11-15: K6 camera top +25 % (Ron): camera gain c_g6 = 1.25 x K6 / 256 (6 bits, 0 .. 39; was 0 .. 31), the
+-- camera product widened to 15 bits.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -164,7 +166,7 @@ architecture hourglass of program_top is
     signal c_eoff : signed(9 downto 0) := (others => '0');
     signal z_d5   : signed(11 downto 0) := (others => '0');
     signal z_t1, z_t2 : signed(20 downto 0) := (others => '0');
-    signal c_g6   : unsigned(4 downto 0) := to_unsigned(12, 5);
+    signal c_g6   : unsigned(5 downto 0) := to_unsigned(15, 6);
     signal c_ga   : unsigned(9 downto 0) := to_unsigned(256, 10);
     type t_c4 is array (0 to 3) of signed(10 downto 0);
     signal c_eb, c_db : t_c4 := (others => (others => '0'));   -- 160 / 256 + eoff + dither offset, per dither phase
@@ -211,7 +213,7 @@ architecture hourglass of program_top is
     signal p3_ua  : unsigned(10 downto 0) := (others => '0');
     signal p5_u   : unsigned(10 downto 0) := (others => '0');
     signal p4_lm  : unsigned(7 downto 0) := (others => '0');
-    signal p5_cam : signed(13 downto 0) := (others => '0');
+    signal p5_cam : signed(14 downto 0) := (others => '0');
     signal p6_wc  : signed(12 downto 0) := (others => '0');
     signal p6_xa  : signed(11 downto 0) := (others => '0');
     signal p6_x6  : signed(11 downto 0) := (others => '0');
@@ -313,6 +315,7 @@ begin
         variable v_p  : unsigned(19 downto 0);
         variable v_q  : signed(19 downto 0);
         variable v_m  : unsigned(15 downto 0);
+        variable v_cg : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -459,7 +462,8 @@ begin
                         z_d5 <= signed(resize(s_g5(12 downto 3), 12)) - 512;
                     when 96 =>
                         c_kw <= s_g1(12 downto 4);
-                        c_g6 <= s_g6(12 downto 8);
+                        v_cg := resize(s_g6(12 downto 6), 8) + resize(s_g6(12 downto 8), 8);   -- x1.25 (2026-11-15)
+                        c_g6 <= v_cg(7 downto 2);
                         z_t1 <= signed(shift_left(resize(s_gp(12 downto 3), 21), 9)) - signed(shift_left(resize(s_gp(12 downto 3), 21), 5));
                         z_t2 <= shift_left(resize(z_d5, 21), 7) + shift_left(resize(z_d5, 21), 4);
                     when 97 =>
@@ -699,7 +703,7 @@ begin
             v_a := abs(p4_x); p5_u <= unsigned(v_a(10 downto 0));
             p5_x <= p4_x;
             if s_src = '1' then v_l := signed('0' & p4_lm) - 120; else v_l := signed('0' & p4_lm); end if;
-            p5_cam <= resize(v_l * signed('0' & c_g6), 14);
+            p5_cam <= resize(v_l * signed('0' & c_g6), 15);
             -- 6: Wc = W + camera; partial sums of 0.203 X and 0.094 U
             p6_wc <= resize(l_w, 13) + resize(shift_right(p5_cam, 4), 13);
             p6_xa <= shift_right(p5_x, 3) + shift_right(p5_x, 4);

@@ -245,3 +245,17 @@ at 77–88 MHz, 7143–7186 LC (93–94 %), 20 EBR. NOT flashed.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 307 -> 512 (v0.6.3). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 % (initial 1023, v0.6.4).
+- **Classification: bend.** K6 (Picture, the source depth) adds camera luma to the D field (the gradient's
+  colour index), the eye margin and the wedge / floor edges. It displaces the drawing's fields (relief and bent
+  edges); it is not a mix of the camera image.
+- **Change.** The depth is ×1.25 at every K6 position: `f_depth = K6/4 + K6/16` (9 bits, 0 .. 318, was 0 .. 255),
+  added in the per-field latch; the high partial product's depth operand is 5 bits (was 4). The source term
+  now reaches ±180 (was ±144) in its 9 bits; D ±855 (was ±690) in 12; the colour index is clamped as before.
+- **Look check** (bear, 720p60 / 4, K6 1023): `.heirloom_work/rb_facet/k6b/k6b_cmp.png`: the same relief, a little
+  deeper, the red cone pushed further; no wrap.
+- **Build:** router1; HD Analog s1 84.90, SD Analog s1 85.88, HD HDMI s1 80.24, SD HDMI s1 78.00, HD Dual s1 75.95, SD Dual s1 89.71 MHz; worst HD 75.95 MHz; 7410-7451 / 7680 LC; all seed 1. vmprog: out/rev_b/ron/heirloom/facet.vmprog.

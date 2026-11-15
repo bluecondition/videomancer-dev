@@ -37,6 +37,8 @@
 -- Generated avid; output conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2
 -- 2 1]/16, luma to ~777) before the blanking gate.  Latency 16 clocks in
 -- every mode.  Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron): bend gain = 1.25 x K6 / 4 (9 bits, 0 .. 318; was 0 .. 255), bend
+-- product widened to 19 bits (bend +-636 Q.1 px at most, was +-510).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -167,7 +169,7 @@ architecture spearhead of program_top is
     signal s_vw : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal s_k1l, s_k2l, s_k3l, s_k5l : unsigned(9 downto 0) := (others => '0');
     signal s_spd : signed(9 downto 0) := (others => '0');
-    signal s_bendk : unsigned(7 downto 0) := (others => '0');
+    signal s_bendk : unsigned(8 downto 0) := (others => '0');
     signal s_p12 : unsigned(9 downto 0) := (others => '0');
     signal s_gdiff : signed(12 downto 0) := (others => '0');
     signal s_gl : unsigned(11 downto 0) := to_unsigned(1696, 12);
@@ -236,7 +238,7 @@ architecture spearhead of program_top is
 
     -- pixel path
     signal s_yv2 : unsigned(7 downto 0) := (others => '0');
-    signal s_bend3 : signed(17 downto 0) := (others => '0');
+    signal s_bend3 : signed(18 downto 0) := (others => '0');
     signal s_bend : signed(11 downto 0) := (others => '0');
     signal s1_tq, s1_tqA, s1_dB : unsigned(11 downto 0) := (others => '0');
     signal s1_rB : signed(12 downto 0) := (others => '0');
@@ -351,7 +353,7 @@ begin
             if s_warm /= 15 or v_d > 6 or v_d < -6 then s_k5l <= v_k; end if;
             v_s := signed(resize(unsigned(registers_in(3)), 11)) - 512;
             if v_s > -8 and v_s < 8 then s_spd <= (others => '0'); else s_spd <= v_s(9 downto 0); end if;
-            s_bendk <= unsigned(registers_in(5)(9 downto 2));
+            s_bendk <= resize(unsigned(registers_in(5)(9 downto 2)), 9) + resize(unsigned(registers_in(5)(9 downto 4)), 9);   -- x1.25 (2026-11-15)
             s_p12 <= unsigned(registers_in(7));
             s_gdiff <= signed(resize(s_p12 & "00", 13)) - signed(resize(s_gl, 13));
 
@@ -660,7 +662,7 @@ begin
         variable v_dl : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
-            -- bend: source luma about mid-grey (a few pixels early) x K6, Q.1 px, +-440 at most
+            -- bend: source luma about mid-grey (a few pixels early) x K6 x 1.25, Q.1 px, +-636 at most (|bend3| < 2^17)
             s_lb_ra <= s_px;
             s_yv2 <= unsigned(s_lb_q);
             s_bend3 <= (signed(resize(s_yv2, 9)) - 128) * signed('0' & s_bendk);

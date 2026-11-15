@@ -87,3 +87,15 @@ Not flashed. The presets are hand-written placeholders: Photo, Needles, Interloc
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 64 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 % (initial 1023, v0.5.3).
+- **Classification: bend.** K6 (Bend) adds source luma about mid-grey to the spear and chevron fields.
+- **Change.** The bend gain is ×1.25 at every K6 position: `s_bendk = K6/4 + K6/16` (9 bits, 0 .. 318, was 0 .. 255);
+  the bend product is 19 bits (it was 18; |product| < 2^17, so the existing slice still holds it). Bend now
+  reaches ±636 Q.1 px (was ±510).
+- **Look check** (bear, 720p60 / 4, K6 1023): `.heirloom_work/rb_spearhead/k6b/k6b_cmp.png`: the same picture with
+  the band contours pushed further round the bear; no wrap.
+- **Build:** router1; HD Analog s1 86.21, SD Analog s1 87.91, HD HDMI s1 78.28, SD HDMI s1 84.38, HD Dual s1 84.58, SD Dual s1 84.63 MHz; worst HD 78.28 MHz; 5824-5861 / 7680 LC; all seed 1. vmprog: out/rev_b/ron/heirloom/spearhead.vmprog.

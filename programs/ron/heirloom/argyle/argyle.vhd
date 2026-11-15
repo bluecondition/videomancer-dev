@@ -50,6 +50,8 @@
 -- gate.  Latency 27 clocks in every mode.
 
 -- K6 camera pass 2026-11-15: K6 = Bend (camera strength, was K5), K5 = Fringe (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron): bend = g*25/64 x 1.25 (k_bend 0 .. 498, was 0 .. 399; the pixel
+-- path's 5-bit bend 0 .. 31, was 0 .. 24), one extra register stage on the quasi-static knob curve.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -133,7 +135,8 @@ architecture argyle of program_top is
     signal k_d1   : signed(9 downto 0) := (others => '0');            -- Q.8 Bloom depth, -252 .. 252
     signal k_d2   : unsigned(7 downto 0) := (others => '0');          -- Q.8 Scatter depth, 0 .. 255
     signal k_eps  : unsigned(9 downto 0) := to_unsigned(256, 10);     -- Q.8 pairs
-    signal k_bend : unsigned(8 downto 0) := to_unsigned(154, 9);
+    signal k_bend : unsigned(8 downto 0) := to_unsigned(192, 9);
+    signal k_bend0 : unsigned(8 downto 0) := to_unsigned(154, 9);
     signal k_a    : unsigned(9 downto 0) := to_unsigned(256, 10);     -- Q.8 gain
     signal k_ag   : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal k_c1, k_c2, k_c, k_hi, k_hi2, k_pr : unsigned(19 downto 0) := (others => '0');
@@ -649,7 +652,8 @@ begin
             k_eps <= s_g(2)(12 downto 3);
             v_g := s_g(3)(12 downto 3);                          -- bend = g*25/64
             v_t := resize(v_g & "0000", 15) + resize(v_g & "000", 15) + resize(v_g, 15);
-            k_bend <= resize(v_t(14 downto 6), 9);
+            k_bend0 <= resize(v_t(14 downto 6), 9);
+            k_bend <= k_bend0 + shift_right(k_bend0, 2);                -- x1.25 (2026-11-15)
             -- gain a: 0.55 .. 1.0 .. 2.2 = 141 + g*115/512 (g <= 512), 256 + (g-512)*307/512; one add per clock
             v_g := s_g(4)(12 downto 3);
             if v_g <= 512 then k_al <= '1'; k_ag <= v_g; else k_al <= '0'; k_ag <= v_g - 512; end if;

@@ -36,6 +36,8 @@
 -- coordinates (SD shows the centre 4:3 of the picture).  Generated avid; output
 -- conditioning (chroma and luma [1 2 2 2 2 2 2 2 1]/16, luma 13/16) before the blanking
 -- gate.  Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron): etch constant 430 -> 537 (x1.25 at every K6 position), gain 9 -> 10
+-- bits, etch term 10 -> 11 bits.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -160,7 +162,7 @@ architecture medallion of program_top is
     signal c_kg   : unsigned(9 downto 0) := to_unsigned(250, 10);
     signal c_we2  : unsigned(11 downto 0) := to_unsigned(1291, 12);
     signal c_gs   : unsigned(9 downto 0) := to_unsigned(255, 10);
-    signal c_eq   : unsigned(8 downto 0) := to_unsigned(64, 9);
+    signal c_eq   : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal c_rh   : unsigned(10 downto 0) := to_unsigned(861, 11);
     signal c_rh2  : unsigned(21 downto 0) := (others => '0');
     signal c_v2   : unsigned(17 downto 0) := (others => '0');
@@ -244,7 +246,7 @@ architecture medallion of program_top is
     signal p4_w0  : unsigned(12 downto 0) := (others => '0');
     signal p4_ea, p4_eb : unsigned(12 downto 0) := (others => '0');
     signal p5_w0  : unsigned(12 downto 0) := (others => '0');
-    signal p5_e   : unsigned(9 downto 0) := (others => '0');
+    signal p5_e   : unsigned(10 downto 0) := (others => '0');
     signal p6_w   : unsigned(13 downto 0) := (others => '0');
     signal p7_pm, p7_d : signed(14 downto 0) := (others => '0');
     signal p8_p0, p8_p1 : signed(18 downto 0) := (others => '0');
@@ -422,7 +424,7 @@ begin
                     when 152 => f_a <= resize(s_g4(12 downto 3), 36); f_b <= resize(s_g4(12 downto 3), 16);
                     when 176 => f_a <= resize(c_sq, 36);              f_b <= to_unsigned(704, 16);
                     when 200 => f_a <= resize(s_g6(12 downto 3), 36); f_b <= resize(s_g6(12 downto 3), 16);
-                    when 224 => f_a <= resize(c_sq, 36);              f_b <= to_unsigned(430, 16);
+                    when 224 => f_a <= resize(c_sq, 36);              f_b <= to_unsigned(537, 16);
                     when 248 => f_a <= resize(s_gp(12 downto 3), 36); f_b <= to_unsigned(1812, 16);
                     when 272 => f_a <= resize(c_rh, 36);              f_b <= resize(c_rh, 16);
                     when 296 => f_a <= resize(s_vm, 36);              f_b <= resize(s_vm, 16);
@@ -447,7 +449,7 @@ begin
                     when 170 => c_sq  <= f_acc(19 downto 0);
                     when 194 => c_gs  <= to_unsigned(64, 10) + resize(f_acc(29 downto 20), 10);
                     when 218 => c_sq  <= f_acc(19 downto 0);
-                    when 242 => c_eq  <= resize(f_acc(28 downto 20), 9);
+                    when 242 => c_eq  <= f_acc(29 downto 20);
                     when 266 => c_rh  <= resize(f_acc(20 downto 10), 11);
                     when 290 => c_rh2 <= f_acc(21 downto 0);
                     when 314 => c_v2  <= f_acc(17 downto 0);
@@ -750,7 +752,7 @@ begin
     p_pix : process(clk)
         variable v_t  : unsigned(11 downto 0);
         variable v_dx : signed(12 downto 0);
-        variable v_e  : unsigned(16 downto 0);
+        variable v_e  : unsigned(17 downto 0);
         variable v_w  : unsigned(13 downto 0);
         variable v_v  : signed(19 downto 0);
         variable v_eb : signed(15 downto 0);
@@ -787,8 +789,8 @@ begin
             s_tc4 <= r_tile_q(2 downto 0);           -- tile ROM (address at 2, EBR out at 3, fabric 4)
 
             -- 5: etch
-            v_e := resize(p4_ea, 17) + shift_left(resize(p4_eb, 17), 4);
-            p5_e <= v_e(16 downto 7);
+            v_e := resize(p4_ea, 18) + shift_left(resize(p4_eb, 18), 4);
+            p5_e <= v_e(17 downto 7);
             p5_w0 <= p4_w0;
             s_tcp(5) <= s_tc4;
 

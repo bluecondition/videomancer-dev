@@ -50,6 +50,8 @@
 -- mosaic's red bit, the tubes' red and the flame warp alike (0 % = a black input, 25 % = the shipped
 -- 0.297 per level, 50 % = 1.53x, the strongest clean level, 100 % = 1.97x).  K6's old six-way Patch
 -- moved to S7 as RGB / BGR (the photo / the Embers preset); the old S7 Fringe is fixed at Blue.
+-- 2026-11-15: K6 camera top +25 % (Ron): the flame warp (only; the mosaic bit and the tubes' red keep the
+-- camera gain as it was) x1.25 at every K6 position: s_pfd2 = 2 pf + g dv + (g dv) / 4.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -932,7 +934,7 @@ begin
             if s_adv = '1' then
                 s_avg <= unsigned(signed(s_avg) + resize(shift_right(s_adf, 10), 16));
             end if;
-            -- flame warp: lp += (L - lp) / 8; dv = lp - mean; s_pfd2 = 2 pf + g dv
+            -- flame warp: lp += (L - lp) / 8; dv = lp - mean; s_pfd2 = 2 pf + 1.25 g dv
             v_t := signed(resize(v_l3, 10)) - signed(resize(v_lp, 10));
             v_t := signed(resize(v_lp, 10)) + shift_right(v_t, 3);
             v_lp <= unsigned(v_t(7 downto 0));
@@ -940,7 +942,7 @@ begin
             if s_vg(1) = '1' then v_g1 := shift_left(resize(v_dv, 12), 1); else v_g1 := (others => '0'); end if;
             if s_vg(0) = '1' then v_g0 := resize(v_dv, 12); else v_g0 := (others => '0'); end if;
             v_pa <= v_g1 + v_g0;
-            s_pfd2 <= signed(resize(s_pf & '0', 14)) + resize(v_pa, 14);
+            s_pfd2 <= signed(resize(s_pf & '0', 14)) + resize(v_pa, 14) + resize(shift_right(v_pa, 2), 14);   -- warp x1.25 (2026-11-15)
         end if;
     end process p_vid;
 

@@ -39,6 +39,7 @@
 -- Generated avid; output conditioning (Y, U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes whose 8-back
 -- taps come from block-RAM rings, luma 13/16) before the blanking gate.  Colours composed in the hardware
 -- convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron): etch per luma unit 293 -> 366 (the gain x1.25 at every K6 position).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -551,7 +552,7 @@ begin
                     when 54 => z_fa <= to_unsigned(C_TG_WR(0), 18);      z_fb <= c_wrq;                       -- width per px, a
                     when 55 => z_fa <= to_unsigned(C_TG_WR(2), 18);      z_fb <= c_wrq;                       -- width per px, b
                     when 56 => z_fa <= resize(c_opn, 18);                z_fb <= to_unsigned(164, 16);        -- wv: 0.08 * opn
-                    when 57 => z_fa <= resize(c_etch11, 18);             z_fb <= to_unsigned(293, 16);        -- etch per luma unit
+                    when 57 => z_fa <= resize(c_etch11, 18);             z_fb <= to_unsigned(366, 16);        -- etch per luma unit (x1.25, 2026-11-15)
                     when others => z_fa <= (others => '0');              z_fb <= (others => '0');
                 end case;
             end if;

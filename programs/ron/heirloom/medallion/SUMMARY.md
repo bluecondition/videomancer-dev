@@ -171,3 +171,16 @@ in the middle keys in a CMY/grey plaid.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 396 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 % (initial 1023, v0.5.3).
+- **Classification: bend.** K6 (Etch) adds camera luma to the diamond field w: the fire rings bend round the
+  picture.
+- **Change.** Etch ×1.25 at every K6 position: the square-law constant 430 -> 537 in the serial-multiplier slot,
+  the gain register c_eq 9 -> 10 bits (0 .. 536), the etch sum 17 -> 18 bits and the etch term 10 -> 11 bits
+  (≤ 1068, was ≤ 854); w (14 bits) has room.
+- **Look check** (bear, 720p60 / 4, K6 1023, glide bypassed in scratch copies): `.heirloom_work/rb_medallion/k6b/k6b_cmp.png`:
+  the same picture, the ring zone pushed a little further out of the bright fur into the flat stripes; no wrap.
+- **Build:** router1; HD Analog s1 92.25, SD Analog s1 92.19, HD HDMI s1 89.48, SD HDMI s1 90.10, HD Dual s1 92.55, SD Dual s1 93.46 MHz; worst HD 89.48 MHz; 6277-6312 / 7680 LC; all seed 1. vmprog: out/rev_b/ron/heirloom/medallion.vmprog.

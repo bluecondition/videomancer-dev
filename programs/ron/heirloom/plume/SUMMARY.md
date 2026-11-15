@@ -167,3 +167,17 @@ Working files: `.heirloom_work/rb_plume/` (`notes.md` has every number).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Bend), so K5 and K6 swapped: **K6 = Bend** (the camera strength, default now 512 = 50 %), **K5 = Tear** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 81.05 MHz (HD Analog 82.62, HD HDMI 81.05, HD Dual 85.24), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh plume`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 % (initial 1023, v0.5.3).
+- **Classification: bend.** K6 (Bend) adds camera luma (or the Osc) to the seam phase and the stripe phase.
+- **Change.** The bend gain is ×1.25 at every K6 position: `f_b5 = (g/64 + g/256) / 4` from the glided K6
+  (6 bits, 0 .. 39, was 0 .. 31); the bend product (±256 × 39) still fits its 15 bits.
+- **Note.** The seam-phase add `resize(vm/4, 10)` is a signed resize (mod 512 with the sign kept), which folds
+  bends past half a cycle. It already did at the old top; the stronger gain reaches it over more of the picture.
+  It is unchanged.
+- **Look check** (bear, 720p60 / 4, K6 1023, glide bypassed in scratch copies): `.heirloom_work/rb_plume/k6b/k6b_cmp.png`:
+  the same picture with the seams and stripes bent a little harder; no new artifacts.
+- **Build:** router1; HD Analog s1 84.38, SD Analog s1 82.62, HD HDMI s1 77.14, SD HDMI s1 77.85, HD Dual s1 83.01, SD Dual s1 82.62 MHz; worst HD 77.14 MHz; 6989-7022 / 7680 LC; all seed 1. vmprog: out/rev_b/ron/heirloom/plume.vmprog.

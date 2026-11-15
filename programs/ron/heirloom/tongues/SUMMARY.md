@@ -223,3 +223,16 @@ gives right-band widths of 140 → 122 → 158 lines at 0 / +0.5 / +1.0 s; the c
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 % (initial 1023, v0.1.2).
+- **Classification: bend.** K6 (Etch) adds camera luma to the window level, so the lines and band edges trace
+  the picture.
+- **Change.** Etch ×1.25 at every K6 position: the per-luma constant 293 -> 366 in multiplier slot 57. The gain
+  c_etchg4 now reaches 218 (was 174) and stays in 8 bits; the partial products (15 × 218) fit their 12 bits.
+  Top: 1.5 cos units per full luma (was 1.2).
+- **Look check** (bear, 720p60 / 4, K6 1023, glide bypassed in scratch copies): `.heirloom_work/rb_tongues/k6b/k6b_cmp.png`:
+  the same picture with the camera contours shifted further; no wrap.
+- **Build:** router1; HD Analog s1 80.14, SD Analog s1 80.39, HD HDMI s2 74.72, SD HDMI s1 80.30, HD Dual s1 80.30, SD Dual s1 81.73 MHz; worst HD 74.72 MHz; 6964-6990 / 7680 LC; HD HDMI seed 2. vmprog: out/rev_b/ron/heirloom/tongues.vmprog.

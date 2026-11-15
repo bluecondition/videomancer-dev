@@ -212,3 +212,16 @@ sizes.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Bend), so K5 and K6 swapped: **K6 = Bend** (the camera strength, default now 512 = 50 %), **K5 = Fringe** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.2, rebuilt with router1: all six seed 1; HD worst 81.33 MHz (HD Analog 94.32, HD HDMI 84.69, HD Dual 81.33), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh argyle`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 % (initial 1023, v0.6.3).
+- **Classification: bend.** K6 (Bend) adds camera luma (or the Osc) to the ring phase and the colour phase, so it
+  bends the drawing; it never shows the camera image itself.
+- **Change.** The bend gain is ×1.25 at every K6 position: `k_bend = b + b/4` with b = g·25/64 (0 .. 498, was
+  0 .. 399), computed one register later on the quasi-static knob curve. The pixel path's 5-bit bend now reaches
+  31 (was 24; the 5-bit step makes the top ×1.29). The bend product (±512 × 31) still fits its 16 bits.
+- **Look check** (bear, 720p60 / 4, K6 1023, glide bypassed in scratch copies): `.heirloom_work/rb_argyle/k6b/k6b_cmp.png`,
+  the same picture with the rings bent further round the bear; no wrap.
+- **Build:** router1; HD Analog s1 86.53, SD Analog s1 89.13, HD HDMI s1 85.55, SD HDMI s1 84.78, HD Dual s1 92.74, SD Dual s1 87.59 MHz; worst HD 85.55 MHz; 7190-7199 / 7680 LC; all seed 1. vmprog: out/rev_b/ron/heirloom/argyle.vmprog.

@@ -57,6 +57,8 @@
 -- including the eye table) and the per-line jobs (after each line).
 -- Latency 32 clocks in every mode.  Colours in hardware convention
 -- (u = Cr, v = Cb); luma stored x16/13 so the conditioning lands on the photo.
+-- 2026-11-15: K6 camera top +25 % (Ron): source depth = 1.25 x K6 / 4 (9 bits, 0 .. 318; was 0 .. 255), the
+-- high partial product's depth operand 4 -> 5 bits.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -243,7 +245,7 @@ architecture facet of program_top is
     signal f_CA0 : signed(27 downto 0) := (others => '0');
     signal f_dCB : unsigned(16 downto 0) := (others => '0');
     signal f_CB0 : signed(25 downto 0) := (others => '0');
-    signal f_depth : unsigned(7 downto 0) := (others => '0');
+    signal f_depth : unsigned(8 downto 0) := (others => '0');
     signal f_oyinc : unsigned(7 downto 0) := to_unsigned(61, 8);
     signal f_oxinc : unsigned(7 downto 0) := to_unsigned(51, 8);
     signal f_x62 : unsigned(6 downto 0) := to_unsigned(68, 7);
@@ -550,7 +552,7 @@ begin
                 s_twin  <= registers_in(6)(2);
                 s_ember <= registers_in(6)(3);
                 s_osc   <= registers_in(6)(4);
-                f_depth <= unsigned(registers_in(5)(9 downto 2));
+                f_depth <= resize(unsigned(registers_in(5)(9 downto 2)), 9) + resize(unsigned(registers_in(5)(9 downto 4)), 9);   -- x1.25 (2026-11-15)
                 s_lm <= s_lm + resize(s_linc, 20);
             end if;
 
@@ -1046,7 +1048,7 @@ begin
             p4_dy <= a_vy - resize(p3_yo, 12);
             p4_xa <= resize(b_x, 14) + resize(a_axo, 14);                   -- X of this pixel (b_x is 3 xs on)
             p4_slo <= resize(p3_src * signed('0' & f_depth(3 downto 0)), 14);
-            p4_shi <= resize(p3_src * signed('0' & f_depth(7 downto 4)), 14);
+            p4_shi <= resize(p3_src * signed('0' & f_depth(8 downto 4)), 14);
 
             -- 5
             v_s := shift_left(resize(p4_phi, 22), 5) + resize(p4_plo, 22);

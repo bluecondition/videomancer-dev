@@ -40,6 +40,7 @@
 -- Latency 24 clocks in every mode.  Generated colours in the hardware convention (U = Cr, V = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Bend (camera strength, was K5), K5 = Tear (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron): bend gain f_b5 = 1.25 x K6 / 256 (6 bits, 0 .. 39; was 0 .. 31).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -148,7 +149,7 @@ architecture plume of program_top is
     signal f_sig, f_st : unsigned(9 downto 0) := to_unsigned(256, 10);    -- Q8
     signal f_lam  : unsigned(8 downto 0) := to_unsigned(256, 9);          -- Q8
     signal f_wake : unsigned(9 downto 0) := to_unsigned(256, 10);         -- Q8, 0 .. 3
-    signal f_b5   : unsigned(4 downto 0) := to_unsigned(3, 5);
+    signal f_b5   : unsigned(5 downto 0) := to_unsigned(4, 6);
     signal f_tg   : unsigned(5 downto 0) := to_unsigned(32, 6);
     signal f_tk   : unsigned(3 downto 0) := to_unsigned(3, 4);            -- teeth depth (x 1/8 px per pulse unit)
     signal f_x0   : unsigned(13 downto 0) := (others => '0');             -- virtual x of pixel 0, Q2
@@ -345,6 +346,7 @@ begin
         variable v_u  : unsigned(10 downto 0);
         variable v_ng : signed(13 downto 0);
         variable v_g  : unsigned(9 downto 0);
+        variable v_b8 : unsigned(7 downto 0);
         variable v_t  : unsigned(17 downto 0);
     begin
         if rising_edge(clk) then
@@ -444,7 +446,8 @@ begin
             v_g := s_g(1)(12 downto 3);
             f_lam <= to_unsigned(96, 9) + resize(v_g(9 downto 2), 9) + resize(v_g(9 downto 4), 9);
             f_st  <= f_x2(s_g(2)(12 downto 3));
-            f_b5 <= s_g(3)(12 downto 8);
+            v_b8 := resize(s_g(3)(12 downto 6), 8) + resize(s_g(3)(12 downto 8), 8);   -- x1.25 (2026-11-15)
+            f_b5 <= v_b8(7 downto 2);
             v_g := s_g(4)(12 downto 3);
             if v_g(9) = '0' then f_wake <= resize(v_g(8 downto 1), 10);
             else f_wake <= to_unsigned(256, 10) + resize(v_g(8 downto 0), 10); end if;

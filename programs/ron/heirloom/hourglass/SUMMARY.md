@@ -168,3 +168,16 @@ proto; `imodel.py` = the integer model).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 % (initial 1023, v0.1.2).
+- **Classification: bend.** K6 adds camera luma (or the Osc lattice) to W, so the lens edges bulge and the rings
+  bend round the picture.
+- **Change.** The camera gain is ×1.25 at every K6 position: `c_g6 = (s_g6/64 + s_g6/256) / 4` (6 bits, 0 .. 39,
+  was 0 .. 31: top ×1.26), in the existing sequencer slot 96. The camera product is widened to 15 bits (239 × 39);
+  W + camera still fits 13 bits.
+- **Look check** (bear, 720p60 / 4, K6 1023, glide bypassed in scratch copies): `.heirloom_work/rb_hourglass/k6b/k6b_cmp.png`:
+  the same picture with the lens regions pushed further; no wrap.
+- **Build:** router1; HD Analog s1 95.49, SD Analog s1 94.54, HD HDMI s1 97.01, SD HDMI s1 96.85, HD Dual s1 94.63, SD Dual s3 97.05 MHz; worst HD 94.63 MHz; 5686-5707 / 7680 LC; SD Dual seed 3. vmprog: out/rev_b/ron/heirloom/hourglass.vmprog.
