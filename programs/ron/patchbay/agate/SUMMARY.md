@@ -1,6 +1,6 @@
 # Agate
 
-**Patchbay. v0.1.0 built 2026-11-14, not flashed.** Marbling by cascaded cross-modulation: the H and V ramps
+**Patchbay. v0.1.0 built 2026-11-14; v0.1.1 (K6 camera pass) built 2026-11-15; not flashed.** Marbling by cascaded cross-modulation: the H and V ramps
 phase-modulate each other through three octaves, and the folded X ramp drives a wavefolder and a banded
 colouriser. Paper marbling, suminagashi, cut agate.
 
@@ -52,8 +52,8 @@ the bands wave; at 100 % they are folded several times over into fine marbling.
 | K2 | Lean | pan between the X VCAs and the Y VCAs | left: the V ramp modulates H (bands combed sideways, lying down); right: the H ramp modulates V (upright pillars with flame edges); centre: both |
 | K3 | Detail | attenuator ratio between stages | 0.25 (only the big swirl) .. 0.5 (default) .. 0.75 (the fine stages as strong as the coarse: tight combing) |
 | K4 | Speed | drift of the five VCO phases | bipolar, square law, +-8 deadband at the centre (frozen); each phase at its own rate and direction |
-| K5 | Bands | gain into the wavefolder | colour bands per swirl, 4 octaves: broad colour fields .. many thin bands |
-| K6 | Colour | colouriser rotate | which half of the ten-band palette the fold sweeps: blue / cream / amber .. rust / maroon / teal .. teal / black / blue |
+| K5 | Colour | colouriser rotate (moved from K6 in v0.1.1) | which half of the ten-band palette the fold sweeps: blue / cream / amber .. rust / maroon / teal .. teal / black / blue. Default 0. (K5 Bands is fixed at its old default 512 = wavefolder gain 2.0) |
+| K6 | Camera | gain of the luma into X | camera strength 0 .. 100 %, default 50 %: 0 % = no camera (the black-input stone), 25 % = the v0.1.0 depth (0.2 swirl at white), 50 % = x2, 100 % = x4; the Osc lattice keeps its 4x over the camera. Glided, +-4 deadband |
 | S7 | Shape | VCO waveform | Round (sine: curved swirls) / Angular (triangle: zig-zag chevrons) |
 | S8 | Bookmatch | H ramp rectifier | Off / On: the H ramp becomes \|x - centre\|, the stone mirrored left / right like a split slab |
 | S9 | Veins | edge keyer on the colouriser | Off / On: a line at every band edge, pale between dark bands and dark between light ones |
@@ -61,7 +61,7 @@ the bands wave; at 100 % they are folded several times over into fine marbling.
 | S11 | Source | X adder input | Video (camera luma) / Osc (a drifting triangle lattice at four times the level) |
 | P12 | Stir | all five VCAs | modulation depth, square law: 0 % straight ruled bands .. 78 % the default .. 100 % deep folded marbling |
 
-K1, K2, K3, K5, K6 and P12 glide (1/8 of the gap per field).
+K1, K2, K3, K5 (Colour), K6 (Camera) and P12 glide (1/8 of the gap per field).
 
 ## Video
 
@@ -162,3 +162,28 @@ Verification (GHDL image sims of exactly the built sources):
 Not checked on hardware: everything. Most likely to need a look: the thin HD Analog timing margin; the syncs
 running through a block-RAM ring; SD and 1080i (never rendered); the 8-pixel beading in Osc; Bands, Detail
 and STIR all at maximum together give mostly the mean colour (each alone keeps the picture).
+
+## K6 camera pass (2026-11-15), v0.1.1
+
+- **K6 is now Camera** (0 .. 100 %, default 512 = 50 %): the gain on the smoothed luma (or the Osc lattice)
+  before it is added to X between stage 1 and stage 2. Law: luma x 13 k / 4096 (gain register `s_cgq` = 13 k >> 7,
+  0 .. 103, k = the glided knob; video >> 5, Osc >> 3): 0 % = 0 (the black-input stone), 25 % = x13/16 (the
+  v0.1.0 fixed gain, 0.2 swirl at white), 50 % = x2, 100 % = x4. One 12 x 7 multiply in its own stage, so the
+  luma reaches X one pixel later than before (invisible: it is stored at 1/8 of the pixel rate). The term is
+  16 bits now (the Osc at 100 % displaces up to 3 swirls). K6 rides the shared glide (channel 3, formerly K5's),
+  +-4 deadband; latency unchanged (40).
+- **K6's old function (Colour rotate) moved to K5; K5 Bands is fixed at 512** (wavefolder gain 2.0, its default):
+  K1 Scale already sets the band density on screen. With the gain a constant the pixel path's X x Bands
+  multiplier folds into a shift: standalone yosys 4,305 -> 4,081 LUT4 and 1,540 -> 1,483 carries, so the
+  camera multiply costs nothing net. Bit-exact with v0.1.0 at K5 = 512. Presets lose their Bands values
+  (Suminagashi 300, Neon Comb 700, Ruled 640); the Colour values moved from K6 to K5. No new block RAM (24).
+- **Seen in GHDL** (720p60, decimation 2, selfie.jpg; `.patchbay_work/rb_agate/k6/k6sheet.png`): 0 % the clean
+  stone; 25 % the bands bend around the picture; 50 % strong bending, the veins zig-zag with the picture's
+  structure, soft horizontal smears at band edges (the luma store's 1/8 rate and the one-pole lags, now twice
+  as visible) but no per-line breakup; 100 % the picture's contours carve the stone (rings and eyes from the
+  picture), smears more visible, colours intact: a bold climax. Osc at 50 %: the stone reorganises into the
+  lattice's diamonds, with the known 8-pixel beading on steep contours.
+- **Build v0.1.1 (2026-11-15), router1, all six configs on seed 1**: HD Analog 80.17, SD Analog 83.06, HD HDMI
+  88.24, SD HDMI 83.54, HD Dual 79.76, SD Dual 74.40 MHz post-route (worst HD 79.76; HD Analog's margin is now
+  8 %, was 1.9 %). 6,928 .. 6,953 / 7,680 LC (91 %, down from 93 %), 24 / 32 EBR.
+  `out/rev_b/ron/patchbay/agate.vmprog`. Not flashed.

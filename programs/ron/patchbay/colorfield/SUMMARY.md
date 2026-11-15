@@ -1,6 +1,6 @@
 # Colorfield — soft window keys as paint: breathing fields of colour on a coloured ground
 
-**v0.1.0 built 2026-11-14, not flashed.** Patchbay #10. Rothko's stacked soft rectangles at the default; at one
+**v0.1.0 built 2026-11-14; v0.1.1 (K6 camera pass) built 2026-11-15; not flashed.** Patchbay #10. Rothko's stacked soft rectangles at the default; at one
 end of the slider Ellsworth Kelly's hard-edged bars, at the other one glowing fog of colour. Presets are
 hand-written placeholders.
 
@@ -44,10 +44,10 @@ the noise on the ramps, the halo is the key's skirt, the colours are the mixer's
 |---|---|---|
 | K1 Fields | window comparators (count and proportions) | 16 layouts, four each of 1, 2, 3 and 4 rectangles (big / thin / equal / bars). The rectangles slide and resize to the new layout; a new one slides in from off-screen. +-8 hysteresis. Default 560 = layout 9 (large, thin band, medium) |
 | K2 Feather | window comparators' softness | Feather width, exponential, 3 octaves; adds to P12's 6.4 octaves (1 .. 675 table entries; an entry is about 2 lines). Default 700 |
-| K3 Breath | size LFO depth | 0 = still rectangles .. 1023 = each +-60 % of its size (they merge and part). The cross window breathes at a quarter of that. Default 512 |
+| K3 Colour | colourizer / palette (moved from K6 in v0.1.1) | 16 chords (ground dark + light, a looped palette path): Maroon, Ember, Saffron, Rust Blue, Blue Green, Hot Pink, Seagram, Ochre, Sunset (default), Violet, Ashes, Coral, Acid, Chapel, Meadow, Spectrum. Colours glide to the new chord. (K3 Breath is fixed at its old default 512: each rectangle breathes +-30 % of its size) |
 | K4 Speed | LFO / drift master rate | Bipolar, +-8 deadband: all nine LFOs and the four noise drifts; left runs them backwards. Full = 4.8x the default. Default 680 |
 | K5 Drift | colour sources' palette positions | Spacing of the fields along the chord's 16-point path (1 .. 7 steps: tonal .. far apart) and how far each wanders (0 .. +-3 steps). Default 512 = the chord's four anchor colours |
-| K6 Colour | colourizer / palette | 16 chords (ground dark + light, a looped palette path): Maroon, Ember, Saffron, Rust Blue, Blue Green, Hot Pink, Seagram, Ochre, Sunset (default), Violet, Ashes, Coral, Acid, Chapel, Meadow, Spectrum. Colours glide to the new chord |
+| K6 Camera | camera input gain | camera strength 0 .. 100 %, default 50 %: scales both the edge displacement and the stain. 0 % = no camera (the black-input picture), 25 % = the v0.1.0 gain, 50 % = x2, 100 % = x4 (the stain saturates). Osc keeps its 2x displacement over the camera. Glided, +-4 deadband |
 | S7 Layout | ramp routing | Stacked / Columns: the two tables swap axes, so the rectangles stand side by side |
 | S8 Grain | canvas | On: fixed fine grain, the mottle (edge noise at 1/4 in luma) and scumbled feathers / Off: clean flat colour, smooth feathers |
 | S9 Ground | ground colour source | Dark / Light ground of the chord (glides) |
@@ -129,7 +129,7 @@ the noise on the ramps, the halo is the key's skirt, the colours are the mixer's
 - **The halo runs along the long axis only** (above, below and between the fields); a halo on the cross key
   too made a tartan of lighter blocks left and right of the fields in the prototype.
 - **K6 has 16 labelled chords**, K1 is numeric (1 .. 16): the layouts have no good short names.
-- **The camera's displacement gain is fixed** (no knob left for it); Osc is fed at 2x.
+- **The camera's displacement gain was fixed in v0.1.0**; v0.1.1 gives it K6 (see the K6 camera pass below). Osc is fed at 2x.
 - **SD (by construction, not simulated):** the 4:3 frame shows the WHOLE composition squeezed to 4:3 (the
   table x coordinate spans the frame width in every mode), not a centre crop; the edge-noise and Osc textures
   stay in virtual pixels, so they are slightly finer relative to the rectangles. The fill needs about 8,200
@@ -144,3 +144,28 @@ the noise on the ramps, the halo is the key's skirt, the colours are the mixer's
 (if it does not, the lower table entries update a field late, with no visible fault expected on a slow
 picture); whether the fixed camera gain bends the edges enough or too much on real video; router1 build with
 no pin-skew seed screening.
+
+## K6 camera pass (2026-11-15), v0.1.1
+
+- **K6 is now Camera** (0 .. 100 %, default 512 = 50 %), decoded in fabric (the microcode is unchanged): once per
+  field from the zone start a 4-clock glide (1/8 of the gap, +-4 deadband) eases `s_kc` toward K6, and the gain
+  is g = k / 8 in Q5 (`s_cg`, 0 .. 127; k < 8 = 0). The source side multiplies both uses by g, each in its own
+  stage (edge displacement 12 x 8, stain 8 x 7), then slices: displacement x g / 32, stain x g / 32 clamped at
+  255. 0 % = exactly the black-input picture, 25 % = x1 (the v0.1.0 fixed gains), 50 % = x2, 100 % = x4.
+  The source reaches the pixel path two clocks later than before (it is lagged over ~14 px anyway); latency
+  unchanged (C_LAT 20).
+- **Osc** keeps its 2x displacement over the camera under the same gain.
+- **K6's old function (Colour, 16 chords) moved to K3; K3 Breath is fixed at 512** (its default, rectangles
+  breathing +-30 %). The microcode's knob port 2 (Breath) now reads the constant and port 5 (chord) reads K3,
+  so the engine and its settled initial state are unchanged. Presets lose their Breath values (Kelly Bars 300,
+  Blue on Green 800); the chord values moved from K6 to K3.
+- **Seen in GHDL** (720p60, decimation 1 because the table fill needs a longer vblank than any decimated
+  raster gives, selfie.jpg; `.patchbay_work/rb_colorfield/k6/k6sheet.png`): 0 % the clean Rothko stack; 25 %
+  the edges shift a little and a faint stain streaks the fields; 50 % the stain shows a soft ghost of the
+  picture (laptops and skulls) in the fields and the edges ripple with it; 100 % the picture's silhouettes
+  carve the field edges, the stain saturates and lightens the fields toward salmon / pale gold (bold, still the
+  stacked fields, not washed out). Osc at 50 %: bold scalloped edges that march across.
+- **Build v0.1.1 (2026-11-15), router1, all six configs on seed 1**: HD Analog 82.67, SD Analog 75.19, HD HDMI
+  79.30, SD HDMI 77.54, HD Dual 80.38, SD Dual 80.48 MHz post-route (worst HD 79.30). 7,083 .. 7,127 / 7,680 LC
+  (93 %; the two camera multiplies and the glide cost about 400 LC), 24 / 32 EBR.
+  `out/rev_b/ron/patchbay/colorfield.vmprog`. Not flashed.

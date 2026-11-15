@@ -6,7 +6,7 @@
 processing_delay_clks = 40
 program_id = "com.czartroniks.agate"
 program_name = "Agate"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -58,21 +58,21 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Bands"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 512
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Colour"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
 initial_value = 0
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -122,7 +122,7 @@ name = "Agate"
 [[preset]]
 name = "Split Stone"
 rotary_potentiometer_1 = 380
-rotary_potentiometer_6 = 341
+rotary_potentiometer_5 = 341
 toggle_switch_8 = 1
 toggle_switch_9 = 1
 
@@ -130,20 +130,17 @@ toggle_switch_9 = 1
 name = "Suminagashi"
 rotary_potentiometer_2 = 200
 rotary_potentiometer_3 = 800
-rotary_potentiometer_5 = 300
-rotary_potentiometer_6 = 682
+rotary_potentiometer_5 = 682
 linear_potentiometer_12 = 900
 
 [[preset]]
 name = "Neon Comb"
 rotary_potentiometer_2 = 80
-rotary_potentiometer_5 = 700
 toggle_switch_7 = 1
 toggle_switch_10 = 1
 
 [[preset]]
 name = "Ruled"
-rotary_potentiometer_5 = 640
 toggle_switch_9 = 1
 linear_potentiometer_12 = 0
 

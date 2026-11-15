@@ -35,6 +35,7 @@
 -- [1 2 2 2 2 2 2 2 1]/16 boxes, luma 13/16) before the blanking gate.  Colours in the hardware
 -- convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Soft fixed at 600 (C_KFIX_2).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -47,6 +48,7 @@ use work.limelight_pkg.all;
 use work.all;
 
 architecture limelight of program_top is
+    constant C_KFIX_2 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(600, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 16;   -- = processing_delay_clks
 
     function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
@@ -175,7 +177,8 @@ architecture limelight of program_top is
 
     -- knobs: glided (Q3), raw speed, switches
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(800 * 8, 13);
-    signal s_g2 : unsigned(12 downto 0) := to_unsigned(600 * 8, 13);
+    signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: glided K6 Camera
+    signal s_cg : unsigned(2 downto 0) := to_unsigned(4, 3);            -- camera gain step (8 steps)
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(600 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(300 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(64 * 8, 13);
@@ -212,6 +215,9 @@ architecture limelight of program_top is
     signal z_cy  : unsigned(13 downto 0) := (others => '0');
     signal z_step : unsigned(14 downto 0) := (others => '0');
     signal z_acc : signed(24 downto 0) := (others => '0');            -- the one adder: seeds, signs, RAM write data
+    signal z_ab  : signed(24 downto 0) := (others => '0');            -- its operand, registered (K6 camera pass)
+    signal z_clr, z_go, z_sub, q_we2 : std_logic := '0';
+    signal q_wa2 : unsigned(5 downto 0) := (others => '0');
     signal c_yf   : unsigned(10 downto 0) := to_unsigned(843, 11);
     signal c_sf   : unsigned(15 downto 0) := (others => '0');
     signal c_g    : unsigned(15 downto 0) := to_unsigned(683, 16);
@@ -289,6 +295,7 @@ architecture limelight of program_top is
     signal p3_ts, p4_ts, p5_tex : signed(7 downto 0) := (others => '0');
     signal p4_lm, p5_v : unsigned(7 downto 0) := (others => '0');
     signal p6_src : signed(8 downto 0) := (others => '0');
+    signal p6_srcg : signed(10 downto 0) := (others => '0');
     signal p6_tf  : signed(10 downto 0) := (others => '0');
     signal p7_lvl : unsigned(7 downto 0) := (others => '0');
     signal p5_j, p6_j : t_u8x4 := (others => (others => '0'));
@@ -352,7 +359,8 @@ begin
     begin
         if rising_edge(clk) then
             c_rq <= cram(to_integer(unsigned'("00" & c_ra)));
-            if q_we = '1' then cram(to_integer(unsigned'("00" & q_wa))) <= std_logic_vector(resize(z_acc, 32)); end if;
+            q_we2 <= q_we; q_wa2 <= q_wa;
+            if q_we2 = '1' then cram(to_integer(unsigned'("00" & q_wa2))) <= std_logic_vector(resize(z_acc, 32)); end if;
             c_bus <= c_rq;
             c_ra <= w_ra;
         end if;
@@ -419,6 +427,10 @@ begin
                 end case;
             end if;
             g_wm1 <= s_w - 1;
+            -- K6 camera gain step = round(k / 128), 0 .. 7 -> x 0, 0.625, 1.25, 2, 2.5, 3, 4, 5:
+            -- 25 % = x1.25 (shipped), 50 % = x2.5, 100 % = x5 (a two-term shift-add in the pixel path)
+            if s_g2(12 downto 9) = "1111" then s_cg <= "111";
+            else s_cg <= resize(shift_right(s_g2(12 downto 9) + 1, 1), 3); end if;
             s_oys <= f_oys(s_tid);
 
             -- shared glide (1/8 of the gap per field, +-2 deadband): four clocks per channel, run
@@ -430,10 +442,10 @@ begin
                     when "00" =>
                         case to_integer(z_gc) is
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
-                            when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
+                            when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(5));   -- K6 Camera
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(1));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -443,6 +455,7 @@ begin
                     when "01" =>
                         if s_gd > 16 or s_gd < -16 then
                             s_gd <= shift_right(s_gd, 3);
+                            if z_gc = 1 and s_gd > -33 and s_gd < 33 then s_gd <= (others => '0'); end if;   -- camera: +-4
                         else
                             s_gd <= (others => '0');
                         end if;
@@ -601,11 +614,12 @@ begin
                     if v_ph = 19 then v_sub := z_sgy; v_go := '1'; end if;
                 when others => null;
             end case;
-            if q_run = '1' then
-                if v_clr = '1' then z_acc <= (others => '0');
-                elsif v_go = '1' then
-                    if v_sub = '1' then z_acc <= z_acc - v_ab; else z_acc <= z_acc + v_ab; end if;
-                end if;
+            -- (K6 camera pass, timing: the adder's controls and operand are registered here and the add runs
+            -- one clock later; the RAM write strobe is delayed one clock to match)
+            z_clr <= v_clr and q_run; z_go <= v_go and q_run; z_sub <= v_sub; z_ab <= v_ab;
+            if z_clr = '1' then z_acc <= (others => '0');
+            elsif z_go = '1' then
+                if z_sub = '1' then z_acc <= z_acc - z_ab; else z_acc <= z_acc + z_ab; end if;
             end if;
 
             -- sine / tangent address: one of three angles, folded to the quarter wave
@@ -638,7 +652,7 @@ begin
                         when 4  => z_fa <= r_ex_q;                            z_fb <= to_unsigned(1443, 16);
                         when 5  => z_fa <= resize(s_g1(12 downto 3), 16);     z_fb <= to_unsigned(268, 16);
                         when 6  => z_fa <= r_ex_q;                            z_fb <= to_unsigned(500, 16);
-                        when 7  => z_fa <= resize(not s_g2(12 downto 3), 16); z_fb <= to_unsigned(1281, 16);
+                        when 7  => z_fa <= resize(not unsigned(C_KFIX_2), 16); z_fb <= to_unsigned(1281, 16);
                         when 8  => z_fa <= r_ex_q;                            z_fb <= to_unsigned(683, 16);
                         when 9  => z_fa <= resize(s_gp(12 downto 3), 16);     z_fb <= to_unsigned(1009, 16);
                         when 10 => z_fa <= r_ex_q;                            z_fb <= to_unsigned(30, 16);
@@ -976,6 +990,7 @@ begin
         variable v_c  : std_logic_vector(4 downto 0);
         variable v_t  : unsigned(9 downto 0);
         variable v_s  : unsigned(9 downto 0);
+        variable v_ca, v_cb : signed(15 downto 0);
         variable v_l  : signed(11 downto 0);
         variable v_l8 : unsigned(7 downto 0);
         variable v_j  : unsigned(8 downto 0);
@@ -1069,16 +1084,32 @@ begin
                 end if;
             end loop;
             p6_tf <= resize(l_fb, 11) + resize(p5_tex, 11);
+            -- K6 camera pass: the source before the camera gain (video x1, Osc = the shipped gobo / 1.25)
             if s_src = '1' then
-                v_s := resize(p5_v & '0', 10) + resize(p5_v, 10) + resize(shift_right(p5_v, 1), 10);
-                if v_s > 166 then p6_src <= to_signed(70, 9); else p6_src <= signed(resize(v_s(7 downto 0), 9)) - 96; end if;
+                v_s := resize(p5_v & '0', 10) + resize(shift_right(p5_v, 1), 10) + resize(shift_right(p5_v, 2), 10);
+                if v_s > 133 then p6_src <= to_signed(56, 9); else p6_src <= signed(resize(v_s(7 downto 0), 9)) - 77; end if;
             else
-                p6_src <= signed(resize(resize(p5_v, 9) + resize(shift_right(p5_v, 2), 9), 9));
+                p6_src <= signed(resize(p5_v, 9));
             end if;
+            -- 6b: camera gain, x (a + b) / 16 by shift-select (its own stage; the source reaches the level
+            -- one pixel after the texture)
+            v_ca := (others => '0'); v_cb := (others => '0');
+            case to_integer(s_cg) is
+                when 1      => v_ca := shift_left(resize(p6_src, 16), 3); v_cb := shift_left(resize(p6_src, 16), 1);   -- 10
+                when 2      => v_ca := shift_left(resize(p6_src, 16), 4); v_cb := shift_left(resize(p6_src, 16), 2);   -- 20
+                when 3      => v_ca := shift_left(resize(p6_src, 16), 5);                                              -- 32
+                when 4      => v_ca := shift_left(resize(p6_src, 16), 5); v_cb := shift_left(resize(p6_src, 16), 3);   -- 40
+                when 5      => v_ca := shift_left(resize(p6_src, 16), 5); v_cb := shift_left(resize(p6_src, 16), 4);   -- 48
+                when 6      => v_ca := shift_left(resize(p6_src, 16), 6);                                              -- 64
+                when 7      => v_ca := shift_left(resize(p6_src, 16), 6); v_cb := shift_left(resize(p6_src, 16), 4);   -- 80
+                when others => null;
+            end case;
+            v_ca := v_ca + v_cb;
+            p6_srcg <= v_ca(14 downto 4);
 
             -- 7: the level (0 off the generated avid); gels: per lamp a Y tap (1/4, 1/2, 1) and U, V taps
             -- (0 or +-2), summed in pairs with lamp 1's (lamp 3's) sign carried outside
-            v_l := resize(p6_tf, 12) + resize(p6_src, 12);
+            v_l := resize(p6_tf, 12) + resize(p6_srcg, 12);
             if v_l < 0 then v_l8 := (others => '0');
             elsif v_l > 255 then v_l8 := (others => '1');
             else v_l8 := unsigned(v_l(7 downto 0)); end if;

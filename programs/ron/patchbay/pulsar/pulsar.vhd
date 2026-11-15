@@ -38,6 +38,7 @@
 -- (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16 with a per-line resync, luma 13/16), blanking gate.  Colours in
 -- the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Height fixed at 880 (C_KFIX_2).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -50,6 +51,7 @@ use work.pulsar_pkg.all;
 use work.all;
 
 architecture pulsar of program_top is
+    constant C_KFIX_2 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(880, 10));   -- K6 camera pass: fixed knob
     constant C_LAT  : integer := 24;   -- = processing_delay_clks
     constant C_GLIDE : boolean := true;  -- false in the sim-only copy: knobs snap
 
@@ -153,7 +155,7 @@ architecture pulsar of program_top is
     signal s_w    : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(620 * 8, 13);
-    signal s_g2 : unsigned(12 downto 0) := to_unsigned(880 * 8, 13);
+    signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: glided K6 Camera
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(430 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(450 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
@@ -230,7 +232,8 @@ architecture pulsar of program_top is
     signal c_o1, c_o2 : unsigned(15 downto 0) := (others => '0');
     signal c_f1c, c_f2c : unsigned(15 downto 0) := (others => '0');
     signal c_tes  : unsigned(10 downto 0) := (others => '0');
-    signal c_cv   : unsigned(10 downto 0) := (others => '0');
+    signal c_cv   : signed(17 downto 0) := to_signed(1449, 18);
+    signal z_koff : unsigned(11 downto 0) := (others => '0');
     signal c_ic   : unsigned(7 downto 0) := to_unsigned(120, 8);
     signal c_nc   : unsigned(7 downto 0) := to_unsigned(128, 8);
     signal c_fend : unsigned(9 downto 0) := to_unsigned(533, 10);
@@ -476,10 +479,10 @@ begin
                     when "00" =>
                         case to_integer(z_gc) is
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
-                            when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
+                            when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(5));   -- K6 Camera
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(1));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -491,6 +494,7 @@ begin
                             null;
                         elsif s_gd > 16 or s_gd < -16 then
                             s_gd <= shift_right(s_gd, 3);
+                            if z_gc = 1 and s_gd > -33 and s_gd < 33 then s_gd <= (others => '0'); end if;   -- camera: +-4
                         else
                             s_gd <= (others => '0');
                         end if;
@@ -524,12 +528,14 @@ begin
     -- waiting (eight times in vblank, then once per baseline the beam passes).
     ---------------------------------------------------------------------------
     p_seq : process(clk)
-        variable v_k1, v_k2, v_k3, v_k5, v_k6, v_kp : unsigned(9 downto 0);
+        variable v_k1, v_kc, v_k3, v_k5, v_k6, v_kp : unsigned(9 downto 0);
+        variable v_cb  : signed(17 downto 0);
         variable v_n   : unsigned(9 downto 0);
         variable v17   : unsigned(16 downto 0);
         variable v18   : unsigned(17 downto 0);
         variable v_tk  : unsigned(15 downto 0);
         variable v_s18 : signed(17 downto 0);
+        variable v_tcv : signed(18 downto 0);
         variable v_y   : signed(16 downto 0);
         variable v_c7  : unsigned(6 downto 0);
         variable v_inc, v_dec : std_logic;
@@ -542,7 +548,7 @@ begin
         variable v_a22, v_b22, v_s22 : unsigned(21 downto 0);
     begin
         if rising_edge(clk) then
-            v_k1 := s_g1(12 downto 3); v_k2 := s_g2(12 downto 3); v_k3 := s_g3(12 downto 3);
+            v_k1 := s_g1(12 downto 3); v_kc := s_g2(12 downto 3); v_k3 := s_g3(12 downto 3);
             v_k5 := s_g5(12 downto 3); v_k6 := s_g6(12 downto 3); v_kp := s_gp(12 downto 3);
             f_go <= '0'; l_zk <= '0'; rf_we <= '0';
             v_inc := l_rel; v_dec := '0';
@@ -578,6 +584,16 @@ begin
                     when 41 =>
                         v18 := resize(z_lv & '0', 18) + resize(z_np, 18) + 180;
                         z_tdz <= f_sat16(v18);
+                    when 44 =>
+                        -- K6 camera pass: camera attenuation, 1/1024 octave.  K6 < 256: L[k] (a linear fade to 0,
+                        -- k < 8 = off); 256 .. 512: -4 (k - 256) (x1 .. x2); 512 .. 1023: -1024 - 2 (k - 512) (.. x4)
+                        if v_kc < 8 then q_la <= (others => '0'); else q_la <= v_kc(7 downto 0); end if;
+                        if v_kc(9) = '1' then z_koff <= to_unsigned(1024, 12) + resize(v_kc(8 downto 0) & '0', 12);
+                        else z_koff <= resize(v_kc(7 downto 0) & "00", 12); end if;
+                    when 48 =>
+                        if s_src = '1' then v_cb := to_signed(425, 18); else v_cb := to_signed(1449, 18); end if;
+                        if v_kc(9 downto 8) = "00" then c_cv <= signed(resize(f_lg, 18)) + v_cb;
+                        else c_cv <= v_cb - signed(resize(z_koff, 18)); end if;
                     when 51 => q_t <= resize(z_tp, 16) + 724;                         -- octaves per trace (tilt)
                     when 52 => q_t <= resize(v_k3 & "00", 16) + resize(v_k3, 16) + resize(c_tes, 16);   -- envelope step
                     when 53 => q_t <= z_tdz;                                          -- travel
@@ -601,7 +617,7 @@ begin
                     when 61 =>
                         v_ta_en := '1';                                               -- + one trace: trace -1 at fz = 0
                         m_a <= resize(c_eo, 32); m_b <= s_fz; m_acc <= (others => '0');
-                        v_n := not v_k2;
+                        v_n := not unsigned(C_KFIX_2);
                         c_ce <= resize(v_n & '0', 13) + resize(v_n(9 downto 1), 13) + resize(c_eo(15 downto 4), 13) - resize(c_eo(15 downto 7), 13);
                     when 62 => q_t <= unsigned(t_a(21 downto 6));                     -- its pitch
                     when 67 => z_pm1 <= x_v;
@@ -626,7 +642,10 @@ begin
                     when 106 =>
                         q_t <= z_ca;                                                  -- window (clip)
                         t_ca <= f_sat16(resize(z_ca, 17) + resize(c_cpb, 17));
-                        t_cv <= f_sat16(resize(z_ca, 17) + resize(c_cv, 17));
+                        v_tcv := signed(resize(z_ca, 19)) + resize(c_cv, 19);
+                        if v_tcv(18) = '1' then t_cv <= (others => '0');
+                        elsif v_tcv(17 downto 16) /= "00" then t_cv <= (others => '1');
+                        else t_cv <= unsigned(v_tcv(15 downto 0)); end if;
                         rf_we <= '1'; rf_wa <= q_fp & '0'; rf_wd <= std_logic_vector(not t_yb);
                         if t_yb >= 0 and t_yb < 17280 then t_rowv <= '1'; else t_rowv <= '0'; end if;
                         if t_yb(14) = '1' then t_row <= (others => '1'); else t_row <= unsigned(t_yb(13 downto 8)); end if;
@@ -720,7 +739,6 @@ begin
                                c_ic <= to_unsigned(120, 8); c_nc <= to_unsigned(128, 8); c_fend <= to_unsigned(533, 10);
                                c_pos0 <= to_signed(-40, 12); c_tes <= to_unsigned(1824, 11);
             end case;
-            if s_src = '1' then c_cv <= to_unsigned(425, 11); else c_cv <= to_unsigned(1449, 11); end if;
             if s_paper = '1' then
                 c_bgy <= unsigned(C_PU_PAPER(29 downto 20)); c_bgu <= unsigned(C_PU_PAPER(19 downto 10)); c_bgv <= unsigned(C_PU_PAPER(9 downto 0));
             else

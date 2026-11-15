@@ -1,6 +1,6 @@
 # Limelight: soft-keyed beams of gelled light
 
-v0.1.0 built 2026-11-14, not flashed. Patchbay #9. Presets are hand-written.
+v0.1.0 built 2026-11-14; v0.1.1 (K6 camera pass) built 2026-11-15; not flashed. Patchbay #9. Presets are hand-written.
 
 ## The patch
 
@@ -42,11 +42,11 @@ sweep takes about 9 s.
 | Control | Module | What it does |
 |---|---|---|
 | K1 Reach | level ramp / rectifier | the floor line, 500 .. 1030 lines below the top (exponential), and the fade scaled to it: 0 = short beams over a deep mirror floor, 1023 = the beams run to the bottom edge. Default 800 |
-| K2 Soft | window comparators | penumbra width 12 .. 384 px (5 octaves, glided): crisp cones .. a wash of colour. Default 600 = 91 px |
+| K2 Colour | gels | 8 gel sets (moved from K6 in v0.1.1): Primaries (magenta, red, green, azure), Stage (rose, amber, cyan, violet), Warm, Cold, Rack (hot pink / lime), CMY, Police (rose red / azure), Limelight (white, yellow, ice, lilac). Default 64 = Primaries. (K2 Soft is fixed at its old default 600 = a 91 px penumbra) |
 | K3 Sweep | LFO 1 depth | swing 3 .. 45 degrees (never 0, so the rig cannot freeze). Default 600 = 28 degrees |
 | K4 Speed | LFO 1 rate | bipolar, square law, +-8 deadband: +-0.9 sweeps / s; the sign reverses the travelling wave. LFO 2 keeps its own 0.04 Hz plus a quarter of this. Default 700 = 0.11 Hz |
 | K5 Spread | LFO 1 phase taps | phase step per lamp, 0 (all four in unison: a chorus line) .. half a cycle (neighbours opposed: scissoring). Default 300 |
-| K6 Colour | gels | 8 gel sets: Primaries (magenta, red, green, azure), Stage (rose, amber, cyan, violet), Warm, Cold, Rack (hot pink / lime), CMY, Police (rose red / azure), Limelight (white, yellow, ice, lilac) |
+| K6 Camera | source gain | camera strength 0 .. 100 %, default 50 %: 0 % = no camera (the black-input picture), 25 % = the v0.1.0 gain (x1.25), 50 % = x2.5, 100 % = x5. Scales the Osc gobo the same way. Glided, +-4 deadband |
 | S7 Lamps | rail position | Top / Foot: the rail goes below the bottom edge, the beams rise and fan outward, the "floor" becomes a ceiling line near the top |
 | S8 Haze | haze texture | Smooth (drifting strata) / Rays (the front lamp's cone split into six shafts) |
 | S9 Mix | mixer / keyer | Add (light adds) / Key (opaque layers, lamp 1 on top; each layer's soft edge falls to black before the next shows: the dark seam of an analog keyer) |
@@ -105,8 +105,8 @@ swing a camera gives, so the flip is unmistakable.
 - 6,857 .. 6,895 / 7,680 LC (90 %), 16 / 32 block RAMs. hd_clock_divisor untouched.
 - Output: out/rev_b/ron/patchbay/limelight.vmprog.
   Rebuild: NEXTPNR_ROUTER="--router router1" ./build_set.sh patchbay limelight
-- The HD critical path is in the vblank sequencer (the one adder, z_acc, with its add / subtract select). If a
-  rebuild misses on HD, register that select one phase earlier.
+- The HD critical path is in the vblank sequencer (the one adder, z_acc, with its add / subtract select). Done in
+  v0.1.1: the select and operand are registered one clock ahead of the add (see the K6 camera pass).
 - Verified in GHDL against the integer model (.patchbay_work/rb_limelight/imodel.py), 0 differing pixels in
   each case:
   - 720p60, defaults, Source Video with a black input
@@ -149,3 +149,41 @@ swing a camera gives, so the flip is unmistakable.
 - Not checked on hardware: everything. Watch first for the gel colours (the chroma taps are full-scale at low
   luma and rely on the encoder's clipping; the previews are computed, not measured), the HD Dual config (zero
   timing margin), and how visible the camera is at the default Blaze.
+
+## K6 camera pass (2026-11-15), v0.1.1
+
+- **K6 is now Camera** (0 .. 100 %, default 512 = 50 %): the gain on the source term that is added to the level every
+  beam is clipped to. Law: eight steps, step = round(k / 128) (k = the glided knob), gain x 0, 0.625, 1.25, 2,
+  2.5, 3, 4, 5: 0 % (k < 64) = 0 (the beams draw exactly the black-input picture), 25 % = x1.25 (the v0.1.0 fixed
+  gain), 50 % = x2.5, 100 % = x5. K6 rides the shared knob glide (channel 1, formerly K2's) with a +-4 deadband,
+  decoded per field.
+- **Osc is scaled by the same gain**: the gobo's pre-gain values are the v0.1.0 ones / 1.25 (+56 in the diamonds,
+  -77 around them), so 25 % is the v0.1.0 Osc and 50 % doubles it (beams nearly black between the diamonds).
+- **Where it is applied**: stage 6 forms the pre-gain source (video: luma above the threshold, x1; Osc: the
+  ramped gobo), a new stage 6b scales it by the gain (a two-term shift-add, x (a + b) / 16, its own stage; a first
+  build with a 9 x 9 multiply there missed timing on every HD config, 70 .. 72 MHz), and stage 7 adds it
+  to the level. The camera now reaches the level one pixel after the haze texture (5 px right of the beam edges
+  instead of 4; invisible). Latency unchanged (C_LAT 16).
+- **K6's old function (Colour, 8 gel sets) moved to K2**; **K2 Soft is fixed at 600** (91 px penumbra, the old
+  default). K2 was the weakest knob on the sheet: its 0 end changed the picture least of any knob (mean panel
+  difference 6.4 vs 18.5 for K1 Reach's 0 end; K1 + K2 total 29.7 vs 26.1), because the output softening hides
+  anything crisper than the default. Presets: K2 values dropped (Pencils 250, Cut Paper 100, Footlights 820);
+  the K6 gel choices moved to K2.
+- **Seen in GHDL** (720p60, decimation 2, selfie.jpg, `.patchbay_work/rb_limelight/k6/k6sheet.png`): 0 % is the
+  clean black-input picture; 25 % adds the camera as texture and lift inside the beams; 50 % and 100 % lift the
+  beams further, but the camera term already saturates at 25 %: the level is capped at twice the beam's fade
+  ramp (and the beam at its window), so a mid-grey already reaches the cap at x1.25. Mean lift inside the beams
+  7.6 / 9.1 / 10.0 codes at 25 / 50 / 100 %, the camera's fine detail about the same at all three. No washout at
+  100 % (the cap holds; the beams turn flat-bright where the picture is bright, the ground stays black). A
+  bolder camera would need the camera to darken the beams too (a redesign of the level path), not more gain.
+- Osc at 50 %: the beams survive only in the bright diamonds: bold.
+- **Timing fix in the same pass**: the first v0.1.1 build (router1, 4 seeds) missed on every HD config (69.9 ..
+  71.9 MHz, LC 7,083). The routed critical path was the vblank sequencer's one adder (slot / phase decode ->
+  add / subtract select -> 25-bit carry chain), the path v0.1.0 had already flagged. Now the adder's clear / go /
+  subtract controls and its operand are registered one clock ahead and the add runs a clock later; the block
+  RAM write strobe is delayed one clock to match (every step stays inside its 24-clock slot). A GHDL render at
+  K6 = 512 after the change is pixel-identical to the one before it (0 differing pixels).
+- **Build v0.1.1 (2026-11-15), router1, all six configs on seed 1** (after the timing fix): HD Analog 99.75,
+  SD Analog 92.76, HD HDMI 96.37, SD HDMI 99.76, HD Dual 99.58, SD Dual 97.64 MHz post-route (worst HD 96.37;
+  v0.1.0 was 78.45 .. 80.53). 6,945 .. 6,970 / 7,680 LC (91 %), 16 / 32 EBR.
+  `out/rev_b/ron/patchbay/limelight.vmprog`. Not flashed.

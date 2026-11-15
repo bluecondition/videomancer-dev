@@ -6,7 +6,7 @@
 processing_delay_clks = 16
 program_id = "com.czartroniks.limelight"
 program_name = "Limelight"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -28,13 +28,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Soft"
+name_label = "Colour"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 600
+display_min_value = 1
+display_max_value = 8
+initial_value = 64
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -68,13 +68,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Colour"
+name_label = "Camera"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 8
-initial_value = 64
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -121,7 +121,6 @@ name = "Limelight"
 
 [[preset]]
 name = "Pencils"
-rotary_potentiometer_2 = 250
 rotary_potentiometer_3 = 900
 rotary_potentiometer_5 = 1023
 linear_potentiometer_12 = 60
@@ -131,21 +130,19 @@ name = "Chorus Line"
 rotary_potentiometer_3 = 800
 rotary_potentiometer_4 = 820
 rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 320
+rotary_potentiometer_2 = 320
 toggle_switch_8 = 1
 
 [[preset]]
 name = "Cut Paper"
-rotary_potentiometer_2 = 100
-rotary_potentiometer_6 = 704
+rotary_potentiometer_2 = 704
 toggle_switch_9 = 1
 linear_potentiometer_12 = 760
 
 [[preset]]
 name = "Footlights"
 rotary_potentiometer_1 = 500
-rotary_potentiometer_2 = 820
-rotary_potentiometer_6 = 448
+rotary_potentiometer_2 = 448
 toggle_switch_7 = 1
 linear_potentiometer_12 = 700
 
@@ -153,6 +150,6 @@ linear_potentiometer_12 = 700
 name = "White Out"
 rotary_potentiometer_1 = 1023
 rotary_potentiometer_4 = 620
-rotary_potentiometer_6 = 960
+rotary_potentiometer_2 = 960
 toggle_switch_8 = 1
 linear_potentiometer_12 = 1023

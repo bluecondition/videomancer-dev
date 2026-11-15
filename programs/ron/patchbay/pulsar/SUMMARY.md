@@ -1,6 +1,6 @@
 # Pulsar — stacked scope traces with hidden lines (the PSR B1919+21 ridgeline plot)
 
-**v0.1.0 built 2026-11-14, not flashed.** Patchbay set. A patch that was never on the rack: a complex H-rate
+**v0.1.0 built 2026-11-14; v0.1.1 (K6 camera pass) built 2026-11-15; not flashed.** Patchbay set. A patch that was never on the rack: a complex H-rate
 waveform under a burst envelope, one comparator per trace against the V ramp, a priority chain so nearer traces
 hide farther ones, and an edge differentiator that draws each trace as a bright line over its black body.
 Presets are hand-written placeholders.
@@ -38,11 +38,11 @@ the peaks morph while they travel.
 | Control | Module it belongs to |
 |---|---|
 | K1 Lines | V ramp / trace baselines: 16 .. 83 traces (exponential), default 43 |
-| K2 Height | VCA 2: the tallest peak, 1.06 .. 6 pitches (exponential, 2.5 octaves); default 4.7. The video relief scales with it |
+| K2 Colour | colouriser (moved from K6 in v0.1.1): white (0) .. pale .. full colour by height (38 .. 59 %, default 50 %) .. blended .. colour by trace (97 %+): a slow rainbow that rides the traces. (K2 Height is fixed at its old default 880 = 4.7 pitches) |
 | K3 Envelope | burst envelope width: half-width 110 .. 3,500 virtual px (exponential): a narrow central ridge .. the full line; default 470 px |
 | K4 Speed | travel of the baselines: bipolar, +-8 deadband, square law; right = toward the viewer; up to 26 traces/s with BURST at 100 % |
 | K5 Rough | crossfader: VCO swells (0) .. jagged noise (100 %), in 9 steps; default half |
-| K6 Colour | colouriser: white (0) .. pale .. full colour by height (38 .. 59 %, default) .. blended .. colour by trace (97 %+): a slow rainbow that rides the traces |
+| K6 Camera | VCA on the video relief | camera strength 0 .. 100 %, default 50 %: 0 % = no relief (the black-input picture), 25 % = the v0.1.0 gain, 50 % = x2, 100 % = x4; Osc keeps its 2x over the camera. Glided, +-4 deadband |
 | S7 Fill | Black (hidden line) / Glow: a ramp under each trace, 10/16 at the line fading out over one pitch, in the colour of the height |
 | S8 Burst | burst envelope: One bump / Twin (two bumps, each half as wide, side by side) |
 | S9 Tilt | trace baselines: Flat (even pitch) / Perspective: the pitch grows by a constant ratio per trace below a horizon above the screen (1 : 6 from top to bottom), and the heights with it |
@@ -137,3 +137,25 @@ the peaks morph while they travel.
   the same rows.
 - The line's weight term uses the slope one pixel ahead of the pixel it draws (invisible; modelled).
 - The exp2 ROM steps heights by 0.27 %: a 300-row peak moves in 0.8-row steps as a knob glides.
+
+## K6 camera pass (2026-11-15), v0.1.1
+
+- **K6 is now Camera** (0 .. 100 %, default 512 = 50 %): an attenuation added to the video term's octave
+  constant CV (the relief is EXPU(L[video] + CV + the trace's attenuation)), computed once per field in the
+  sequencer (steps 44 and 48, one log-ROM look-up). Law, k = the glided knob: k < 256: + L[k] = a linear fade
+  of the gain to 0 (k < 8 = off: L[0] saturates the exponent, so the relief is exactly 0); 256 .. 512:
+  -4 (k - 256) (x1 .. x2); 512 .. 1023: -1024 - 2 (k - 512) (x2 .. x4). So 0 % = the black-input picture,
+  25 % = the v0.1.0 relief, 50 % = twice it, 100 % = four times. CV is now signed; the trace's video exponent is
+  clamped at 0 (the full EXPU scale) below. K6 rides the shared glide (channel 1, formerly K2's), +-4 deadband.
+- **Osc** keeps its 2x over the camera (CV 425 instead of 1449) under the same law.
+- **K6's old function (Colour) moved to K2; K2 Height is fixed at 880** (4.7 pitches, its default). P12 BURST
+  already sets how tall the peaks tower (VCA 1), so Height was the redundant control. Preset CP 1919 loses its
+  full Height (K2 1023); the Colour values moved from K6 to K2.
+- **Seen in GHDL** (720p60, decimation 2, selfie.jpg; `.patchbay_work/rb_pulsar/k6/k6sheet.png`): 0 % flat ruled
+  lines left of the burst; 25 % a gentle relief; 50 % clear swells that lift the colours to red and orange,
+  lines stay clean; 100 % towering overlapping relief, white-hot, some flat tops where the relief reaches the
+  trace's window (a climax that still reads as hidden-line traces). Osc at 50 %: the lattice diamonds reach the
+  window over most of the frame (white mesas with the burst's peaks on them): bold, saturated.
+- **Build v0.1.1 (2026-11-15), router1, all six configs on seed 1**: HD Analog 87.47, SD Analog 88.82, HD HDMI
+  83.01, SD HDMI 85.16, HD Dual 89.90, SD Dual 91.39 MHz post-route (worst HD 83.01). 7,020 .. 7,032 / 7,680 LC
+  (91 %), 22 / 32 EBR. `out/rev_b/ron/patchbay/pulsar.vmprog`. Not flashed.

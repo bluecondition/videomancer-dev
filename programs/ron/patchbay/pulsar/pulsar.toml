@@ -6,7 +6,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.pulsar"
 program_name = "Pulsar"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -28,11 +28,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Height"
+name_label = "Colour"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 880
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -68,7 +68,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Colour"
+name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -122,10 +122,9 @@ name = "Pulsar"
 [[preset]]
 name = "CP 1919"
 rotary_potentiometer_1 = 1023
-rotary_potentiometer_2 = 1023
 rotary_potentiometer_3 = 330
 rotary_potentiometer_5 = 800
-rotary_potentiometer_6 = 0
+rotary_potentiometer_2 = 0
 linear_potentiometer_12 = 700
 
 [[preset]]
@@ -149,7 +148,7 @@ linear_potentiometer_12 = 900
 name = "Twin Ink"
 rotary_potentiometer_1 = 760
 rotary_potentiometer_5 = 650
-rotary_potentiometer_6 = 300
+rotary_potentiometer_2 = 300
 toggle_switch_8 = 1
 toggle_switch_10 = 1
 
@@ -157,7 +156,7 @@ toggle_switch_10 = 1
 name = "Rainbow Swell"
 rotary_potentiometer_3 = 1023
 rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 1023
+rotary_potentiometer_2 = 1023
 rotary_potentiometer_4 = 300
 toggle_switch_11 = 1
 linear_potentiometer_12 = 600

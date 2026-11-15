@@ -34,6 +34,7 @@
 -- (C_LAT 20), output conditioning (two [1 2 2 2 2 2 2 2 1]/16 boxes on Y, U, V with the per-line
 -- resync, luma 13/16), blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Colour (was K6); K3 Breath fixed at 512 (C_KFIX_3).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -46,6 +47,7 @@ use work.colorfield_pkg.all;
 use work.all;
 
 architecture colorfield of program_top is
+    constant C_KFIX_3 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(512, 10));   -- K6 camera pass: fixed knob
     constant C_LAT  : integer := 20;   -- = processing_delay_clks
     constant C_SNAP : boolean := false; -- sim only: glides jump to their targets
 
@@ -155,6 +157,16 @@ architecture colorfield of program_top is
     signal v_hl  : unsigned(7 downto 0) := (others => '0');
     signal v_st  : unsigned(7 downto 0) := (others => '0');            -- stain
     signal v_vd  : signed(11 downto 0) := (others => '0');             -- edge displacement, Q4 entries
+    -- K6 camera pass: K6 Camera glided per field (Q3, +-4 deadband), gain Q5 (32 = the shipped x1)
+    signal s_kc  : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_kcr : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_kcd : signed(14 downto 0) := (others => '0');
+    signal s_kcp : std_logic_vector(3 downto 0) := (others => '0');
+    signal s_cg  : unsigned(6 downto 0) := to_unsigned(64, 7);
+    signal v_vdp : signed(19 downto 0) := (others => '0');
+    signal v_stp : unsigned(14 downto 0) := (others => '0');
+    signal v_vdg : signed(11 downto 0) := (others => '0');
+    signal v_stg : unsigned(7 downto 0) := (others => '0');
 
     -- timing / zone / width
     signal s_tid  : std_logic_vector(3 downto 0) := (others => '0');
@@ -669,10 +681,10 @@ begin
                             case to_integer(v_n(2 downto 0)) is
                                 when 0 => v_in := unsigned(registers_in(0));
                                 when 1 => v_in := unsigned(registers_in(1));
-                                when 2 => v_in := unsigned(registers_in(2));
+                                when 2 => v_in := unsigned(C_KFIX_3);
                                 when 3 => v_in := unsigned(registers_in(3));
                                 when 4 => v_in := unsigned(registers_in(4));
-                                when 5 => v_in := unsigned(registers_in(5));
+                                when 5 => v_in := unsigned(registers_in(2));
                                 when 6 => v_in := unsigned(registers_in(6));
                                 when others => v_in := unsigned(registers_in(7));
                             end case;
@@ -878,6 +890,21 @@ begin
                 v_vd <= signed(resize(v_fs(11 downto 4) & '0', 12));
                 v_st <= v_hl - resize(shift_right(v_hl, 2), 8);
             end if;
+            -- K6 camera pass: the camera gain, one multiply per use in its own stage, then the slice
+            v_vdp <= v_vd * signed('0' & s_cg);
+            v_stp <= v_st * s_cg;
+            v_vdg <= v_vdp(16 downto 5);
+            if v_stp(14 downto 13) /= "00" then v_stg <= (others => '1'); else v_stg <= v_stp(12 downto 5); end if;
+            -- K6 glide, once per field from the zone start: 1/8 of the gap, +-4 deadband; gain = k / 8 (Q5):
+            -- 25 % = x1 (shipped), 50 % = x2, 100 % = x4; k < 8 = 0
+            s_kcp <= s_kcp(2 downto 0) & s_zgo;
+            if s_zgo = '1' then s_kcr <= unsigned(registers_in(5)); end if;
+            if s_kcp(0) = '1' then s_kcd <= signed(resize(s_kcr & "000", 15)) - signed(resize(s_kc, 15)); end if;
+            if s_kcp(1) = '1' then
+                if s_kcd > 32 or s_kcd < -32 then s_kcd <= shift_right(s_kcd, 3); else s_kcd <= (others => '0'); end if;
+            end if;
+            if s_kcp(2) = '1' then s_kc <= unsigned(signed(s_kc) + s_kcd(12 downto 0)); end if;
+            if s_kcp(3) = '1' then s_cg <= s_kc(12 downto 6); end if;
         end if;
     end process p_src;
 
@@ -956,11 +983,11 @@ begin
             v_r2 := unsigned(q_lfsr(19 downto 10)) xor q_w(10 downto 1);
             v_by := f_bayer(b_row, q_col);
             if s_cols = '0' then
-                p6_th <= signed(resize(b_iy, 16)) + resize(shift_right(p5_mh, 4), 16) + resize(v_vd, 16);
+                p6_th <= signed(resize(b_iy, 16)) + resize(shift_right(p5_mh, 4), 16) + resize(v_vdg, 16);
                 p6_tv <= signed(resize(q_ix(16 downto 4), 16)) + resize(shift_right(p5_mv, 4), 16);
             else
                 p6_th <= signed(resize(b_iy, 16)) + resize(shift_right(p5_mh, 4), 16);
-                p6_tv <= signed(resize(q_ix(16 downto 4), 16)) + resize(shift_right(p5_mv, 4), 16) + resize(v_vd, 16);
+                p6_tv <= signed(resize(q_ix(16 downto 4), 16)) + resize(shift_right(p5_mv, 4), 16) + resize(v_vdg, 16);
             end if;
             if s_groff = '0' then
                 p6_e1 <= signed(resize(v_by, 12)) + signed(resize(v_r1 and c_mask, 12)) - signed(resize(c_half, 12));
@@ -991,11 +1018,11 @@ begin
             if v_ql = 0 or v_qc = 0 then p11_st <= (others => '0');
             else
                 case to_integer(v_sh) is
-                    when 0      => p11_st <= v_st;
-                    when 1      => p11_st <= shift_right(v_st, 1);
-                    when 2      => p11_st <= shift_right(v_st, 2);
-                    when 3      => p11_st <= shift_right(v_st, 3);
-                    when others => p11_st <= shift_right(v_st, 4);
+                    when 0      => p11_st <= v_stg;
+                    when 1      => p11_st <= shift_right(v_stg, 1);
+                    when 2      => p11_st <= shift_right(v_stg, 2);
+                    when 3      => p11_st <= shift_right(v_stg, 3);
+                    when others => p11_st <= shift_right(v_stg, 4);
                 end case;
             end if;
             -- 12: + ground

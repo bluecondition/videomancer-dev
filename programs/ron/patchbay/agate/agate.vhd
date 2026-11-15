@@ -40,6 +40,7 @@
 -- [1 2 2 2 2 2 2 2 1]/16 boxes, luma 13/16) before the blanking gate.  Colours in the hardware
 -- convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Bands fixed at 512 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -52,6 +53,7 @@ use work.agate_pkg.all;
 use work.all;
 
 architecture agate of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(512, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 40;   -- = processing_delay_clks
 
     function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
@@ -184,7 +186,7 @@ architecture agate of program_top is
     signal l_we : std_logic := '0';
     signal l_p10, l_p11, l_p12 : std_logic := '0';
     signal c9   : unsigned(10 downto 0) := (others => '0');
-    signal s13_l : unsigned(13 downto 0) := (others => '0');
+    signal s13_l : unsigned(15 downto 0) := (others => '0');
 
     -- colouriser phase store (the line above, a quarter of the horizontal rate) for the vertical
     -- footprint; each entry is read for its four pixels and rewritten by the last of them
@@ -258,7 +260,9 @@ architecture agate of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
-    signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: glided K6 Camera
+    signal s_cgq : unsigned(6 downto 0) := to_unsigned(52, 7);         -- camera gain, 13 k / 128 (26 = shipped)
+    signal l_v13 : unsigned(11 downto 0) := (others => '0');
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(0, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(800 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
@@ -285,7 +289,7 @@ architecture agate of program_top is
     signal c_ly   : unsigned(15 downto 0) := to_unsigned(39219, 16);
     type t_amp is array (0 to 4) of unsigned(11 downto 0);
     signal c_amp  : t_amp := (others => (others => '0'));
-    signal c_g    : unsigned(11 downto 0) := to_unsigned(512, 12);     -- Bands gain, Q8
+    constant c_g  : unsigned(11 downto 0) := to_unsigned(512, 12);     -- Bands gain, Q8 (K5 Bands fixed at 512)
     signal c_rot  : unsigned(7 downto 0) := (others => '0');
     signal c_my, c_mu, c_mv : unsigned(9 downto 0) := to_unsigned(512, 10);   -- the window's mean colour
     signal c_d    : unsigned(13 downto 0) := (others => '0');          -- drift per field (speed^2 / 16)
@@ -529,8 +533,8 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(5));   -- K6 Camera
+                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(4));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -540,6 +544,7 @@ begin
                     when "01" =>
                         if s_gd > 16 or s_gd < -16 then
                             s_gd <= shift_right(s_gd, 3);
+                            if z_gc = 3 and s_gd > -33 and s_gd < 33 then s_gd <= (others => '0'); end if;   -- camera: +-4
                         else
                             s_gd <= (others => '0');
                         end if;
@@ -632,17 +637,8 @@ begin
                         r_ex_a <= unsigned(v_e(7 downto 0)); z_sh <= v_e(10 downto 8);
                         c_rot <= s_g6(12 downto 5);
                     when 28 => z_mt <= r_ex_q;
-                    -- Bands exponent = k5 - 512: +-2 octaves; gain = 2 * 2^e, Q8
-                    when 29 =>
-                        v_e := signed(resize(s_g5(12 downto 3), 11)) - 512;
-                        r_ex_a <= unsigned(v_e(7 downto 0)); z_sh <= v_e(10 downto 8);
+                    -- (K6 camera pass: Bands is fixed at its default, gain 2.0 = the constant c_g)
                     when 31 =>
-                        case to_integer(z_sh) is
-                            when -2     => c_g <= resize(r_ex_q(15 downto 8), 12);
-                            when -1     => c_g <= resize(r_ex_q(15 downto 7), 12);
-                            when 0      => c_g <= resize(r_ex_q(15 downto 6), 12);
-                            when others => c_g <= resize(r_ex_q(15 downto 5), 12);
-                        end case;
                         -- the Scale shift again, for slot 0's store
                         v_e := signed(resize(s_g1(12 downto 3), 11)) - 512;
                         v_e := v_e - shift_right(v_e, 2);
@@ -689,6 +685,9 @@ begin
                 end case;
             end if;
 
+            -- K6 camera gain from the glided knob (changes only in the vblank glide): 13 k >> 7
+            s_cgq <= resize(shift_right(shift_left(resize(s_g5(12 downto 3), 14), 3) + shift_left(resize(s_g5(12 downto 3), 14), 2)
+                                        + resize(s_g5(12 downto 3), 14), 7), 7);
             s_gav_sr(0) <= g_avid;
             for i in 1 to C_LAT - 1 loop
                 s_gav_sr(i) <= s_gav_sr(i - 1);
@@ -971,7 +970,7 @@ begin
         variable v_x  : unsigned(23 downto 0);
         variable v_x21 : unsigned(17 downto 0);
         variable v_l  : unsigned(11 downto 0);
-        variable v_m  : unsigned(15 downto 0);
+        variable v_mp : unsigned(18 downto 0);
         variable v_d  : signed(12 downto 0);
         variable v_w2 : unsigned(12 downto 0);
         variable v_g1, v_g2 : unsigned(11 downto 0);
@@ -1051,8 +1050,11 @@ begin
             end if;
             l_wa <= l_ra2;
             l_we <= s_gav_sr(10) and l_p12;
-            v_m := resize(v_l & "000", 16) + resize(v_l & "00", 16) + resize(v_l, 16);
-            if s_src = '1' then s13_l <= v_m(15 downto 2); else s13_l <= resize(v_m(15 downto 4), 14); end if;
+            -- K6 camera pass: luma x 13 k / 4096 in its own stage (one pixel later): 25 % = x13/16 (shipped),
+            -- 50 % = x2, 100 % = x4; four times that for the oscillator
+            l_v13 <= v_l;
+            v_mp := l_v13 * s_cgq;
+            if s_src = '1' then s13_l <= v_mp(18 downto 3); else s13_l <= resize(v_mp(18 downto 5), 16); end if;
 
             -- 23..25: U = X * Bands (mod 4 colouriser cycles), 1024 per cycle
             v_x := unsigned(resize(signed(px22), 24));
