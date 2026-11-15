@@ -1,5 +1,6 @@
 # Idol — a camera idol folded in a frame-store mirror, colourized on flat yellow (Heirloom #31)
 
+**v0.6.2 (2026-11-15): K6 camera pass, K6 Ground → Camera; see [below](#k6-camera-pass-2026-11-15-v062).**
 **v0.6.1 (2026-11-03): phase 2 FINAL except presets.** Ron approved the v0.6.1 diag after flashing it, and it was
 merged into production (see [v0.6.1](#v061-bold-axis), [Phase 2](#phase-2-v060) and the
 [sign-off](#phase-2-sign-off-2026-11-03)). Built 2026-11-03 with router2, all six configs on seed 1:
@@ -20,6 +21,36 @@ v0.1.0 (a relief-shaded column of the picture) was judged too abstract. This ver
 a store of its field and reproduces it through the measured colourizer, mirror, key, smear and streaks.
 Working files: `.heirloom_work/rb_idol/`: `notes.md`, `protof.py` (float proto), `gfit.py` / `quant.py`
 (store fit), `imodel.py` (integer model), `sheet.png` (control sheet), `cmp_final.png`.
+
+## K6 camera pass (2026-11-15), v0.6.2
+Ron's rule for the Heirloom / Kinetic / Patchbay sets: K6 is the camera strength, default 50 %. Idol is FINAL, so the
+change is kept small; the default frame is unchanged in both modes.
+- **Idol is a "camera IS the picture" program** (Video = the camera's frame store through the colourizer), so K6 =
+  how strongly the camera shows, renamed **Camera** (was Ground).
+- **Video:** a camera luma gain in the store writer, `luma × 0.291 × g/128` with g = the glided K6 / 4 (the existing
+  K6 glide: ±4 hold, 1/8 ease), clamped at white. One 9 × 8 multiply in a writer stage of its own plus a clamp stage
+  (the writer is two clocks deeper, the stored picture moves 2 px: invisible at 30 px per store column; the pixel
+  path and its 30-clock latency are untouched). 0 % = black in the store, so the picture is exactly the black-input
+  picture (all yellow ground, black on Rainbow); 25 % = ×0.5 (the bands crowd into the yellow → light-blue half of
+  the cycle, more ground); 50 % = ×1 (bit-identical: g = 128); 100 % = ×2 (the darks come up out of the ground into
+  the full cycle and the streaks grow with the camera's edges; the brightest areas clip to code 15, a flat
+  yellow-orange, which reads as part of the idol, not a washout). The key window stays at the photo's 61 in Video.
+- **Osc** (the fitted store, which plays the camera there): K6 is the old Ground key window, inverted, so it is how
+  much of the Osc idol shows over the yellow ground: 0 % = 1085 (more than half the cycle: everything is ground),
+  25 % = 317, 50 % = 61 (the photo), then 61 − (K6 − 512)/8 down to 0 (no ground, the stored key off) from ~98 %.
+  Phase gains are not usable on the Osc store (its phases are cyclic; a gain other than P12's about the pivot tears
+  seams), so the Osc side stays a window.
+- **K6's old function (Ground) is not lost:** it is the Osc half of the new K6, and in Video the camera gain does its
+  job (less gain = more of the picture falls into the black key). Nothing is frozen and no other knob changed.
+  Preset Calm Flood's Ground 800 (window 646) became Camera 146 (the same window).
+- Renders: `.heirloom_work/rb_idol/k6/k6sheet.png` (720p60, decimation 2, selfie; Video K6 0 / 256 / 512 / 1023, Osc
+  0 / 256 / 512 / 1023). Video: 0 solid yellow, 256 a pale warm idol with grey faces sinking into the ground, 512 =
+  the shipped render (matches `rtl_vid.png`), 1023 a hotter idol (red / blue / orange background bands, the bright
+  faces flat yellow). Osc: 0 solid yellow, 256 the centre's orange / cream turned to ground, 512 the photo, 1023 almost
+  the photo (the ground only loses its key: **the Osc top half is subtle**; the bottom half carries the Osc range).
+- **Build** (router1, 2026-11-15, all six seed 1): HD Analog 79.31, SD Analog 83.15, HD HDMI 81.99, SD HDMI 79.81, HD
+  Dual 79.63, SD Dual 79.74 MHz (worst HD 79.31, better than v0.6.1's router2 74.79); 7,373–7,395 / 7,680 LC (96 %,
+  v0.6.1 94 %), 27 / 32 EBR. `out/rev_b/ron/heirloom/idol.vmprog`. NOT flashed.
 
 ## v0.6.1: bold Axis
 Ron's note from flashing v0.6.0 (2026-11-02): "not seeing much happening from P3 Axis".
@@ -175,7 +206,7 @@ Rainbow palette's hues on hardware, motion over time (swell / ripple travel), SD
 | K3 Axis | the mirror line | 13 .. 91 % of the height (48 % = the photo), the idol riding on it: below the photo the fold shrinks into stacked idols (4 at 0 %), above it the top half stretches down to the line (v0.6.1) |
 | K4 Speed | the bands' colours, widths and rows | bipolar colour cycling, still at the centre (±8); default +17 % ≈ 14 s per cycle. Past the default either way the bands swell in sequence and the rows ripple sideways, deeper with speed |
 | K5 Smear | the sideways smear and whitish fringes | chroma box 1 .. 128 px in power-of-two steps (64 = the photo), luma box a quarter of it |
-| K6 Ground | the flat yellow ground | key window: 0 = no ground, 30 % = the photo, 100 % = 89 % of the cycle flat (only a blue band left) |
+| K6 Camera | how strongly the source shows (v0.6.2, was Ground) | Video: the camera's luma gain into the store, 0 = black (all yellow ground) → 25 % ×0.5 → 50 % ×1 (the photo) → 100 % ×2 (darks pulled up into the bands, highlights clip to flat yellow-orange). Osc: the old Ground key window, inverted: 0 = all ground (solid yellow) → 25 % = 0.15 cycle each side flat → 50 % = the photo's window → ~98 % and up = no ground |
 | S7 Mirror | the fold | Fold (the photo) / Off (Osc: the top half repeats; Video: the plain camera) |
 | S8 Twin | the idol's symmetry | adds a left/right mirror: a symmetric totem |
 | S9 Palette | the colourizer family | Photo (yellow ground) / Rainbow (the hue once round the wheel, black ground) |

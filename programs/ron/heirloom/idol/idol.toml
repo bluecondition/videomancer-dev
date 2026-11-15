@@ -1,4 +1,4 @@
-# Idol - Heirloom #31 (v0.6.1 phase 2, 2026-11-03: the v0.6 diag merged, bold Axis; v0.5.0 2026-10-27), rebuilt from WIN_20230515_23_14_37.
+# Idol - Heirloom #31 (v0.6.2 K6 camera pass 2026-11-15: K6 Ground -> Camera; v0.6.1 phase 2, 2026-11-03: the v0.6 diag merged, bold Axis; v0.5.0 2026-10-27), rebuilt from WIN_20230515_23_14_37.
 # A camera idol folded top-to-bottom, through a cyclic yellow/orange/blue/brown colourizer on a
 # flat yellow ground, smeared sideways and feathered into per-line streaks.
 
@@ -6,7 +6,7 @@
 processing_delay_clks = 30
 program_id = "com.czartroniks.idol"
 program_name = "Idol"
-program_version = "0.6.1"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -68,11 +68,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Ground"
+name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 307
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -155,6 +155,6 @@ toggle_switch_11 = 1
 [[preset]]
 name = "Calm Flood"
 rotary_potentiometer_1 = 0
-rotary_potentiometer_6 = 800
+rotary_potentiometer_6 = 146
 toggle_switch_11 = 1
 linear_potentiometer_12 = 150

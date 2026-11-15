@@ -1,10 +1,36 @@
 # Kiln — camera fired in a frame-store kiln
 
+**v0.6.2 (2026-11-15): K6 camera pass, K6 = Camera (the old K3 Blocks), K3 = Glaze; see [below](#k6-camera-pass-2026-11-15-v062).**
 **v0.6.1 phase 2 FINAL (2026-11-03): the v0.6.1 diag merged into production.** Ron flashed the v0.6.0 diag ("kiln is
 pretty much the perfect program") and asked for one change: replace Quench with an option that makes K1 Tiles glide and
 lock into whole tile counts. That is v0.6.1's S10 Tile Lock; Ron then said "finalize kiln". `out/rev_b/ron/heirloom/kiln.vmprog`
 is the v0.6.1 diag's six bitstreams repacked with the production TOML. See [v0.6.1](#v061-s10-tile-lock) and
 [Phase 2](#phase-2-v060).
+
+## K6 camera pass (2026-11-15), v0.6.2
+Ron's rule for the Heirloom / Kinetic / Patchbay sets: K6 is the camera strength, default 50 %. Kiln is FINAL, so the
+change is as small as it can be.
+- **Kiln is a "camera IS the picture" program** (the camera frame store is the picture), so K6 = how strongly the
+  camera shows. The old **K3 Blocks** was already that control: the colouriser contrast `(s − 40) × g` about the red
+  mids, applied to the store's s (the camera in Video, the stored scene in Osc) before Heat, the fibre noise and
+  the comb are added. So Blocks moved to K6 and was renamed **Camera**; **Glaze moved to K3** (labelled, same eight
+  colourways). Nothing is frozen; preset values swapped keys.
+- **Law** (per field, on the existing K3 glide, now reading K6: ±4 hold, 1/8 ease): gain g/64 =
+  - 0 % → 0 (new: the bottom quarter is now linear 0 .. 0.5x, was 0.25 .. 0.5x), so the camera fades out to flat
+    red mids with only the fibres left;
+  - 25 % → 0.5x, 50 % → 1x (the shipped look, bit-identical), 75 % → 2x, 100 % → 4x (as v0.6.1: bold blue / yellow /
+    white-hot blocks that still read as kiln, no washout).
+  - In the bottom quarter the K5 rim lift fades with it in three steps (full from 25 %, 1/2 from 12.5 %, 1/4 from
+    6 %, none below), so 0 % leaves no camera edges either (the Video rims are an edge map of the camera).
+- Renders: `.heirloom_work/rb_kiln/k6/k6sheet.png` (720p60, decimation 2, selfie, Glaze Fire, K6 0 / 256 / 512 / 1023
+  and Osc at 512; a sim-only copy bypasses the K6 glide). 0 = flat red-orange fibres (no camera); 256 = the camera
+  surfacing faintly in yellow and violet; 512 = the shipped Video look; 1023 = the camera posterised into bold blue,
+  yellow and white-hot blocks. (Sim note: an enum rotary sims at 512 unless set, which on K3 is Glaze Violet; set
+  `rotary_potentiometer_3=0` for Fire.)
+- **Build** (router1, 2026-11-15): HD Analog s1 85.85, SD Analog s1 83.25, HD HDMI s1 83.44, SD HDMI s1 83.01, HD Dual
+  s1 80.21, **SD Dual s2** 85.79 MHz (seed 1 stalled router1; the netlist has 4 LUTs with a duplicated input net in
+  the old lift / noise lerps, no carry self-adds); worst HD 80.21 (v0.6.1's router2 worst was 76.41);
+  7,347–7,374 / 7,680 LC (96 %), 27 / 32 EBR. `out/rev_b/ron/heirloom/kiln.vmprog`. NOT flashed.
 
 ## v0.6.1: S10 Tile Lock
 Ron's note on v0.6.0 (2026-11-02): "in place of the quench knob, make an option that changes the behavior of K1 Tiles.
@@ -138,10 +164,10 @@ The measurements and fits are in `.heirloom_work/rb_kiln/notes.md`.
 |---|---|
 | K1 Tiles | the horizontal repeat: 0.5–6.4 copies across, exponential (1.94 = the photo, at 54 %) |
 | K2 Fibres | the fibre texture (colour noise 0–2x) and the sideways tear of the venetian blinds (0–17x, steep above the photo at 50 %) |
-| K3 Blocks | the yellow blocks and blue patches: colouriser contrast 0.25–4x about the red mids (photo 1x at 50 %) |
+| K3 Glaze | the fire palette's colourway: Fire (the photo) / Ice / Ember / Toxic / Violet / Mono / Neon / Rust (was K6, v0.6.2) |
 | K4 Drift | the frame-store scroll (bipolar, still in the centre ± 8, square law, up to ~2 cells per field); past the default speed a sideways wave runs down (right) / up (left) the frame, up to ±34 cells |
 | K5 Rims | the pink rims and ring edges: lift −1x..2.9x (1x at 50 %, none at 25 %); in Video, rims on the camera's edges |
-| K6 Glaze | the fire palette's colourway: Fire (the photo) / Ice / Ember / Toxic / Violet / Mono / Neon / Rust |
+| K6 Camera | how strongly the camera (Osc: the stored scene) shows, = the old K3 Blocks: colouriser contrast about the red mids, 0 at 0 % (faded to flat red, the rims fading with it) → 0.5x at 25 % → 1x at 50 % (the photo) → 4x at 100 % (the yellow blocks and blue patches swell into blue / yellow / white-hot) (v0.6.2) |
 | S7 Mirror | the top/bottom symmetry: Mirror (the photo) / Repeat |
 | S8 Kaleido | the partial left/right symmetry: Off / On (every other copy flipped) |
 | S9 Strips | Off (the photo) / On: 8 mirrored bands per half slid apart; half of them stand while the rest scroll |

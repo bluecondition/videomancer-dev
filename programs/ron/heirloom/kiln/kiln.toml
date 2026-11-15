@@ -1,4 +1,4 @@
-# Kiln - Heirloom #32, v0.6.1 phase-2 final (2026-11-03); v0.5.0 (2026-10-27) rebuilt from the photo
+# Kiln - Heirloom #32, v0.6.2 K6 camera pass (2026-11-15: K6 Camera = the old K3 Blocks, K3 = Glaze); v0.6.1 phase-2 final (2026-11-03); v0.5.0 (2026-10-27) rebuilt from the photo
 # WIN_20230515_23_17_11.  Camera video in a frame store zoomed to a quadrant, repeated across (1.94 copies)
 # with the bottom row mirrored, through a fire colouriser (blue / violet / purple / magenta / red / orange /
 # yellow) and torn into rising horizontal fibres with an interlace comb.  Phase 2: wider Tiles / Blocks /
@@ -9,7 +9,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.kiln"
 program_name = "Kiln"
-program_version = "0.6.1"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -43,13 +43,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Blocks"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 512
-display_float_digits = 0
-suffix_label = "%"
+name_label = "Glaze"
+value_labels = ["Fire", "Ice", "Ember", "Toxic", "Violet", "Mono", "Neon", "Rust"]
+initial_value_label = "Fire"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -73,9 +69,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Glaze"
-value_labels = ["Fire", "Ice", "Ember", "Toxic", "Violet", "Mono", "Neon", "Rust"]
-initial_value_label = "Fire"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 # --- Toggle Switches (7-11) ---
 
@@ -127,10 +127,10 @@ suffix_label = "%"
 name = "Photo"
 rotary_potentiometer_1 = 551
 rotary_potentiometer_2 = 512
-rotary_potentiometer_3 = 512
+rotary_potentiometer_6 = 512
 rotary_potentiometer_4 = 640
 rotary_potentiometer_5 = 512
-rotary_potentiometer_6 = 0
+rotary_potentiometer_3 = 0
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
@@ -146,7 +146,7 @@ rotary_potentiometer_2 = 650
 [[preset]]
 name = "White Hot"
 linear_potentiometer_12 = 1000
-rotary_potentiometer_3 = 760
+rotary_potentiometer_6 = 760
 
 [[preset]]
 name = "Kaleidoscope"
@@ -157,13 +157,13 @@ rotary_potentiometer_4 = 700
 [[preset]]
 name = "Torn"
 rotary_potentiometer_2 = 960
-rotary_potentiometer_3 = 640
+rotary_potentiometer_6 = 640
 
 [[preset]]
 name = "Frieze"
 rotary_potentiometer_1 = 1000
 toggle_switch_8 = 1
-rotary_potentiometer_3 = 700
+rotary_potentiometer_6 = 700
 
 [[preset]]
 name = "Strips"
@@ -174,5 +174,5 @@ rotary_potentiometer_5 = 800
 [[preset]]
 name = "Etched"
 rotary_potentiometer_5 = 0
-rotary_potentiometer_3 = 900
+rotary_potentiometer_6 = 900
 toggle_switch_11 = 0

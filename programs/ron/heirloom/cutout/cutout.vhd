@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Cutout v0.6.0 -- Heirloom #55 (phase 2, 2026-11-01), rebuilt from tezcatlipoca.jpg (a paper collage).
+-- Cutout v0.6.2 -- Heirloom #55 (phase 2, 2026-11-01), rebuilt from tezcatlipoca.jpg (a paper collage).
 --
 -- The collage: a skull-like head in profile, facing left, cut out of a flat cadmium-yellow
 -- ground and filled with overlapping torn magazine scraps -- blues, teals, glossy blacks, a sea,
@@ -17,7 +17,7 @@
 -- (Source = Osc: a generated magazine photo) from a 128 x 64 x 4-bit store at its own crop, scale
 -- and flip, drifting on its own line, through its own ink ramp (16 luma quantiles of that scrap family
 -- in the photo).  The crop, flip and scale come per pixel from a slot word per scrap that the field
--- sequencer recomputes every field (the scraps are separate modules: K2 and K6 patch into all of them).  The
+-- sequencer recomputes every field (the scraps are separate modules: K2 and K3 patch into all of them).  The
 -- soup and its cream rim are chord quadratics (one squarer), the cup, saucer, garnish, plate, plate
 -- rim, gravy and pastries come from the map (rings from the distance), the teeth and the "Love."
 -- glyph from a 4096 x 2 detail ROM, the forks are per-line bars.
@@ -26,11 +26,12 @@
 --                fringe with it (none .. the photo's .. thick, on every scrap)
 --   K2  Crops    0 = every scrap prints one camera frame in register, zoomed to span the head; 50 % =
 --                the photo's crops; up: each scrap's crop slides off on its own, flips and rescales
---   K3  Ink      texture contrast of the scraps: flat paper .. the photo .. hard 2-tone
+--   K3  Speed    bipolar: each scrap's picture drifts on its own line and rate, "Love." crawls, the
+--                Osc photo drifts, the torn strips sway (centre = still)   [was K6, v0.6.2]
 --   K4  Jaw      the jaw drops open (0 = closed, the photo)
 --   K5  Paint    the ground: yellow (the photo) and seven more poster paints
---   K6  Speed    bipolar: each scrap's picture drifts on its own line and rate, "Love." crawls, the
---                Osc photo drifts, the torn strips sway (centre = still)
+--   K6  Camera   how strongly the camera (or the Osc photo) prints in the scraps: 0 = flat paper
+--                colours (camera faded out) .. 50 % the photo .. 100 % hard (x1.94)   [was K3 Ink, v0.6.2]
 --   S7  Facing   Left (the photo) / Right (mirrored)
 --   S8  Inks     Photo / Swap (the scraps trade ink ramps: a warm head, a cool cup and plate)
 --   S9  Chatter  Off / On (the jaw chatters, at least a third open)
@@ -47,6 +48,8 @@
 -- chroma [1 2 2 2 2 2 2 2 1]/16, luma to ~777) before the blanking gate.  Latency 32 in every
 -- mode.  Colours in the hardware convention (u = Cr, v = Cb), see cutout.py.
 
+-- K6 camera pass 2026-11-15 (v0.6.2): K6 = Camera (the old K3 Ink contrast, which is the camera strength:
+-- flat .. photo .. x1.94), K3 = Speed (was K6); default K6 50 % = the shipped look.  Pure register remap.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -266,7 +269,7 @@ architecture cutout of program_top is
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal s_mir, s_swp, s_cht, s_eye, s_osc : std_logic := '0';
     signal s_spd : signed(9 downto 0) := (others => '0');
-    -- P12 glide (Q.3); K2 deadband latch; 32-step hysteresis indices: K1, K3, K5
+    -- P12 glide (Q.3); K2 deadband latch; 32-step hysteresis indices: K1, K6 (s_kr3), K5
     signal s_g12 : unsigned(12 downto 0) := (others => '0');                      -- P12 glide (Q.3)
     signal s_g2 : unsigned(9 downto 0) := to_unsigned(512, 10);                    -- K2 Crops, powers up at the photo
     signal gl_d : signed(13 downto 0) := (others => '0');
@@ -613,7 +616,7 @@ begin
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
-                v_x := signed(resize(unsigned(registers_in(5)), 11)) - 512;          -- K6 Speed
+                v_x := signed(resize(unsigned(registers_in(2)), 11)) - 512;          -- K3 Speed (was K6)
                 if v_x > -16 and v_x < 16 then s_spd <= (others => '0'); else s_spd <= v_x(9 downto 0); end if;
                 s_mir <= registers_in(6)(0);
                 s_swp <= registers_in(6)(1);
@@ -640,9 +643,9 @@ begin
             if s_zgo = '1' and (resize(s_kr2, 11) > resize(s_g2, 11) + 3 or resize(s_kr2, 11) + 3 < resize(s_g2, 11)) then
                 s_g2 <= s_kr2;
             end if;
-            -- K1 Rag, K3 Ink, K5 Paint: 32-step indices with hysteresis (no ADC flicker)
+            -- K1 Rag, K6 Camera (was K3 Ink), K5 Paint: 32-step indices with hysteresis (no ADC flicker)
             s_kr1 <= unsigned(registers_in(0)); s_kr2 <= unsigned(registers_in(1));
-            s_kr3 <= unsigned(registers_in(2)); s_kr5 <= unsigned(registers_in(4));
+            s_kr3 <= unsigned(registers_in(5)); s_kr5 <= unsigned(registers_in(4));
             s_kr12 <= unsigned(registers_in(7));
             s_hn1 <= f_hyst(s_kr1, s_h1);
             s_hn3 <= f_hyst(s_kr3, s_h3); s_hn5 <= f_hyst(s_kr5, s_h5);
@@ -650,7 +653,7 @@ begin
                 s_h1 <= s_hn1; s_h3 <= s_hn3; s_h5 <= s_hn5;
             end if;
             -- field values (settle long before the field sequencer reads them)
-            f_c16 <= s_h3;                                                   -- K3 Ink, Q.3: flat .. 16 the photo .. 31 hard
+            f_c16 <= s_h3;                                                   -- K6 Camera, Q.3: flat .. 16 the photo .. 31 hard
             -- K2 Crops: gain A (Q.9) = g below the centre, 3g - 1024 above; zoom index (one camera frame
             -- across the head at 0 .. the photo's from the centre up); 32-step position for the flip / scale steps
             if s_g2(9) = '0' then

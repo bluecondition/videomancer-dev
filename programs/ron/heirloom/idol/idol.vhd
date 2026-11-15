@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Idol v0.6.1 (phase 2) -- Heirloom #31, rebuilt from the photo WIN_20230515_23_14_37.
+-- Idol v0.6.2 (phase 2; K6 camera pass 2026-11-15) -- Heirloom #31, rebuilt from the photo WIN_20230515_23_14_37.
 --
 -- The photo: a camera on a small idol figure (hat, eyes, an open "O" mouth -- it shows plainly in
 -- the blue channel, twice, 324 px apart), folded top-to-bottom about row 518.5 by a frame-store
@@ -33,7 +33,9 @@
 --                colour bands also swell in sequence (a travelling sine on the palette position) and the
 --                rows ripple sideways (a travelling sine down the folded store, up to ~6 cells)
 --   K5  Smear    horizontal smear, chroma box 1 .. 128 px (64 = the photo), luma a quarter of it
---   K6  Ground   the key window: none .. the photo (30 %) .. 89 % of the cycle flat (only a blue band left)
+--   K6  Camera   how strongly the source shows (K6 camera pass 2026-11-15, was Ground).  Video: the camera's
+--                luma gain into the store, 0 (black: all yellow ground) .. 1 (the photo, 50 %) .. 2.  Osc: the
+--                old Ground key window inverted: 0 = all ground .. the photo's window (50 %) .. no ground
 --   S7  Mirror   Fold / Off (Osc: the top half repeats; Video: the plain camera)
 --   S8  Twin     left/right mirror too
 --   S9  Palette  Photo (yellow ground) / Rainbow (the hue once round the wheel, black ground)
@@ -145,11 +147,11 @@ architecture idol of program_top is
     signal t_q : unsigned(14 downto 0) := to_unsigned(2185, 15);
     signal s_brst : std_logic := '0';
     signal s_warm : unsigned(3 downto 0) := (others => '0');
-    -- glides: K1 Feather, K2 Hue, K3 Axis, K6 Ground, P12 Bands
+    -- glides: K1 Feather, K2 Hue, K3 Axis, K6 Camera, P12 Bands
     signal s_g1 : unsigned(9 downto 0) := to_unsigned(409, 10);
     signal s_g2 : unsigned(9 downto 0) := (others => '0');
     signal s_g3 : unsigned(9 downto 0) := to_unsigned(463, 10);
-    signal s_g6 : unsigned(9 downto 0) := to_unsigned(307, 10);
+    signal s_g6 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_gp : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_gl_g, s_gl_r : unsigned(9 downto 0) := (others => '0');
     signal s_gl_t : std_logic_vector(9 downto 0) := (others => '0');
@@ -160,7 +162,8 @@ architecture idol of program_top is
     signal f_acc : unsigned(15 downto 0) := (others => '0');
     signal f_ph : unsigned(10 downto 0) := (others => '0');
     signal f_g : unsigned(8 downto 0) := to_unsigned(64, 9);
-    signal f_w : unsigned(9 downto 0) := to_unsigned(61, 10);
+    signal f_w : unsigned(10 downto 0) := to_unsigned(61, 11);
+    signal f_cg : unsigned(7 downto 0) := to_unsigned(128, 8);       -- K6 Camera: Video luma gain (Q.7)
     signal f_axis : unsigned(19 downto 0) := to_unsigned(512 * 256, 20);        -- axis divisor (rows, Q8)
     signal f_st : unsigned(12 downto 0) := to_unsigned(256, 13);   -- top-half row step: ys x 512 / axis
     signal f_up : std_logic := '1';                                 -- axis at / above the photo's
@@ -278,6 +281,9 @@ architecture idol of program_top is
     signal w_d1 : unsigned(10 downto 0) := (others => '0');
     signal w_l2 : unsigned(7 downto 0) := (others => '0');
     signal w_a1, w_a2, w_a3 : std_logic := '0';
+    signal w_b2 : unsigned(8 downto 0) := (others => '0');          -- K6 camera gain stages (W2a / W2b)
+    signal w_p2 : unsigned(16 downto 0) := (others => '0');
+    signal w_a1b, w_a1c : std_logic := '0';
     signal w_col : signed(23 downto 0) := (others => '0');
     signal w_ev : std_logic := '0';
     signal w_k : unsigned(5 downto 0) := (others => '0');
@@ -635,13 +641,22 @@ begin
                             end if;
                         end if;
                     when 135 =>
-                        -- K6 Ground: key window (1/2048 cycle)
-                        if s_g6 <= 307 then
-                            f_w <= resize(shift_right(s_g6, 3) + shift_right(s_g6, 4) + shift_right(s_g6, 6), 10);
+                        -- K6 Camera (K6 camera pass 2026-11-15; was K6 Ground).  Video: the key window stays at the
+                        -- photo's 61 and K6 is the camera luma gain f_cg (Q.7: 0 at 0, 1 = the photo at 512, 2 at
+                        -- 1023), applied in the camera writer.  Osc: K6 is the old Ground key window, inverted: 0 =
+                        -- the whole cycle keyed (all ground), 61 = the photo at 512, 0 (no ground) near 100 %.
+                        f_cg <= s_g6(9 downto 2);
+                        if f_osc = '0' then
+                            f_w <= to_unsigned(61, 11);
+                        elsif s_g6(9) = '1' then
+                            if s_g6(8 downto 3) >= 61 then f_w <= (others => '0');
+                            else f_w <= to_unsigned(61, 11) - resize(s_g6(8 downto 3), 11); end if;
+                        elsif s_g6(8) = '1' then
+                            -- 256 .. 511: 61 + (512 - g)
+                            f_w <= to_unsigned(573, 11) - resize(s_g6, 11);
                         else
-                            -- above the photo: 1.1875 per step, to 910 (0.44 cycle each side) at 1023
-                            f_w <= 61 + resize((s_g6 - 307) + shift_right(s_g6 - 307, 3)
-                                     + shift_right(s_g6 - 307, 4), 10);
+                            -- 0 .. 255: 317 + 3 (256 - g), 1085 at 0 (past half the cycle: all ground)
+                            f_w <= to_unsigned(1085, 11) - resize(s_g6, 11) - resize(shift_left(resize(s_g6, 11), 1), 11);
                         end if;
                     when 136 =>
                         -- hue: K2 (two units per knob step) + the cycle, plus the gain pivot
@@ -911,13 +926,16 @@ begin
         variable v_z : signed(13 downto 0);
     begin
         if rising_edge(clk) then
-            -- W1: luma above black; W2: x 0.291 (8 bit, 0..255); W3: IIR and the column events
+            -- W1: luma above black; W2: x 0.291; W2a/b: x K6 camera gain, clamp (8 bit, 0..255); W3: IIR and the column events
             v_d := signed(resize(unsigned(data_in.y), 11)) - 64;
             if v_d < 0 then w_d1 <= (others => '0'); else w_d1 <= unsigned(v_d); end if;
             w_a1 <= data_in.avid;
             v_x := shift_right(w_d1, 2) + shift_right(w_d1, 5) + shift_right(w_d1, 7) + shift_right(w_d1, 9);
-            if v_x > 255 then w_l2 <= (others => '1'); else w_l2 <= v_x(7 downto 0); end if;
-            w_a2 <= w_a1; w_a3 <= w_a2;
+            w_b2 <= v_x(8 downto 0); w_a1b <= w_a1;                         -- (<= 279)
+            -- W2a: K6 Camera gain (Q.7, 128 = the photo: bit-exact), a stage to itself; W2b: clamp
+            w_p2 <= w_b2 * f_cg; w_a1c <= w_a1b;
+            if w_p2(16 downto 15) /= "00" then w_l2 <= (others => '1'); else w_l2 <= w_p2(14 downto 7); end if;
+            w_a2 <= w_a1c; w_a3 <= w_a2;
             w_ev <= '0';
             if w_a2 = '1' then
                 if w_a3 = '0' then

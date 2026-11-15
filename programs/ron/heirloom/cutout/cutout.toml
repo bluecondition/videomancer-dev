@@ -1,4 +1,4 @@
-# Cutout - Heirloom #55, v0.6.0 (phase 2, 2026-11-01), rebuilt from tezcatlipoca.jpg (a paper collage).
+# Cutout - Heirloom #55, v0.6.2 (phase 2, 2026-11-01; K6 camera pass 2026-11-15: K6 Camera = the old K3 Ink, K3 = Speed), rebuilt from tezcatlipoca.jpg (a paper collage).
 # A skull-like head in profile cut out of a yellow ground, filled with torn magazine scraps that print
 # the camera picture, each at its own crop, flip and scale, drifting on its own line; a soup-cup eye,
 # a plate of pastries, stone teeth, a "Love." label, a black jaw.  See cutout.vhd and SUMMARY.md.
@@ -7,7 +7,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.cutout"
 program_name = "Cutout"
-program_version = "0.6.1"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -39,13 +39,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Ink"
+name_label = "Speed"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 640
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -69,13 +69,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Speed"
+name_label = "Camera"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
-initial_value = 640
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -139,12 +139,12 @@ rotary_potentiometer_5 = 380
 name = "Shredded"
 linear_potentiometer_12 = 1023
 rotary_potentiometer_1 = 1023
-rotary_potentiometer_3 = 900
+rotary_potentiometer_6 = 900
 
 [[preset]]
 name = "One Picture"
 rotary_potentiometer_2 = 0
-rotary_potentiometer_3 = 700
+rotary_potentiometer_6 = 700
 
 [[preset]]
 name = "Inverse"
@@ -154,4 +154,4 @@ rotary_potentiometer_5 = 640
 [[preset]]
 name = "Scattered"
 rotary_potentiometer_2 = 1023
-rotary_potentiometer_6 = 900
+rotary_potentiometer_3 = 900

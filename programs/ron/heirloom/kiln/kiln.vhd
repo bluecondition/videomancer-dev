@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Kiln v0.6.1 (phase 2 final) -- Heirloom #32, rebuilt from the photo WIN_20230515_23_17_11.
+-- Kiln v0.6.2 (phase 2 final; K6 camera pass 2026-11-15) -- Heirloom #32, rebuilt from the photo WIN_20230515_23_17_11.
 --
 -- The photo: camera video in a frame store zoomed to a quadrant (992 px x 540
 -- rows), repeated across the frame (period 992 px = 1.94 copies) with the
@@ -25,12 +25,13 @@
 --   K1  Tiles    copies across 0.5 .. 6.3, exponential (1.94 = the photo, at 551)
 --   K2  Fibres   fibre colour noise 0 .. 2x (16 steps) and the sideways tear
 --                0 .. 3.9x (square law above the photo's 1x at 512)
---   K3  Blocks   colouriser contrast 0.25 .. 4x, exponential: the yellow blocks
---                and blue patches swell, or the picture melts into the red mids
+--   K3  Glaze    colourways: Fire / Ice / Ember / Toxic / Violet / Mono / Neon / Rust  [was K6, v0.6.2]
 --   K4  Drift    bipolar tile scroll, still at the centre (+-8), square law
 --   K5  Rims     the brightness lift (pink rims, ring edges) -1x .. 2.9x; Video:
 --                rims traced on the camera's edges (an edge map of the store)
---   K6  Glaze    colourways: Fire / Ice / Ember / Toxic / Violet / Mono / Neon / Rust
+--   K6  Camera   how strongly the camera (Osc: the stored scene) shows = the old K3 Blocks colouriser
+--                contrast about the red mids: 0 = faded out to flat red (the rims fade too) .. 0.5x at
+--                25 % .. 1x at 50 % (the photo) .. 4x (blue / yellow / white-hot blocks)  [K6 camera pass, v0.6.2]
 --   S7  Mirror   Mirror / Repeat (bottom row of quadrants reflected or repeated)
 --   S8  Kaleido  Off / On: every other copy flipped left/right
 --   S9  Strips   Off / On: 8 bands per half (mirrored) slid by their own quarter-copy
@@ -48,6 +49,8 @@
 -- Colours in the hardware convention (U = Cr, V = Cb).  The integer model
 -- (.heirloom_work/rb_kiln/imodel.py) is the spec; the RTL renders bit-exact.
 
+-- K6 camera pass 2026-11-15 (v0.6.2): K6 = Camera (the old K3 Blocks contrast = the camera strength; its bottom
+-- quarter now fades to 0 and takes the rims with it), K3 = Glaze (was K6); default K6 50 % = the shipped look.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -168,7 +171,7 @@ architecture kiln of program_top is
     signal s_hd : unsigned(10 downto 0) := to_unsigned(1080, 11);
     signal t_hd, t_hdl : std_logic := '1';
 
-    -- glides (Q.3): 0 K1 Tiles, 1 K2 Fibres, 2 K3 Blocks, 3 K5 Rims, 4 P12 Heat
+    -- glides (Q.3): 0 K1 Tiles, 1 K2 Fibres, 2 K6 Camera (was K3 Blocks), 3 K5 Rims, 4 P12 Heat
     type t_g is array(0 to 4) of unsigned(12 downto 0);
     signal s_g : t_g := (to_unsigned(551 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13),
                          to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13));
@@ -476,6 +479,8 @@ begin
         variable v_ph : integer range 0 to 31;
         variable v_rm : unsigned(12 downto 0);
         variable v_k  : unsigned(9 downto 0);
+        variable v_cr : std_logic_vector(1 downto 0);
+        variable v_rr : signed(5 downto 0);
         variable v_h  : signed(13 downto 0);
         variable v_t  : unsigned(9 downto 0);
         variable v_q  : unsigned(10 downto 0);
@@ -519,8 +524,8 @@ begin
                 elsif v_x < -7 then s_s4 <= '1'; v_u := unsigned(-v_x) - 8; s_m4 <= v_u(8 downto 0);
                 else s_s4 <= '0'; s_m4 <= (others => '0'); end if;
                 -- labelled knob: 0..7 at program load is the label index
-                if unsigned(registers_in(5)) < 8 then f_pl <= unsigned(registers_in(5)(2 downto 0));
-                else f_pl <= unsigned(registers_in(5)(9 downto 7)); end if;
+                if unsigned(registers_in(2)) < 8 then f_pl <= unsigned(registers_in(2)(2 downto 0));
+                else f_pl <= unsigned(registers_in(2)(9 downto 7)); end if;
                 f_rep   <= registers_in(6)(0);
                 f_kal   <= registers_in(6)(1);
                 f_strp  <= registers_in(6)(2);
@@ -532,7 +537,7 @@ begin
 
             end if;
 
-            -- glides: K1, K2, K3, K5, P12 ease 1/8 of the gap per field (deadband 4)
+            -- glides: K1, K2, K6, K5, P12 ease 1/8 of the gap per field (deadband 4)
             if s_zone = '1' and s_zc >= 4 and s_zc < 24 then q_gon <= '1'; else q_gon <= '0'; end if;
             q_gi <= s_zc(4 downto 2) - 1; q_gph <= s_zc(1 downto 0);
             if q_gon = '1' then
@@ -541,7 +546,7 @@ begin
                         case to_integer(q_gi) is
                             when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
                             when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
-                            when 2 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(2);
+                            when 2 => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(2);
                             when 3 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(3);
                             when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(4);
                         end case;
@@ -570,17 +575,29 @@ begin
                 v_k := s_g(1)(12 downto 3);
                 f_fq <= v_k(9 downto 6);
                 s_kd <= v_k(8 downto 0); s_k2hi <= v_k(9);
-                -- K3: gain (256 + frac) << oct >> 4 = 16 .. 255 (0.25x .. 4x of 64), 64 at k 512
+                -- K6 Camera (the old K3 Blocks): gain (256 + frac) << oct >> 4 = 32 .. 255 (0.5x .. 4x of 64),
+                -- 64 at k 512; the bottom quarter linear 0 .. 31 (0 = the camera faded out; was 16 .. 31)
                 v_k := s_g(2)(12 downto 3);
+                -- and the rims (K5) fade with it in the bottom quarter, so 0 leaves no camera edges
+                if v_k(9 downto 8) /= "00" then v_cr := "11";
+                elsif v_k(7) = '1' then v_cr := "10";
+                elsif v_k(6) = '1' then v_cr := "01";
+                else v_cr := "00"; end if;
                 case to_integer(v_k(9 downto 8)) is
-                    when 0 => f_g64 <= resize('1' & v_k(7 downto 4), 9);
+                    when 0 => f_g64 <= resize(v_k(7 downto 3), 9);
                     when 1 => f_g64 <= resize('1' & v_k(7 downto 3), 9);
                     when 2 => f_g64 <= resize('1' & v_k(7 downto 2), 9);
                     when others => f_g64 <= resize('1' & v_k(7 downto 1), 9);
                 end case;
                 -- K5: rims k/32 - 8 (-8 .. 23; 8 = 1x at k 512)
                 v_k := s_g(3)(12 downto 3);
-                f_rim <= signed(resize(v_k(9 downto 5), 6)) - 8;
+                v_rr := signed(resize(v_k(9 downto 5), 6)) - 8;
+                case v_cr is
+                    when "11" => f_rim <= v_rr;
+                    when "10" => f_rim <= shift_right(v_rr, 1);
+                    when "01" => f_rim <= shift_right(v_rr, 2);
+                    when others => f_rim <= (others => '0');
+                end case;
                 f_rise <= f_fc(9 downto 1);
             elsif s_zone = '1' and s_zc = 41 then
                 -- comb-map term: 66 x fq / 8 (Q3 palette steps)
@@ -1133,7 +1150,7 @@ begin
             p13_s <= resize(v_s, 12);
             p13_b <= resize(shift_right(p12_ba + p12_pb, 4), 7);
 
-            -- 14: Blocks gain, Rims
+            -- 14: Camera (Blocks) gain, Rims
             p14_gp <= resize((resize(p13_s, 13) - 320) * signed(resize(f_g64, 10)), 20);
             p14_bp <= resize(p13_b * f_rim, 13);
 

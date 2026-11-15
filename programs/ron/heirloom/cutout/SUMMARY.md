@@ -1,5 +1,6 @@
 # Cutout — a collage head of torn magazine scraps on a yellow ground (Heirloom #55)
 
+**v0.6.2 (2026-11-15): K6 camera pass, K6 = Camera (the old K3 Ink), K3 = Speed; see [below](#k6-camera-pass-2026-11-15-v062).**
 **v0.6.0 (2026-11-01, phase 2): every scrap is its own module (crop, flip, scale, drift); built, NOT
 flashed.** v0.5.0 (2026-10-28) rebuilt it from the photo. Source: `photos/tezcatlipoca.jpg`.
 v0.1.0 posterized the video inside an oval head shape, with no relation to the collage's pieces. This
@@ -26,6 +27,27 @@ Ron 2026-11-01, before flashing v0.5, picked these from a proposed map:
 - **P12 unchanged.** **K3 Ink** range is now 0 = flat paper .. 50 % the photo .. 100 % hard (x1.9 the photo).
 - The default frame matches v0.5 (the scrap crops differ by under 0.25 store px at power-up; the tear and
   brush noise run on 12-bit phases, the same look).
+
+## K6 camera pass (2026-11-15), v0.6.2
+Ron's rule for the Heirloom / Kinetic / Patchbay sets: K6 is the camera strength, default 50 %.
+- **Cutout is a "camera IS the picture" program** (every scrap prints the camera store), so K6 = how strongly the
+  camera shows. The old **K3 Ink** was already exactly that: the store level's contrast before the ink ramps
+  (`(L − 8) × c16 / 8`, c16 = the 32-step K6 index, 16 = the photo), applied to the camera and to the Osc photo
+  alike, with the shade, texture, dither and fringe added after it. So Ink moved to K6 and was renamed **Camera**;
+  its law is unchanged: 0 % = gain 0 (flat paper colours, the collage drawing with the camera faded out), 25 % =
+  ×0.5, 50 % = ×1 (the shipped look, bit-identical default), 100 % = ×1.94 (hard, punchy scraps; ink ramps keep
+  it from washing out). Osc is scaled the same way (the generated photo lives in the same store).
+- **K6's old function, Speed, moved to K3** (the only speed control, so it had to stay). Nothing is frozen and no
+  control was lost; K3's preset values moved to K6 and K6's to K3.
+- A pure register remap (literal `registers_in` indices swapped), so LC and timing change only through placement.
+  The 32-step hysteresis index already keeps pot noise from shimmering, so no glide was added (the program is
+  FULL at 98 % LC).
+- Renders: `.heirloom_work/rb_cutout/k6/k6sheet.png` (720p60, decimation 1, selfie, K6 0 / 256 / 512 / 1023 and
+  Osc at 512). 0 = the collage in flat paper colours; 512 = the shipped render; 1023 = hard, high-contrast scraps.
+- **Build** (router1, 2026-11-15, all six seed 1): HD Analog 77.41, SD Analog 73.41, HD HDMI 83.13, SD HDMI 79.64,
+  HD Dual 81.63, SD Dual 75.28 MHz (worst HD 77.41); 7,527–7,542 / 7,680 LC (98 %), 27 / 32 EBR.
+  `out/rev_b/ron/heirloom/cutout.vmprog`. NOT flashed; no pin-skew screen (v0.6.0 needed one for HSYNC skew: if
+  HD HDMI or HD Analog shows lines, re-screen that config with `p6/skew/`).
 
 ## Reading of the photo (measured)
 The photo is a portrait paper collage, 4776 × 5987 (0.80:1). Measurements below are in page px of a
@@ -89,9 +111,9 @@ The photo is a portrait paper collage, 4776 × 5987 (0.80:1). Measurements below
 2. **Camera print.** Every scrap reads a 128 × 64 × 4-bit store through its own slot word from the
    crop RAM: crop (Wu, Wv), x/y flip and scale (2 or 4 virtual px per store pixel at the photo's zoom). The
    field sequencer recomputes all 33 slot words every field (the teeth have slot 0, the camera mirror slot
-   32) from K2 Crops and K6 Speed.
+   32) from K2 Crops and K3 Speed (K6 before v0.6.2).
    - The read is nearest-neighbour.
-   - The level passes the K3 contrast plus a shade, a surface texture (grain, or specks on the
+   - The level passes the K6 Camera contrast (K3 Ink before v0.6.2) plus a shade, a surface texture (grain, or specks on the
      blacks) and dither.
    - A 512-entry ink ROM (family × 16 levels) gives the colour.
 3. **Features.**
@@ -116,10 +138,10 @@ The photo is a portrait paper collage, 4776 × 5987 (0.80:1). Measurements below
 |---|---|---|
 | K1 Rag | the torn edges, the paper core | 0 = clean scissor cuts, no fringe; 50 % = the photo's tears and fringe; 100 % = shredded, thick fringe on every scrap (32-step gain table) |
 | K2 Crops | the pictures inside the scraps | 0 = all scraps in register on one camera frame zoomed to span the head; 50 % = the photo; 100 % = crops slid off x4, every scrap flipped and rescaled (one at a time along the travel) |
-| K3 Ink | the scraps' texture contrast | 0 = flat paper colours → 50 % = the photo → 100 % = hard (×1.9) |
+| K3 Speed | (motion) the scraps' pictures, the label, the Osc photo, the strips | (was K6, v0.6.2) bipolar, still in the centre (±16). Each scrap's picture drifts back and forth on its own line (periods 4–17 s at the default 640, amplitude ×Crops); "Love." crawls along its label (8.5 s a lap at the default); the Osc photo drifts ~15 px/s; the strips sway with a 4.3 s period when P12 > 0 |
 | K4 Jaw | the jaw | 0 = closed (the photo) → the jaw dropped by 0.10 H, yellow in the gap |
 | K5 Paint | the yellow ground | 8 positions: yellow (the photo), orange, red, magenta, violet, blue, cyan, green |
-| K6 Speed | (motion) the scraps' pictures, the label, the Osc photo, the strips | bipolar, still in the centre (±16). Each scrap's picture drifts back and forth on its own line (periods 4–17 s at the default 640, amplitude ×Crops); "Love." crawls along its label (8.5 s a lap at the default); the Osc photo drifts ~15 px/s; the strips sway with a 4.3 s period when P12 > 0 |
+| K6 Camera | how strongly the camera (Osc: the generated photo) prints in the scraps | (the old K3 Ink, v0.6.2) 0 = flat paper colours (the camera faded out) → 25 % = half the photo's contrast → 50 % = the photo → 100 % = hard (×1.94) |
 | S7 Facing | the profile | Left (the photo) / Right (mirrored) |
 | S8 Inks | the scrap colours | Photo / Swap (blues and blacks → warm inks, the cup and plate → blues) |
 | S9 Chatter | the jaw | Off (the photo) / On: the jaw chatters at 2 Hz, at least 35 % open |
@@ -129,7 +151,7 @@ The photo is a portrait paper collage, 4776 × 5987 (0.80:1). Measurements below
 
 - P12 glides (1/8 of the gap per field, ±4 deadband, the tail snaps). K2 follows the knob outside a ±3
   deadband, once per field.
-- K1, K3 and K5 use 32-step indices with hysteresis, so ADC noise does not flicker the tables.
+- K1, K6 (Camera) and K5 use 32-step indices with hysteresis, so ADC noise does not flicker the tables.
 - The control sheet is `.heirloom_work/rb_cutout/p6/sheet6.png` (from the v0.6 integer model).
 
 ## Video
