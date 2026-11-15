@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Gothic v0.1.1 -- Heirloom (video clips), from clip WIN_20230817_00_06_49 at 0.5 s.
 --
 -- v0.1.1: the camera luma is smoothed before it bends the field (pair sums at half horizontal resolution,
@@ -683,8 +685,8 @@ begin
                         else c_w0 <= (others => '0'); end if;
                         c_dw9 <= shift_left(c_dw, 3) + c_dw;
                     when 506 => z_eg0 <= shift_left(resize(m_acc(19 downto 0), 23), 2) + resize(m_acc(19 downto 0), 23);   -- 5 k6^2
-                    when 507 =>                                                       -- eg = 5 k6^2 / 32
-                        c_eg <= resize(shift_right(z_eg0, 5), 19);
+                    when 507 =>                                                       -- eg = 5 k6^2 / 32 x 1.25 (K6 top +25 %)
+                        c_eg <= resize(shift_right(z_eg0, 5), 19) + resize(shift_right(z_eg0, 7), 19);   -- <= 204400: c_eg(17 downto 6) <= 3193
                     when 538 => c_kt <= m_acc(27 downto 0);
                     when 570 => c_dv <= m_acc(39 downto 18);
                     when 571 => c_kmd <= c_kt - resize(c_dv, 28);

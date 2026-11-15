@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Streak v0.5.0 -- Heirloom #7, rebuilt from the photo WIN_20230129_00_40_34.
 --
 -- The photo: the upper two thirds are horizontally smeared noise through a
@@ -267,7 +269,7 @@ architecture streak of program_top is
     signal s_g : t_g := (to_unsigned(340 * 8, 13), to_unsigned(526 * 8, 13), to_unsigned(605 * 8, 13),
                          to_unsigned(293 * 8, 13), to_unsigned(445 * 8, 13), to_unsigned(512 * 8, 13));
     -- K6 Camera: camera gain (Q3, 8 = the shipped x1) and the Osc blob gain select, per field
-    signal c_g5 : unsigned(4 downto 0) := to_unsigned(16, 5);
+    signal c_g5 : unsigned(4 downto 0) := to_unsigned(20, 5);       -- 0 .. 29
     signal c_osel : unsigned(1 downto 0) := to_unsigned(3, 2);
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
@@ -545,6 +547,7 @@ begin
         variable v_pr : unsigned(47 downto 0);
         variable v_sl : integer range 0 to 7;
         variable v_sp : signed(31 downto 0);
+        variable v_g5, v_g5q : unsigned(4 downto 0);
     begin
         if rising_edge(clk) then
             t_ys <= f_ys(registers_in(8)(3 downto 0));
@@ -643,10 +646,18 @@ begin
             end if;
 
             -- K6 Camera (after the glides): camera gain (Q3) k / 128 up to 50 % (x2), then 2 + (k - 512) / 512
-            -- (x2.9 at 100 %); Osc blobs x0 / 0.5 / 1 / 2
+            -- (x2.9 at 100 %), then x1.25 (K6 top +25 %: g + g / 4 rounded, one add; 512 -> 20, 1023 -> 29 = x3.6);
+            -- Osc blobs x0 / 0.5 / 1 / 2
             if s_zone = '1' and s_zc = 30 then
-                if s_g(5)(12) = '0' then c_g5 <= s_g(5)(12 downto 8);
-                else c_g5 <= "10" & s_g(5)(11 downto 9); end if;
+                if s_g(5)(12) = '0' then v_g5 := s_g(5)(12 downto 8);
+                else v_g5 := "10" & s_g(5)(11 downto 9); end if;
+                case s_g(5)(12 downto 10) is                         -- g / 4 (rounded in the upper half)
+                    when "100"         => v_g5q := to_unsigned(4, 5);
+                    when "101" | "110" => v_g5q := to_unsigned(5, 5);
+                    when "111"         => v_g5q := to_unsigned(6, 5);
+                    when others        => v_g5q := "000" & s_g(5)(11 downto 10);
+                end case;
+                c_g5 <= v_g5 + v_g5q;
                 if s_g(5)(12 downto 8) = 0 then c_osel <= "00";
                 elsif s_g(5)(12 downto 3) < 192 then c_osel <= "01";
                 elsif s_g(5)(12 downto 3) < 384 then c_osel <= "10";

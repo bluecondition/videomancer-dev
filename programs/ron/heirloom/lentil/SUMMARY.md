@@ -206,3 +206,15 @@ The clip was re-extracted at 10 fps over all 9 s (`seq/`, `motion2.py`).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, v0.1.2) and its top end is 25 % stronger. **Bend type**: K6 Bend
+frequency-modulates the stripe VCO by the camera luma, so the FM gain went up x1.25 at every knob position: the luma
+FM constant 639 -> 799 in the vblank serial multiply (kl = 799 x bend^2), so K6 = 1023 gives 3.75 f0 at white (was
+3 f0). A constant change only. The Osc rides the same gain. Widths: kl <= 797 of 10 bits, the per-pixel c_klpix <=
+1594 of 11 bits (SD x2), the luma product <= 406k of 19 bits. GHDL 720p dec-4 frames of bear.png at K6 = 100 %, old
+vs new: `.heirloom_work/rb_lentil/k6b/k6b_cmp.png` (same picture, the stripes crowd further in the bright areas; no new
+artifacts).
+**Build:** router1, seed 1 on all six; HD Analog 92.20, HD HDMI 92.28, HD Dual 87.61 MHz (worst HD 87.61); SD 90.33 /
+90.28 / 89.88 MHz; 6912-6938 / 7680 LC (90.3 %), 17/32 EBR. `out/rev_b/ron/heirloom/lentil.vmprog`. NOT flashed.

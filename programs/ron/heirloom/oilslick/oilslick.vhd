@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Oilslick v0.1.0 -- Heirloom from the video clips (phase 3b), made from WIN_20231022_00_05_49 at 0.5 s.
 --
 -- The still: a camera-feedback frame of Ron's modular synth seen through a horizontal kaleidoscope (period
@@ -475,7 +477,9 @@ begin
                     when 4  => z_fa <= resize(s_vm, 18);                z_fb <= resize(s_vm, 16);           -- flow^2
                     when 5  => z_fa <= f_acc(17 downto 0);  z_fb <= to_unsigned(226, 16);
                     when 6  => z_fa <= resize(s_g6(12 downto 3), 18);   z_fb <= resize(s_g6(12 downto 3), 16);  -- etch^2
-                    when 7  => z_fa <= resize(z_a, 18);                 z_fb <= to_unsigned(231, 16);
+                    when 7  =>                                          -- camera 289 = 231 x 1.25 (K6 top +25 %); Osc 231
+                        z_fa <= resize(z_a, 18);
+                        if s_src = '1' then z_fb <= to_unsigned(231, 16); else z_fb <= to_unsigned(289, 16); end if;
                     when 8  => z_fa <= resize(s_ys, 18);                z_fb <= to_unsigned(434, 16);       -- wobble 1
                     when 9  => z_fa <= resize(s_ys, 18);                z_fb <= to_unsigned(2849, 16);      -- wobble 2
                     when 12 => z_fa <= resize(s_ys, 18);                z_fb <= to_unsigned(364, 16);       -- osc y
@@ -542,8 +546,8 @@ begin
                         end case;
                     when 170 => c_dfl <= f_acc(25 downto 16);
                     when 194 => z_a <= f_acc(19 downto 10);
-                    when 218 =>                      -- etch per luma step: k6^2 231 / 2^20; Osc x4
-                        if s_src = '1' then c_eg <= f_acc(17 downto 8); else c_eg <= resize(f_acc(17 downto 10), 10); end if;
+                    when 218 =>                      -- etch per luma step: k6^2 289 / 2^20 (<= 288); Osc k6^2 231 / 2^18
+                        if s_src = '1' then c_eg <= f_acc(17 downto 8); else c_eg <= resize(f_acc(18 downto 10), 10); end if;
                         -- tide: |p12 - 512|, above / below the still
                         if s_gp(12 downto 3) >= 512 then z_d <= s_gp(12 downto 3) - 512; z_hi <= '1';
                         else z_d <= 512 - s_gp(12 downto 3); z_hi <= '0'; end if;

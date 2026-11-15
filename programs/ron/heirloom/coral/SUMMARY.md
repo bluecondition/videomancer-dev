@@ -177,3 +177,16 @@ Working files are in `.heirloom_work/rb_coral/`: `notes.md`; `wmap.py` (the pale
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, v0.1.3) and its top end is 25 % stronger. **Bend type**: K6 Camera
+bends every band and widens / narrows the shapes' edges by the camera luma, so the gain went up x1.25 at every knob
+position: the per-field camera gain is now c_cg = g + g / 4 (6 -> 7 bits, 63 -> 78 at the top; one add at sequencer
+state 143), so K6 = 1023 bends 4.9 bands per full luma (was 3.9). The band term and the shapes' widening (camera / 8)
+both follow it, and the Osc rides the same gain. Widths: the camera product <= 18.6k in 16 bits signed, camera / 16
+<= 1165 in 12 bits, the widening <= 2.2k in 13 bits. GHDL 720p dec-4 frames of bear.png at K6 = 100 %, old vs new:
+`.heirloom_work/rb_coral/k6b/k6b_cmp.png` (same picture, the bands bend further; no new artifacts).
+**Build:** router1; HD Analog 77.74, HD HDMI 79.21 (**seed 2**: seed 1 missed), HD Dual 81.99 MHz (worst HD 77.74);
+SD 81.61 / 82.37 / 79.17 MHz (seed 1); 6050-6075 / 7680 LC (79 %), 23/32 EBR. `out/rev_b/ron/heirloom/coral.vmprog`.
+NOT flashed.

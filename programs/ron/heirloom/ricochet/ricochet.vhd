@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Ricochet v0.5.0 -- Heirloom #30, rebuilt from the photo WIN_20230515_23_08_59.
 --
 -- The photo: two systems of nested chevrons pointing right (cores on lines
@@ -441,7 +443,7 @@ begin
                     when 13 => f_a <= resize(f_acc(19 downto 0), 36); f_b <= to_unsigned(20363, 16);
                     when 19 => f_a <= resize(f_acc(19 downto 0), 36); f_b <= to_unsigned(3707, 16);
                     when 25 => f_a <= resize(f_acc(19 downto 0), 36); f_b <= to_unsigned(3311, 16);
-                    when others => f_a <= resize(f_acc(19 downto 0), 36); f_b <= to_unsigned(687, 16);
+                    when others => f_a <= resize(f_acc(19 downto 0), 36); f_b <= to_unsigned(859, 16);   -- etch: 859 = 687 x 1.25 (K6 top +25 %), s_eq <= 857
                 end case;
             else
                 if f_b(0) = '1' then f_acc <= f_acc + f_a; end if;

@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Coral v0.1.1 -- Heirloom from the video clips, built from the still WIN_20230905_00_44_28 t0.5
 -- (clip frame 15 at 0.5 s; the whole 17 s clip, and clip 00_44_50, is one patch cycling with an 8.9 s period).
 --
@@ -173,7 +175,7 @@ architecture coral of program_top is
     signal c_fz   : signed(13 downto 0) := to_signed(620, 14);         -- outer-zone level, Q8
     signal c_dth  : signed(23 downto 0) := to_signed(-31320, 24);      -- sine phase step per field
     signal c_th0  : unsigned(23 downto 0) := to_unsigned(9589190, 24); -- the field's sine phase (the still)
-    signal c_cg   : unsigned(5 downto 0) := to_unsigned(24, 6);        -- camera gain, Q4 per luma step
+    signal c_cg   : unsigned(6 downto 0) := to_unsigned(30, 7);        -- camera gain, Q4 per luma step (0 .. 78)
     signal z_gb   : unsigned(10 downto 0) := to_unsigned(154, 11);
     signal c_grow : signed(11 downto 0) := (others => '0');          -- solid-shape widening, virtual px
     signal c_off  : unsigned(11 downto 0) := (others => '0');        -- shape-row offset (the roll since the still), lines
@@ -480,7 +482,7 @@ begin
                         else c_dth <= signed(resize(f_acc(19 downto 0), 24)); end if;
                     when 143 =>
                         c_th0 <= unsigned(signed(c_th0) + c_dth);
-                        c_cg <= s_g6(12 downto 7);
+                        c_cg <= resize(s_g6(12 downto 7), 7) + resize(s_g6(12 downto 9), 7);   -- g + g/4 (K6 top +25 %)
                     when 144 =>                                       -- shape offset: (theta_still - theta0) * 2215 lines
                         z_dt <= to_unsigned(9589190, 24) - c_th0;
                     when 145 =>

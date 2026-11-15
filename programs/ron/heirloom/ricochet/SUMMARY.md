@@ -139,3 +139,16 @@ stays live.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, v0.5.3) and its top end is 25 % stronger. **Bend type**: K6 Etch
+pushes the camera luma into the band field (the bands bend round the picture, bright areas push the reach), so the
+gain went up x1.25 at every knob position: the etch scale constant in the per-field serial multiply 687 -> 859
+(s_eq <= 857 of 10 bits at K6 = 1023; ~19 -> ~24 bands at full white). The Osc rides the same gain. Widths: nibble
+products <= 12.9k of 14 bits, etch sum <= 218k of 18 bits, so the field gains at most 13.7k in its 19-bit signed
+register (the field stays far from the rail). GHDL 720p dec-4 frames of bear.png at K6 = 100 %, old vs new:
+`.heirloom_work/rb_ricochet/k6b/k6b_cmp.png` (same picture; bright areas pass the reach into the flat ground sooner, no
+wrap into the cores).
+**Build:** router1, seed 1 on all six; HD Analog 86.79, HD HDMI 80.12, HD Dual 83.79 MHz (worst HD 80.12); SD 84.88 /
+81.00 / 79.81 MHz; 6852-6878 / 7680 LC (89.6 %), 13/32 EBR. `out/rev_b/ron/heirloom/ricochet.vmprog`. NOT flashed.

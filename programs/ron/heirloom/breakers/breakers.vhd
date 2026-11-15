@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Breakers v0.1.1 -- Heirloom (video phase), from the clip WIN_20230214_23_42_08 at 0.5 s.
 --
 -- v0.1.1: K5 Grain's travel made obvious (0 = clean smooth surf stripes, no jitter; 512 = the clip; 1023 = 12x
@@ -537,9 +539,9 @@ begin
                     when 10 => z_fa <= resize(s_ys, 36);              z_fb <= c_ig;                       -- slab step
                     when 11 => z_fa <= resize(s_gp(12 downto 3), 36); z_fb <= to_unsigned(1640, 16);      -- shore
                     when 12 => z_fa <= resize(s_gp(12 downto 3), 36); z_fb <= to_unsigned(20, 16);
-                    when 13 =>                                                                            -- etch (Osc 3x)
-                        z_fa <= resize(s_g6(12 downto 3), 36);
-                        if s_src = '1' then z_fb <= to_unsigned(450, 16); else z_fb <= to_unsigned(45, 16); end if;
+                    when 13 =>                                                                            -- etch (Osc 450)
+                        z_fa <= resize(s_g6(12 downto 3), 36);                                            -- camera 56 = 45 x 1.25 (K6 top +25 %)
+                        if s_src = '1' then z_fb <= to_unsigned(450, 16); else z_fb <= to_unsigned(56, 16); end if;
                     when 14 => z_fa <= resize(s_gp(12 downto 3), 36); z_fb <= to_unsigned(123, 16);
                     when 15 => z_fa <= resize(s_gp(12 downto 3), 36); z_fb <= to_unsigned(850, 16);
                     when 16 =>                                                                            -- Grain's surf depth: 0 .. 1 .. 12x

@@ -156,3 +156,15 @@ Working files are in `.heirloom_work/rb_oilslick/` (`notes.md`, `palfit` `pal16_
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 350 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, v0.1.2) and its top end is 25 % stronger. **Bend type**: K6 Etch
+bends the rings (the camera luma is added to the ring phase), so the camera gain went up x1.25 at every knob
+position: the per-field etch constant 231 -> 289 in Video mode (0.9 -> 1.1 palette cycle per full luma at K6 = 1023),
+its slice one bit wider (`f_acc(18 downto 10)`, c_eg <= 288 of 10 bits). Osc keeps its 231 (the x4 path already
+reaches c_eg 922 of 10 bits; x1.25 would overflow it). The etch phase wraps mod one cycle by design. GHDL 720p dec-4
+frames of bear.png at K6 = 100 %, old vs new: `.heirloom_work/rb_oilslick/k6b/k6b_cmp.png` (same picture, the bright
+areas shift further round the palette; no new artifacts).
+**Build:** router1, seed 1 on all six; HD Analog 89.82, HD HDMI 86.79, HD Dual 86.79 MHz (worst HD 86.79); SD 89.51 /
+87.00 / 77.30 MHz; 7148-7184 / 7680 LC (93.5 %), 24/32 EBR. `out/rev_b/ron/heirloom/oilslick.vmprog`. NOT flashed.

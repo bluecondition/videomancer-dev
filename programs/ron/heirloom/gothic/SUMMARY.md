@@ -167,3 +167,15 @@ imodel.py, thincheck.py, isheet.py.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 120 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, v0.1.3) and its top end is 25 % stronger. **Bend type**: K6 Etch
+bends the arch field (the smoothed camera luma shifts the colouriser phase), so the whole gain went up x1.25 at every
+knob position: the per-field etch gain `c_eg = 5 k^2 / 32` gains `+ z_eg0 >> 7` (one add in the vblank sequencer),
+so K6 = 1023 etches 2.9 cycles per full luma (was 2.3). The Osc rides the same gain (its x32 shift), so it is +25 %
+too. Widths: c_eg <= 204400, the pixel slice c_eg(17 downto 6) <= 3193 of 4095, the nibble products <= 47.9k of 65535;
+the etch sum wraps mod one cycle by design. GHDL 720p dec-4 frames of bear.png at K6 = 100 %, old vs new:
+`.heirloom_work/rb_gothic/k6b/k6b_cmp.png` (same picture, more colour contours through the face; no new artifacts).
+**Build:** router1, seed 1 on all six; HD Analog 82.77, HD HDMI 82.64, HD Dual 81.49 MHz (worst HD 81.49); SD 75.35 /
+80.61 / 79.45 MHz; 7185-7218 / 7680 LC (94 %), 23/32 EBR. `out/rev_b/ron/heirloom/gothic.vmprog`. NOT flashed.

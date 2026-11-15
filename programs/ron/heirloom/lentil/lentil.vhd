@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Lentil v0.1.0 -- Heirloom (phase 3, video clips), rebuilt from the clip WIN_20230501_01_34_42 at 0.5 s.
 --
 -- The still: a band of solid blue lenses (rounded, lumpy diamonds, 940 px apart, pinched to a point between
@@ -416,7 +418,7 @@ begin
                     when 6  => z_fa <= resize(c_kq, 36);                 z_fb <= resize(c_pdh, 16);
                     when 7  => z_fa <= to_unsigned(209715, 36);          z_fb <= c_g2sq(19 downto 4);
                     when 8  => z_fa <= resize(s_g6(12 downto 3), 36);    z_fb <= resize(s_g6(12 downto 3), 16);  -- bend^2
-                    when 9  => z_fa <= to_unsigned(639, 36);             z_fb <= c_g2sq(19 downto 4);   -- (g2sq holds bend^2 here)
+                    when 9  => z_fa <= to_unsigned(799, 36);             z_fb <= c_g2sq(19 downto 4);   -- (g2sq holds bend^2 here); 799 = 639 x 1.25 (K6 top +25 %): kl <= 797
                     when 10 => z_fa <= to_unsigned(1737, 36);            z_fb <= z_mt4;                  -- breath rate
                     when 11 => z_fa <= resize(c_phi(14 downto 0), 36);   z_fb <= resize(to_unsigned(32768, 16) - resize(c_phi(14 downto 0), 16), 16);
                     when 12 => z_fa <= resize(c_par, 36);                z_fb <= to_unsigned(192, 16);

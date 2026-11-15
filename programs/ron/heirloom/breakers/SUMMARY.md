@@ -182,3 +182,15 @@ Glides (1/8 per field): K1, K2, K3, P12. K5 and K6 are read per field; K4 has a 
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 80 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, v0.1.3) and its top end is 25 % stronger. **Bend type**: K6 Etch
+bends the ribbons, surf and shore by the camera's luma, so the camera gain went up x1.25 at every knob position: the
+per-field etch product's Video constant 45 -> 56 (c_eg at K6 = 1023: 179 -> 223, x1.24). A constant change only.
+Osc keeps its 450 (already 10x the old camera gain, stronger than v0.1.0's, and x1.25 would overflow c_eg's 11 bits).
+Widths: the camera etch term <= 3.3k in a 16-bit signed register. GHDL 720p dec-4 frames of bear.png at K6 = 100 %,
+old vs new: `.heirloom_work/rb_breakers/k6b/k6b_cmp.png` (same picture, the bend pushes further: the bright corner
+reaches the blue ribbon cores; no new artifacts).
+**Build:** router1, seed 1 on all six; HD Analog 93.37, HD HDMI 89.40, HD Dual 92.70 MHz (worst HD 89.40); SD 91.75 /
+91.13 / 84.45 MHz; 6991-7020 / 7680 LC (91.4 %), 21/32 EBR. `out/rev_b/ron/heirloom/breakers.vmprog`. NOT flashed.

@@ -181,3 +181,16 @@ Measured from the m-frames (0.5 s apart) and one frame per second over the whole
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, v0.1.2) and its top end is 25 % stronger. **Bend type**: K6 Etch
+bends the bands (the camera luma is added to the band phase), so the gain went up x1.25 at every knob position: the
+etch law's constants 24 -> 30, the slope 40 -> 50 (0.156 -> 0.195 per step) and the low-end k^2 scale 17 -> 21, so
+K6 = 1023 bends 2.5 cycles per full luma (was 2) and c_eg <= 171 of 8 bits. Constant changes only, in the vblank
+serial multiply. The Osc rides the same gain. The etch phase wraps mod one cycle by design. GHDL 720p dec-4 frames of
+bear.png at K6 = 100 %, old vs new: `.heirloom_work/rb_vinyl/k6b/k6b_cmp.png` (same picture, more band cycles through
+the bright areas; no new artifacts).
+**Build:** router1; HD Analog 77.73, HD HDMI 89.65, HD Dual 92.19 MHz (seed 1; worst HD 77.73); SD Analog 89.20, SD
+HDMI 91.75 (seed 1), SD Dual 91.25 MHz (**seed 2**: seed 1 stalled router1 at the timeout); 7148-7171 / 7680 LC
+(93.4 %), 18/32 EBR. `out/rev_b/ron/heirloom/vinyl.vmprog`. NOT flashed.

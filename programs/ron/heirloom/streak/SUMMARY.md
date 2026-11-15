@@ -188,3 +188,20 @@ Ron: K6 is the camera strength in every program, default 50 %; the shipped stren
 - **Build (v0.5.1, 2026-11-15):** router1. HD Analog 90.13, HD HDMI 87.48 (seed 1), HD Dual 85.37 MHz (**seed 3**:
   seeds 1–2 stalled router1 at the 600 s timeout); SD Analog 82.44, SD HDMI 86.35, SD Dual 84.31 MHz (seed 1);
   7526–7568 / 7680 LC (98.5 %, up from 95 %), 20/32 EBR. `out/rev_b/ron/heirloom/streak.vmprog`. NOT flashed.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+Ron: K6 now loads at 100 % (initial_value 1023, v0.5.2) and its top end is 25 % stronger. **Element type**
+(recolour): K6 Camera sets how far the camera luma drives the colourizer phase and the red term, recolouring the
+streaks by the camera's brightness; the camera image itself is not shown.
+- **Change:** the per-field gain is now c_g5 = g + g / 4, rounded in the upper half. It is one 5-bit add at zone
+  clock 30, kept to an add because of the 98.5 % LC. 25 % = x1.25, 50 % = x2.5, 100 % = x3.6 (was x2.9; code 29 for
+  23, the nearest Q3 step to x1.25).
+- **Unchanged:** the Osc blob select, the deviation clamp (2900) and the red clamp (+-383), so a high gain still
+  saturates instead of wrapping. Widths: camera product <= 27.8k of 17 bits signed.
+- **Render:** GHDL 720p dec-4 frames of bear.png at K6 = 100 %, old vs new: `.heirloom_work/rb_streak/k6b/k6b_cmp.png`.
+  Same picture and contours. The brightest areas now sit flat in saturated magenta / pink (the v0.5.1 note: x3.9
+  flooded most of the frame).
+- **Build:** router1. HD Analog 76.91, HD HDMI 84.06, HD Dual 87.73 MHz (seed 1; worst HD 76.91). SD Analog 82.27 and
+  SD Dual 83.96 (seed 1); SD HDMI 84.91 MHz (**seed 2**: seed 1 stalled router1 at the timeout; no CARRY I0 = I1 in
+  the netlist). 7534-7560 / 7680 LC (98.4 %, unchanged), 20/32 EBR. `out/rev_b/ron/heirloom/streak.vmprog`. NOT
+  flashed.

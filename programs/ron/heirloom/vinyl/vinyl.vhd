@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Vinyl v0.1.0 -- Heirloom (phase 3, video clips), from the clip WIN_20230428_23_30_39 at 0.5 s.
 --
 -- The still: nested L-shaped bands -- near-vertical at the top-left, bending through a corner and
@@ -509,8 +511,8 @@ begin
                         if z_hi = '1' then z_fb <= to_unsigned(77, 16); else z_fb <= to_unsigned(76, 16); end if;
                     when 16 =>                                                                           -- etch
                         z_fa <= resize(z_dp, 36);
-                        if z_hi = '1' then z_fb <= to_unsigned(40, 16); else z_fb <= resize(z_dp, 16); end if;
-                    when 17 => z_fa <= resize(z_sq, 36);               z_fb <= to_unsigned(17, 16);      -- etch k^2 scale
+                        if z_hi = '1' then z_fb <= to_unsigned(50, 16); else z_fb <= resize(z_dp, 16); end if;   -- 50 = 40 x 1.25
+                    when 17 => z_fa <= resize(z_sq, 36);               z_fb <= to_unsigned(21, 16);      -- etch k^2 scale (21 = 17 x 1.25)
                     when 18 => z_fa <= resize(s_vm, 36);               z_fb <= resize(s_vm, 16);         -- speed^2
                     when 19 => z_fa <= resize(c_vsq, 36);              z_fb <= to_unsigned(18035, 16);   -- band flow
                     when 20 => z_fa <= resize(s_vm, 36);               z_fb <= to_unsigned(3329, 16);    -- groove flow
@@ -661,8 +663,9 @@ begin
                         else c_ah <= f_acc(17 downto 8); end if;
                         z_kn <= s_g6(12 downto 3); z_kc <= to_unsigned(300, 10); z_md <= "10";
                     when 434 => z_sq <= f_acc(19 downto 0);
-                    when 458 =>                     -- etch gain: 24 (k/300)^2 (0.35 cycles at 300), then 24 + (k - 300) 0.156
-                        if z_hi = '1' then c_eg <= to_unsigned(24, 8) + z_sq(15 downto 8);
+                    when 458 =>                     -- etch gain: 24 (k/300)^2 (0.35 cycles at 300), then 24 + (k - 300) 0.156,
+                                                    -- all x1.25 (K6 top +25 %): 30 (k/300)^2, then 30 + (k - 300) 0.195 (<= 171)
+                        if z_hi = '1' then c_eg <= to_unsigned(30, 8) + z_sq(15 downto 8);
                         else c_eg <= f_acc(23 downto 16); end if;
                     when 482 => c_vsq <= f_acc(17 downto 0);
                     when 506 => c_dfa <= f_acc(35 downto 16);
