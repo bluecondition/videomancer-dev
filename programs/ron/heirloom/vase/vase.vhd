@@ -26,9 +26,12 @@
 --   K3  Roll     bipolar: the colour cycle and bars roll down / up (still at the centre)
 --   K4  Spin     bipolar: the vase turns (sheens slide round the lathe)
 --   K5  Key      red-key centre, left .. right of the vase axis
---   K6  Gloss    luma gain of the vase (dull .. blown-out sheens)
+--   K6  Camera   surface strength (K6 camera pass, v0.5.2): the camera (Video) or the stored vase
+--                (Osc) x 0 .. 2 (x1 at 50 %, the shipped look), max'd with the vase's own sheens and
+--                half its luma; 0 % = what the program draws with a black input
 --   S7  Swap     the red key swaps bars and gaps (red falls between the bars, the blocks go olive)
---   S8  Tear     edge comb + overshoot lines (photo On)
+--   S8  Gloss    Photo (x1) / Glaze (x1.75 luma, the old K6 Gloss); the edge comb + overshoot lines
+--                (v0.5 S8 Tear) are always on
 --   S9  Blocks   the cycle's blocks / off zone (photo On) / bars all the way
 --   S10 Palette  photo / channel rotation (green bars on violet)
 --   S11 Source   Video (camera wrapped round the vase) / Osc (the stored glossy vase)
@@ -37,6 +40,8 @@
 -- Generated avid; output conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma 13/16)
 -- before the gate.  Latency 32 clocks in every mode.  u = Cr, v = Cb.
 
+-- K6 camera pass 2026-11-15 (v0.5.2): K6 = Camera (new, glided, per-field gains on the camera write
+-- side and in the fill engine); K6 Gloss moved to S8 (Photo x1 / Glaze x1.75); S8 Tear fixed On.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -198,10 +203,9 @@ architecture vase of program_top is
     signal s_avq : std_logic := '0';
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
-    type t_g is array(0 to 3) of unsigned(12 downto 0);
+    type t_g is array(0 to 4) of unsigned(12 downto 0);
     signal s_g : t_g := (to_unsigned(314 * 8, 13), to_unsigned(497 * 8, 13), to_unsigned(614 * 8, 13),
-                         to_unsigned(410 * 8, 13));
-    signal s_k6 : unsigned(9 downto 0) := to_unsigned(512, 10);
+                         to_unsigned(410 * 8, 13), to_unsigned(512 * 8, 13));
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
     signal gl_w : std_logic := '0';
@@ -211,13 +215,15 @@ architecture vase of program_top is
 
     signal s_m3, s_m4 : unsigned(8 downto 0) := (others => '0');
     signal s_n3, s_n4 : std_logic := '0';
-    signal f_swp, f_tear, f_blk, f_pal, f_osc : std_logic := '0';
+    signal f_swp, f_blk, f_pal, f_osc, f_gl : std_logic := '0';
+    constant f_tear : std_logic := '1';   -- v0.5 S8 Tear, fixed On (K6 camera pass)
     signal f_wv  : unsigned(13 downto 0) := to_unsigned(3840, 14);
     signal f_xcv : unsigned(13 downto 0) := to_unsigned(4072, 14);
     signal f_keyx4 : signed(11 downto 0) := to_signed(272, 12);
     signal f_xav : signed(14 downto 0) := to_signed(4344, 15);
     signal f_b   : unsigned(8 downto 0) := to_unsigned(128, 9);
-    signal f_g   : unsigned(4 downto 0) := to_unsigned(16, 5);
+    signal f_cm  : unsigned(5 downto 0) := to_unsigned(19, 6);   -- camera gain /64 on luma/4 (19 = shipped x0.297)
+    signal f_sn  : unsigned(4 downto 0) := to_unsigned(16, 5);   -- stored-vase gain Q.4 (Osc)
     signal f_rb  : unsigned(13 downto 0) := to_unsigned(5304, 14);
     signal f_qb  : unsigned(16 downto 0) := to_unsigned(30180, 17);
     signal f_qinc : unsigned(18 downto 0) := to_unsigned(30180, 19);
@@ -286,6 +292,14 @@ architecture vase of program_top is
     signal fl_k   : unsigned(6 downto 0) := (others => '0');
     signal fl_ma  : unsigned(6 downto 0) := (others => '0');
     signal fl_wv, fl_mid : std_logic := '0';
+    -- fill write pipeline (K6 camera pass): writer -> fa (gain product, sheen, half) -> fb (clip, base) -> RAM
+    signal fw_wa, fa_wa, fb_wa : unsigned(7 downto 0) := (others => '0');
+    signal fw_wd : unsigned(7 downto 0) := (others => '0');
+    signal fw_we, fa_we, fb_we : std_logic := '0';
+    signal fa_p  : unsigned(12 downto 0) := (others => '0');
+    signal fa_sh : unsigned(7 downto 0) := (others => '0');
+    signal fa_h  : unsigned(6 downto 0) := (others => '0');
+    signal fb_g, fb_b : unsigned(7 downto 0) := (others => '0');
 
     ---------------------------------------------------------------------------
     -- generated avid
@@ -300,8 +314,9 @@ architecture vase of program_top is
 
     -- camera write side
     signal c_y1  : unsigned(9 downto 0) := to_unsigned(64, 10);
-    signal c_av1, c_av2 : std_logic := '0';
+    signal c_av1, c_av2, c_av3 : std_logic := '0';
     signal c_d   : unsigned(9 downto 0) := (others => '0');
+    signal c_p   : unsigned(13 downto 0) := (others => '0');
     signal c_wacc : unsigned(24 downto 0) := (others => '0');
 
     ---------------------------------------------------------------------------
@@ -331,7 +346,7 @@ architecture vase of program_top is
     signal p8_ua : unsigned(9 downto 0) := (others => '0');
     signal p8_cam : unsigned(7 downto 0) := (others => '0');
     signal p9_cam, p10_cam, p11_cam : unsigned(7 downto 0) := (others => '0');
-    signal p11_s8 : unsigned(7 downto 0) := (others => '0');
+    signal p11_w : unsigned(7 downto 0) := (others => '0');
     signal p12_src : unsigned(8 downto 0) := (others => '0');
     signal p13_sg : unsigned(8 downto 0) := (others => '0');
     signal p14_s, p15_s, p16_s, p17_s, p18_s, p19_s : unsigned(8 downto 0) := (others => '0');
@@ -496,8 +511,7 @@ begin
                 elsif v_x < -7 then s_n4 <= '1'; v_u := unsigned(-v_x) - 8; s_m4 <= v_u(8 downto 0);
                 else s_n4 <= '0'; s_m4 <= (others => '0'); end if;
                 f_swp  <= registers_in(6)(0);
-                s_k6   <= unsigned(registers_in(5));
-                f_tear <= registers_in(6)(1);
+                f_gl   <= registers_in(6)(1);
                 f_blk  <= registers_in(6)(2);
                 f_pal  <= registers_in(6)(3);
                 f_osc  <= registers_in(6)(4);
@@ -507,8 +521,8 @@ begin
             end if;
             f_phi12 <= f_phi(15 downto 4);
 
-            -- glides: K1, K2, K5, K6, P12 (1/8 of the gap per field, deadband 4); 4 zone clocks each
-            if s_zone = '1' and s_zc >= 4 and s_zc < 20 then q_gon <= '1'; else q_gon <= '0'; end if;
+            -- glides: K1, K2, K5, P12, K6 (1/8 of the gap per field, deadband 4); 4 zone clocks each
+            if s_zone = '1' and s_zc >= 4 and s_zc < 24 then q_gon <= '1'; else q_gon <= '0'; end if;
             q_gi <= s_zc(4 downto 2) - 1; q_gph <= s_zc(1 downto 0);
             if q_gon = '1' then
                 case to_integer(q_gph) is
@@ -517,7 +531,8 @@ begin
                             when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
                             when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
                             when 2 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(2);
-                            when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(3);
+                            when 3 => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(3);
+                            when others => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(4);
                         end case;
                     when 1 =>
                         gl_d <= signed(resize(gl_k, 14)) - signed(resize(gl_o, 14));
@@ -531,7 +546,8 @@ begin
                                 when 0 => s_g(0) <= gl_n;
                                 when 1 => s_g(1) <= gl_n;
                                 when 2 => s_g(2) <= gl_n;
-                                when others => s_g(3) <= gl_n;
+                                when 3 => s_g(3) <= gl_n;
+                                when others => s_g(4) <= gl_n;
                             end case;
                         end if;
                 end case;
@@ -551,13 +567,12 @@ begin
             f_xav <= signed(resize(f_xcv, 15)) + resize(f_keyx4, 15);
             v_k := s_g(3)(12 downto 3);
             f_b <= resize(shift_right(resize(v_k, 12) + shift_left(resize(v_k, 12), 2), 4), 9);
-            v_k := s_k6;
-            if v_k < 512 then
-                v_t := shift_left(resize(v_k, 20), 3) + resize(v_k, 20);           -- k6 * 9
-                f_g <= to_unsigned(7, 5) + resize(v_t(13 downto 9), 5);
-            else
-                f_g <= to_unsigned(16, 5) + resize(shift_right(v_k - 512, 5), 5);
-            end if;
+            -- K6 Camera (glided): camera gain m = k * 19 / 512 (x0 .. x2 of the shipped 19/64, 0 in Osc),
+            -- stored-vase gain n = k / 32 (Q.4: x0 .. x1.94, x1 at 512)
+            v_k := s_g(4)(12 downto 3);
+            v_t := shift_left(resize(v_k, 20), 4) + shift_left(resize(v_k, 20), 1) + resize(v_k, 20);   -- k * 19
+            if f_osc = '1' then f_cm <= (others => '0'); else f_cm <= v_t(14 downto 9); end if;
+            f_sn <= v_k(9 downto 5);
             v_k := s_g(0)(12 downto 3);
             f_rb <= to_unsigned(1536, 14) + resize(v_k & "000", 14) + resize(v_k & "00", 14);
             v_k := s_g(1)(12 downto 3);
@@ -845,29 +860,40 @@ begin
                 fl_wv <= '1';
             end if;
             -- writer: v_k at 2k; the next clock (v_{k-1} + v_k) / 2 at 2k - 1; finally v_63 / 2 at 127
-            lr_we <= '0'; fl_mid <= '0';
+            fw_we <= '0'; fl_mid <= '0';
             if le_run = '1' and le_sl = 1 and le_ph = 0 then
                 fl_k <= (others => '0');
             elsif fl_wv = '1' then
-                lr_wa <= fl_bank & fl_k(5 downto 0) & '0';
-                lr_wd <= std_logic_vector(fl_v);
-                lr_we <= '1';
+                fw_wa <= fl_bank & fl_k(5 downto 0) & '0';
+                fw_wd <= fl_v;
+                fw_we <= '1';
                 fl_vk <= fl_v;
                 if fl_k = 0 then fl_vp <= fl_v; else fl_mid <= '1'; end if;
                 fl_ma <= (fl_k(5 downto 0) & '0') - 1;
                 fl_k <= fl_k + 1;
             elsif fl_mid = '1' then
                 v_m := resize(fl_vp, 9) + resize(fl_vk, 9);
-                lr_wa <= fl_bank & fl_ma;
-                lr_wd <= std_logic_vector(v_m(8 downto 1));
-                lr_we <= '1';
+                fw_wa <= fl_bank & fl_ma;
+                fw_wd <= v_m(8 downto 1);
+                fw_we <= '1';
                 fl_vp <= fl_vk;
             elsif fl_k = 64 then
-                lr_wa <= fl_bank & "1111111";
-                lr_wd <= std_logic_vector(shift_right(fl_vk, 1));
-                lr_we <= '1';
+                fw_wa <= fl_bank & "1111111";
+                fw_wd <= shift_right(fl_vk, 1);
+                fw_we <= '1';
                 fl_k <= fl_k + 1;
             end if;
+            -- K6 camera pass: the line RAM holds the stage-12 base W.  Video: max(sheen, half);
+            -- Osc: max(n * S, sheen, half) (= S at n = 1).  sheen = 2 (S - 150)+, half = S / 2.
+            fa_wa <= fw_wa; fa_we <= fw_we;
+            fa_p <= fw_wd * f_sn;
+            if fw_wd > 150 then fa_sh <= shift_left(fw_wd - 150, 1); else fa_sh <= (others => '0'); end if;
+            fa_h <= fw_wd(7 downto 1);
+            fb_wa <= fa_wa; fb_we <= fa_we;
+            if fa_p(12) = '1' then fb_g <= (others => '1'); else fb_g <= fa_p(11 downto 4); end if;
+            if resize(fa_h, 8) > fa_sh then fb_b <= resize(fa_h, 8); else fb_b <= fa_sh; end if;
+            lr_wa <= fb_wa; lr_we <= fb_we;
+            if f_osc = '1' and fb_g > fb_b then lr_wd <= std_logic_vector(fb_g); else lr_wd <= std_logic_vector(fb_b); end if;
         end if;
     end process p_fill;
 
@@ -885,10 +911,13 @@ begin
             v_d := signed(resize(c_y1, 11)) - 64;
             if v_d < 0 then c_d <= (others => '0'); else c_d <= unsigned(v_d(9 downto 0)); end if;
             c_av2 <= c_av1;
-            -- 2: x 0.297 (1/4 + 1/32 + 1/64), clipped to 8 bits; write at the resampled address
-            v_s := resize(c_d(9 downto 2), 10) + resize(c_d(9 downto 5), 10) + resize(c_d(9 downto 6), 10);
+            -- 2: x K6 camera gain (m / 64; shipped 19 / 64 = 0.297 at 50 %)
+            c_p <= c_d(9 downto 2) * f_cm;
+            c_av3 <= c_av2;
+            -- 3: clipped to 8 bits; write at the resampled address
+            v_s := c_p(13 downto 4);
             if v_s > 255 then cb_wd <= (others => '1'); else cb_wd <= std_logic_vector(v_s(7 downto 0)); end if;
-            if c_av2 = '1' then
+            if c_av3 = '1' then
                 cb_wa <= l_par & c_wacc(24 downto 16);
                 cb_we <= '1';
                 c_wacc <= c_wacc + resize(t_winc, 25);
@@ -916,8 +945,6 @@ begin
         variable v_us  : signed(11 downto 0);
         variable v_tt  : signed(12 downto 0);
         variable v_tu  : unsigned(10 downto 0);
-        variable v_sh  : signed(11 downto 0);
-        variable v_src : unsigned(8 downto 0);
         variable v_p14 : unsigned(13 downto 0);
         variable v_dl  : signed(15 downto 0);
         variable v_bb  : signed(11 downto 0);
@@ -1027,21 +1054,18 @@ begin
             -- 10: (line RAM output register)
             p10_cam <= p9_cam;
             -- 11: fabric copy
-            p11_s8 <= unsigned(lr_q); p11_cam <= p10_cam;
+            p11_w <= unsigned(lr_q); p11_cam <= p10_cam;
 
-            -- 12: source: object, or max(camera, the object's sheens, half the object)
-            if f_osc = '1' then
-                p12_src <= resize(p11_s8, 9);
+            -- 12: source: max(camera x K6, W) -- W from the fill engine: max(sheens, half) in Video,
+            -- max(K6 x object, sheens, half) in Osc (the camera is 0 there)
+            if p11_cam > p11_w then p12_src <= resize(p11_cam, 9); else p12_src <= resize(p11_w, 9); end if;
+
+            -- 13: S8 Gloss: Photo x1 / Glaze x1.75
+            if f_gl = '1' then
+                p13_sg <= p12_src + shift_right(p12_src, 1) + shift_right(p12_src, 2);
             else
-                v_sh := shift_left(signed(resize(p11_s8, 12)) - 150, 1);
-                v_src := f_clip(v_sh, 511, 9);
-                if resize(p11_s8(7 downto 1), 9) > v_src then v_src := resize(p11_s8(7 downto 1), 9); end if;
-                if resize(p11_cam, 9) > v_src then p12_src <= resize(p11_cam, 9); else p12_src <= v_src; end if;
+                p13_sg <= p12_src;
             end if;
-
-            -- 13: gloss (Q.4)
-            v_p14 := p12_src * f_g;
-            if v_p14(13 downto 4) > 511 then p13_sg <= (others => '1'); else p13_sg <= v_p14(12 downto 4); end if;
 
             -- 14: envelope from the side ring (rg_q = this pixel's stage-5 bundle)
             v_p14 := p13_sg * unsigned(rg_q(13 downto 9));

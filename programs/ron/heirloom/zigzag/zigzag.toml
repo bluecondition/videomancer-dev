@@ -2,12 +2,14 @@
 # Green ground, red rounded-top zigzag bands and pale blue ribbons with a texture keyed into them: one horizontal
 # oscillator plus a vertical ramp into three colour shapers (R bumps, G wave, B window delayed 36 px).
 # See zigzag.vhd, zigzag.py and SUMMARY.md.
+# v0.1.1 (2026-11-15, K6 camera pass): K6 = Camera (the old K5 Smoke re-ranged: 25 % = the still's smoke, default
+# 50 % = twice it); K5 = Palette (was K6).
 
 [program]
 processing_delay_clks = 32
 program_id = "com.czartroniks.zigzag"
 program_name = "Zigzag"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -59,19 +61,19 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Smoke"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 285
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Palette"
 value_labels = ["Still", "GBR", "BRG", "RBG", "GRB", "BGR", "Negative", "Neg GBR"]
 initial_value_label = "Still"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -132,12 +134,12 @@ linear_potentiometer_12 = 300
 name = "Neon Night"
 toggle_switch_9 = 1
 rotary_potentiometer_3 = 700
-rotary_potentiometer_6 = 192
+rotary_potentiometer_5 = 192
 
 [[preset]]
 name = "Blue Flood"
 rotary_potentiometer_2 = 150
-rotary_potentiometer_5 = 500
+rotary_potentiometer_6 = 675
 linear_potentiometer_12 = 480
 
 [[preset]]
@@ -147,6 +149,6 @@ rotary_potentiometer_4 = 760
 
 [[preset]]
 name = "Shredded"
-rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 950
 rotary_potentiometer_1 = 700
 toggle_switch_11 = 1

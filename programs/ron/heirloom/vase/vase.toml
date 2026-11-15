@@ -2,12 +2,14 @@
 # A glossy lathe vase on black (the camera's picture of a reflective object), keyed and colourised
 # by one slow vertical cycle: yellow/green/blue body, fast red bars, red and magenta blocks, a red key
 # window with a no-red channel.  See vase.vhd and SUMMARY.md.
+# v0.5.2 (2026-11-15, K6 camera pass): K6 = Camera (surface strength, default 50 % = the shipped look);
+# the old K6 Gloss moved to S8 (Photo / Glaze); the edge comb (old S8 Tear) is always on.
 
 [program]
 processing_delay_clks = 32
 program_id = "com.czartroniks.vase"
 program_name = "Vase"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -69,7 +71,7 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Gloss"
+name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -85,9 +87,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Tear"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Gloss"
+value_labels = ["Photo", "Glaze"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -135,4 +137,4 @@ toggle_switch_9 = 0
 name = "Swap Glaze"
 toggle_switch_7 = 1
 toggle_switch_10 = 1
-rotary_potentiometer_6 = 760
+toggle_switch_8 = 1

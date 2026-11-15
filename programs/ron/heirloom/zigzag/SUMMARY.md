@@ -1,5 +1,8 @@
 # Zigzag — rainbow zigzag ribbons on green, smoked by the camera
 
+**v0.1.1 (2026-11-15): K6 camera pass, built, NOT flashed** (K6 Camera = the old K5 Smoke, K5 Palette; see
+[K6 camera pass](#k6-camera-pass-2026-11-15)).
+
 **v0.1.0 (2026-11-04): built, NOT flashed.** Heirloom phase 3, from the clip `WIN_20230205_00_16_05` at 0.5 s
 (still `photos/vid/WIN_20230205_00_16_05_t0p5.png`). The still shows a bright green ground with two rounded-top red
 zigzag bands, and pale blue / white ribbons running down every branch and meeting in V's. A smoky texture (camera or
@@ -57,7 +60,7 @@ Working files: `.heirloom_work/rb_zigzag/` (`notes.md`, `proto1.py`, `imodel.py`
    - T is either three drifting sines (Osc) or the camera luma's 16-px box minus the same box 40 px earlier (Video),
      scaled to ±1.
    - key(f) is a 7-bit window over [0.49, 0.84] with 1/32-unit edges.
-   - kT = key·T·Smoke.
+   - kT = key·T·Camera (K6; v0.1.0 K5 Smoke).
    - R and G read the field at f + ¼·kT. B reads the field delayed 36 virtual px plus 2·kT taken 36 px back: 8× the R / G shift.
 3. **Shapers.**
    - R comes from a 1024-entry red table refilled every field: Lines re-indexes the measured R shaper about the ribbon
@@ -80,8 +83,8 @@ Working files: `.heirloom_work/rb_zigzag/` (`notes.md`, `proto1.py`, `imodel.py`
 | K2 Ribbon | the blue window's width: ×4, a blue flood (0) .. the still (512) .. ×1/4, a thin blue line (1023) |
 | K3 Lines | the red shaper's rate about the ribbon: ×0.4, fat bumps (0) .. the still (512) .. ×2.5, many red lines (1023) |
 | K4 Speed | bipolar (±8 deadband, square law): the colours stream down (+) or up (−) the branches. 612 = one palette cycle per 27 s, full = 0.84 s |
-| K5 Smoke | the texture's bite into the ribbons: 0 = clean ribbons, 285 = the still's hole fraction, 1023 = shredded lace |
-| K6 Palette | which shaper drives which gun: Still / GBR / BRG / RBG / GRB / BGR / Negative / Neg GBR (8 equal bands) |
+| K5 Palette | which shaper drives which gun: Still / GBR / BRG / RBG / GRB / BGR / Negative / Neg GBR (8 equal bands); was K6 (v0.1.1) |
+| K6 Camera | the texture's (camera, or the Osc sines) bite into the ribbons, the old K5 Smoke re-ranged (v0.1.1): 0 = clean ribbons, 25 % = the still's hole fraction (the old default), 50 % = twice that gain (default), 100 % = shredded lace (the old maximum) |
 | S7 Fold | Zigzag (the still) / Slant: the table read unfolded, a sawtooth, giving diagonal bands with the shapers repeating every 1.0 |
 | S8 Mirror | Off / On: the ramp folded at the centre line, so the zigzags meet in diamonds and X's |
 | S9 Ground | Green (the still) / Black: the green shaper dimmed to 1/8 outside the blue ribbon, giving neon on black |
@@ -99,13 +102,13 @@ Working files: `.heirloom_work/rb_zigzag/` (`notes.md`, `proto1.py`, `imodel.py`
   - With no input the ribbons are clean: the still without its smoke.
 - **Osc mode.**
   - Three sines replace the camera: periods 48 / 66 / 84 virtual px at three angles, drifting 0.6–0.8 cycles/s.
-  - At the default Smoke they give the still's hole fraction.
+  - At K6 Camera 25 % (the v0.1.0 default Smoke) they give the still's hole fraction; the 50 % default bites twice as hard.
 
 ## Engine
 - **Per-field sequencer (vblank zone).**
   - The shared glide covers K1, K2, K3, K5 and P12.
   - One serial multiplier runs 12 slots: the phase step from an exp2 ROM, the trough anchor, pitch², pq, speed², the
-    rate, the ribbon half-width, Smoke gain² and the red-table start.
+    rate, the ribbon half-width, the K6 Camera gain (v0.1.1 law, see below) and the red-table start.
   - Then the red table is refilled: 1024 ROM reads into a RAM, zone clocks 700 .. 1730.
 - **Per line.**
   - v = (|vy − cy| or vy)·pq >> 20, on a serial multiplier.
@@ -134,6 +137,30 @@ Working files: `.heirloom_work/rb_zigzag/` (`notes.md`, `proto1.py`, `imodel.py`
   - The Video frame (selfie.jpg as the camera) shows the picture's streaks in the ribbons with the composition intact.
   - A Speed-760 capture showed the red lines streaming 6–10 px along the branches.
   - Knob sweep at RTL widths (`sweep.py`): no overflow.
+
+## K6 camera pass (2026-11-15)
+v0.1.1. Ron's rule for the Heirloom, Kinetic and Patchbay sets: K6 is the camera strength.
+- **What K6 does.** Zigzag already had a camera-strength knob: K5 Smoke was the gain of the texture (camera band-pass
+  in Video, the three sines in Osc) into the ribbons, kT = key·T·gain. A second camera gain on K6 would have
+  multiplied Smoke's travel, so the pass is a **swap**: **K6 = Camera** (the old Smoke, re-ranged and renamed),
+  **K5 = Palette** (the old K6, all 8 gun permutations kept). No function was frozen or dropped. The Osc sines take
+  the same gain, so the Osc flip stays as bold as before relative to the camera.
+- **Gain law** (shared glide, 1/8 per field, ±2 deadband; the per-field sequencer's serial multiplier, slot 9):
+  - k ≤ 512: gain = k × 312 × 2051 / 2²² = 0.1526 k, linear. **25 % (256) = 39 = exactly the shipped default
+    (Smoke 285)**, 50 % (512, default) = 78 = twice it.
+  - k > 512: gain = 78 + d · (3.375 d) × 2051 / 2²², d = k − 512 (continuous at 512): 75 % ≈ 186, **100 % = 508**
+    (the old Smoke maximum, 511: shredded lace).
+  - 0 % = gain 0 = clean ribbons, exactly what a black input draws.
+- **Look** (`.heirloom_work/rb_zigzag/k6/k6sheet.png`, GHDL 720p60 dec 2, selfie, Palette Still): 25 % = the still's
+  yellow smoke streaks in the ribbons; 50 % = the camera's structure fills the ribbons in yellow / pale blue, the
+  red bands and green ground untouched (no ragging outside the ribbons); 100 % = shredded multicoloured lace in the
+  ribbons, the composition intact, no washout. Osc at 50 %: the sine lattice cuts holes about twice the still's.
+- **The still's smoke is now at K6 25 %**, not at the default (50 % bites twice as hard, per the rule). Presets keep
+  their old smoke: "Blue Flood" 500 → 675, "Shredded" 900 → 950 (same gain under the new law); presets that never
+  set Smoke now take the 50 % default. "Neon Night"'s palette moved to K5.
+- **Build (ROUTER1, all six configs seed 1):** HD Analog 88.95, SD Analog 93.80, HD HDMI 94.11, SD HDMI 94.73,
+  HD Dual 91.34, SD Dual 94.11 MHz (worst HD 88.95); 5,922–5,944 / 7,680 LC (77 %), 21 / 32 EBR. Latency 32
+  unchanged. `out/rev_b/ron/heirloom/zigzag.vmprog`. Not flashed.
 
 ## Status
 - **v0.1.0 built 2026-11-04 with ROUTER1, all six configs on seed 1. NOT flashed.**

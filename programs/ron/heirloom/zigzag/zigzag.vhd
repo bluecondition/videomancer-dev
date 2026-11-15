@@ -20,8 +20,9 @@
 --   K2  Ribbon    the blue window's width, x4 .. x1/4 of the still's
 --   K3  Lines     the red shaper's rate, x0.4 .. x2.5 (more red lines; the table is re-indexed every field)
 --   K4  Speed     bipolar: the colours stream down the zigzag (or up), +-8 deadband
---   K5  Smoke     how hard the texture bites into the ribbons (0 = clean ribbons)
---   K6  Palette   which shaper drives which gun: Still, 5 permutations, Negative, Negative GBR
+--   K5  Palette   which shaper drives which gun: Still, 5 permutations, Negative, Negative GBR
+--   K6  Camera    how hard the texture (camera, or the Osc sines) bites into the ribbons (0 = clean ribbons;
+--                 25 % = the still's smoke, 50 % = twice it, 100 % = shredded lace); was K5 Smoke
 --   S7  Fold      Zigzag (rectified) / Slant (a sawtooth: diagonal bands)
 --   S8  Mirror    the ramp folded at the centre line: diamonds
 --   S9  Ground    Green / Black (the green shaper only inside the ribbon)
@@ -36,6 +37,8 @@
 -- conditioning (chroma [1 2 2 2 2 2 2 2 1]/16, luma [1 2 1]/4, luma 13/16) before the blanking gate; syncs through
 -- a block-RAM ring.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15 (v0.1.1): K6 = Camera (the old K5 Smoke, camera strength, re-ranged: 25 % = the shipped
+-- default 285, 50 % = twice its gain), K5 = Palette (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -188,7 +191,7 @@ architecture zigzag of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(520 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
-    signal s_g5 : unsigned(12 downto 0) := to_unsigned(285 * 8, 13);
+    signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 Camera (glided)
     signal s_gp : unsigned(12 downto 0) := to_unsigned(424 * 8, 13);
     signal s_k6 : unsigned(2 downto 0) := (others => '0');
     signal s_gm : unsigned(12 downto 0) := (others => '0');
@@ -215,6 +218,11 @@ architecture zigzag of program_top is
     signal c_sr   : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal c_hwb  : unsigned(11 downto 0) := to_unsigned(717, 12);
     signal c_gain : unsigned(8 downto 0) := (others => '0');
+    -- K6 Camera law operands (free-running from the glided K6): k <= 512: k x 312 (linear, gain k x 0.1526:
+    -- 39 = the shipped Smoke 285 at 256, 78 at 512); k > 512: d x 3.375 d, d = k - 512, plus 78 (509 at 1023)
+    signal c_kh  : std_logic := '0';
+    signal c_ka  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal c_kb  : unsigned(10 downto 0) := to_unsigned(312, 11);
     signal c_ta0  : unsigned(23 downto 0) := (others => '0');         -- red table index start (Q11 entries)
     signal c_tst  : unsigned(12 downto 0) := to_unsigned(2048, 13);   -- red table index step = 8 sR
     type t_s16 is array (0 to 2) of signed(15 downto 0);
@@ -399,7 +407,7 @@ begin
                 s_blk   <= registers_in(6)(2);
                 s_pas   <= registers_in(6)(3);
                 s_src   <= registers_in(6)(4);
-                s_k6    <= unsigned(registers_in(5)(9 downto 7));
+                s_k6    <= unsigned(registers_in(4)(9 downto 7));
                 s_xs    <= s_xsr;
                 case to_integer(s_xsr) is
                     when 4      => s_x0 <= to_unsigned(240, 9); c_dr <= to_unsigned(18, 8);
@@ -424,7 +432,7 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
+                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(5));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -485,7 +493,7 @@ begin
                     when 6  => z_fa <= resize(s_vm, 36);                z_fb <= resize(s_vm, 16);         -- speed^2
                     when 7  => z_fa <= resize(z_a(17 downto 0), 36);    z_fb <= to_unsigned(2715, 16);    -- rate
                     when 8  => z_fa <= to_unsigned(717, 36);            z_fb <= z_mt;                     -- ribbon half-width
-                    when 9  => z_fa <= resize(s_g5(12 downto 3), 36);   z_fb <= resize(s_g5(12 downto 3), 16);  -- k5^2
+                    when 9  => z_fa <= resize(c_ka, 36);                z_fb <= resize(c_kb, 16);         -- K6 camera law
                     when 10 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(2051, 16);    -- gain
                     when others => z_fa <= to_unsigned(C_RIB, 36);      z_fb <= resize(z_a(9 downto 0), 16);   -- table start: c |256 - sR|
                 end case;
@@ -549,8 +557,9 @@ begin
                             when 0      => c_sr <= resize(r_ex_q(15 downto 7), 10);
                             when others => c_sr <= r_ex_q(15 downto 6);
                         end case;
-                    when 266 => z_a <= f_acc(19 downto 0);                        -- k5^2
-                    when 290 => c_gain <= f_acc(30 downto 22);
+                    when 266 => z_a <= f_acc(19 downto 0);                        -- K6 camera law product
+                    when 290 =>
+                        if c_kh = '1' then c_gain <= f_acc(30 downto 22) + 78; else c_gain <= f_acc(30 downto 22); end if;
                         -- red table: entry i reads R at (c (256 - sR) + 8 i sR) >> 11 (Q8 sR); |256 - sR| for the product
                         if c_sr > 256 then z_a <= resize(c_sr - 256, 20); z_neg <= '1';
                         else z_a <= resize(to_unsigned(256, 10) - c_sr, 20); z_neg <= '0'; end if;
@@ -560,6 +569,19 @@ begin
                         else c_ta0 <= resize(f_acc(23 downto 0), 24); end if;
                     when others => null;
                 end case;
+            end if;
+
+            -- K6 Camera law operands (quasi-static; the glide settles by zone clock ~24, slot 9 loads at 270)
+            if s_g5(12 downto 3) > 512 then
+                c_kh <= '1'; c_ka <= s_g5(12 downto 3) - 512;
+            else
+                c_kh <= '0'; c_ka <= s_g5(12 downto 3);
+            end if;
+            if c_kh = '1' then
+                c_kb <= shift_left(resize(c_ka, 11), 1) + resize(c_ka, 11) + resize(c_ka(9 downto 2), 11)
+                        + resize(c_ka(9 downto 3), 11);                                                 -- d x 3.375
+            else
+                c_kb <= to_unsigned(312, 11);
             end if;
 
             s_gav_sr(0) <= g_avid;

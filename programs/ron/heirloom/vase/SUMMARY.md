@@ -1,5 +1,8 @@
 # Vase — a glossy lathe vase striped by a rolling colour cycle
 
+**v0.5.2 (2026-11-15): K6 camera pass, built, NOT flashed** (K6 Camera, S8 Gloss; see
+[K6 camera pass](#k6-camera-pass-2026-11-15)).
+
 **v0.5.0 (2026-10-27): built, NOT flashed.** Rebuilt from the photo WIN_20230424_23_59_47 (the v0.1
 "rainbow silhouette" was judged too abstract). The picture is a camera shot of a glossy vase keyed onto
 black and colourised by one slow vertical oscillator: a yellow/green/blue body, fast red bars, red and
@@ -78,15 +81,15 @@ magenta blocks, and a red key window with a no-red channel. Presets are hand-wri
 | K3 Roll | bars and colour bands | bipolar roll speed, square law, deadband ±8; positive rolls down (default 640, ≈0.5 line/field) |
 | K4 Spin | the vase's sheens | bipolar turn speed, square law, deadband ±8; the sheens slide round the lathe and squash at the rims (default 620, ≈1 turn/min) |
 | K5 Key | the red key window / no-red channel | key centre −220..+260 virtual px from the axis (photo +68, default 614) |
-| K6 Gloss | the sheens and body brightness | luma gain 0.45–2 (photo 1.0 at 512): dull … blown-out white |
+| K6 Camera | the vase's glossy surface | surface strength (K6 camera pass, v0.5.2): the camera (Video) or the stored vase (Osc) × 0–2, max'd with the vase's own sheens and half its luma. 0 % = the vase drawn with a black input (dim body, sheens), 50 % = the shipped look (default), 100 % = the camera twice as bright (Osc: the old Gloss's blown-out glaze); glided |
 | S7 Swap | red bars vs olive gaps | the key swaps bar and gap rows: red falls between the bars, the blocks go olive, the off zone goes red |
-| S8 Tear | edge comb, red overshoot lines | per-line edge jitter + bar-top lines (default On) |
+| S8 Gloss | the sheens and body brightness | Photo (×1, default) / Glaze (luma ×1.75: white glazed vase); the old K6 Gloss. The v0.5 S8 Tear (edge comb, bar-top lines) is fixed On |
 | S9 Blocks | red/magenta blocks and off zones | photo zones (On), or bars all the way down (Off) |
 | S10 Palette | the colours | Photo / Rotate (R→G→B: green bars on a violet body) |
 | S11 Source | the vase's glossy surface | Video (camera wrapped round the vase, default) / Osc (the stored vase) |
 | P12 Bulge | the silhouette (neck, bulbs, waist, base) | profile deviation × 0–2.5: straight cone (0 %), the photo (40 %), an hourglass whose waist pinches to a thread between two swollen bulbs (100 %); glided |
 
-K1, K2, K5 and P12 glide (1/8 of the gap per field, ±4 deadband). K6 is latched per field.
+K1, K2, K5, K6 and P12 glide (1/8 of the gap per field, ±4 deadband).
 
 ## Video
 The photo's vase is camera content, so Video mode puts the camera there through the same processing.
@@ -139,6 +142,31 @@ The photo's vase is camera content, so Video mode puts the camera there through 
 - **Contracts:** generated avid (parity-locked start), virtual 1080-line geometry (the vase is sized to
   height and centred at 0.53 W in every mode), engine started per field, all block RAMs `no_rw_check` and
   collision-free.
+
+## K6 camera pass (2026-11-15)
+v0.5.2. Ron's rule for the Heirloom, Kinetic and Patchbay sets: K6 is the camera strength.
+- **What K6 does.** Vase's camera is the vase's surface (a photocopy of the camera wrapped round the lathe), so K6
+  follows the camera-is-the-picture rule: it sets how strongly the surface shows.
+  - Video: the camera luma × g on the camera write side (the shipped fixed gain was ×0.297 of luma above black;
+    now luma/4 × m/16, m = K6 · 19/512, so m = 19 is the shipped gain at 50 %).
+  - Osc: the stored vase × g (n = K6/32, Q.4) in the fill engine, which now writes the stage-12 base into the
+    line RAM: max(sheen, half) in Video, max(n·S, sheen, half) in Osc. Stage 12 is a single max(camera, base).
+  - Both are then max'd with the vase's own sheens 2·(S − 150) and half its luma, as before.
+- **Gain law** (linear, glided 1/8 per field with a ±4 deadband in the shared glide, decoded per field):
+  g = K6/512, so 0 % = ×0 (exactly the black-input look: the dim vase with its sheens, the same in Video and Osc),
+  25 % = ×0.5, **50 % = ×1 = the shipped look (the default frame is the v0.5.1 frame; Osc = the photo)**,
+  100 % = ×2 (camera ×1.95 / stored vase ×1.94). At 100 % the camera fills the front of the vase with a bright,
+  high-contrast picture and kills the red key where it is bright; Osc at 100 % is the old Gloss maximum (white
+  glazed sheens). Neither washes the vase out: the silhouette, bars, blocks and right-hand sheens stay.
+- **Old K6 Gloss → S8.** Gloss mattered (dull … blown-out), and the weakest other control was S8 Tear (its Off
+  barely changes a still: `sheet.png`), so S8 is now **Gloss: Photo (×1) / Glaze (×1.75)**, a shift-add in stage 13
+  in place of the 9×5 gloss multiply. The edge comb and bar-top lines (Tear) are fixed On (its default). The
+  "Swap Glaze" preset now turns S8 Glaze on (it set Gloss 760 = ×1.44).
+- **Sheet:** `.heirloom_work/rb_vase/k6/k6sheet.png` (GHDL 720p60 dec 2, selfie, K6 0 / 25 / 50 / 100 %, Osc at
+  50 / 0 / 100 %).
+- **Build (ROUTER1, all six configs seed 1):** HD Analog 85.80, SD Analog 81.17, HD HDMI 87.27, SD HDMI 81.03,
+  HD Dual 85.39, SD Dual 88.73 MHz (worst HD 85.39); 7,095–7,116 / 7,680 LC (92.7 %), 24 / 32 EBR. Standalone yosys
+  4,072 LUT (v0.5.1 3,970). Latency 32 unchanged in every mode. `out/rev_b/ron/heirloom/vase.vmprog`. Not flashed.
 
 ## Status
 - **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s2 80.74, SD Analog s1 79.21, HD HDMI s1 76.75, SD HDMI s1 78.13, HD Dual s1 78.21, SD Dual s1 72.98 MHz; 6963-6994 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
