@@ -1,6 +1,6 @@
 # Metamorph (Kinetic)
 
-**v0.1.0 built 2026-11-14, not flashed.** Flash `out/rev_b/ron/kinetic/metamorph.vmprog`.
+**v0.1.1 built 2026-11-15 (K6 camera pass), not flashed.** Flash `out/rev_b/ron/kinetic/metamorph.vmprog`.
 
 ## What it draws
 
@@ -32,8 +32,8 @@ pinwheel instead of shearing it, which is what makes the figures interlock. A = 
 | K2 | Shape | the edge profile, morphing in eighths through four ROM profiles: S-curve > bird hook (default) > zigzag (pinwheel crosses) > jigsaw knob (stars) |
 | K3 | Depth | the wave's swing of A, square law, 0 .. 1/2 tile (default 0.17) |
 | K4 | Rate | wave travel, bipolar, centre = still; exponential, 60 s per cycle just off the deadband to 2 cycles per second |
-| K5 | Spread | phase step per tile, square law, 0 .. 1/2 cycle. 0 = every tile morphs in unison; default = one metamorphosis across the screen; top = neighbours in antiphase |
-| K6 | Colour | the 16 shared Kinetic palettes (ground + A; the accent on the outline), with hysteresis |
+| K5 | Colour | the 16 shared Kinetic palettes (ground + A; the accent on the outline), with hysteresis (K6 before v0.1.1) |
+| K6 | Camera | the camera's strength (0 .. 100 %, default 50 %): 0 = none (the black-input picture), 25 % = v0.1.0's fixed gain, 50 % = 2 x, 100 % = 3 x. Scales Source = Osc too. Glided. (Spread, K5 before v0.1.1, is fixed at 420: one metamorphosis across the screen) |
 | S7 | Wave | Smooth (sine) / Snap (2.5 x the sine, clipped: zones of squares and zones of creatures with quick eased flips, about 74 % dwell) |
 | S8 | Field | Linear (the metamorphosis sweeps across) / Radial (diamond rings from the screen centre) |
 | S9 | Outline | Off / On: an accent-colour line on every tile edge (4 virtual px at 1080p, 2 real px at 720p and SD) |
@@ -46,7 +46,8 @@ pinwheel instead of shearing it, which is what makes the figures interlock. A = 
 `program_type = "processing"`. The picture's luma is the second modulator and adds to the same state A:
 luma -> 32-pixel box -> vertical IIR in a line store (riley's source field, but with a 12-bit state moving
 1/32 per line instead of 8 bits and 1/8) -> square law
-(320 l^2 >> 16, up to 0.46 tile at white, about 0.1 tile at mid grey). The tiles deform where the picture is
+(320 l^2 >> 16, up to 0.46 tile at white, about 0.1 tile at mid grey, in v0.1.0; since v0.1.1 the K6 Camera
+gain scales the 320, see "K6 camera pass" below). The tiles deform where the picture is
 bright. With riley's 1/8 store the field stepped several codes from line to line in textured picture areas
 and every steep edge came out ragged (in the model and in GHDL); with the 1/32 store the edges are clean
 curves again (GHDL render with selfie.jpg in cmp_final.png). With a
@@ -113,6 +114,28 @@ Things to look at on hardware: SD, where a 64-px tile is only 14 field lines tal
 25 % the echo contour and eye crowd the tile (Detail Off reads better there); high Morph + high Depth + Osc
 together push A to the clamp (1 tile) and the tiles fold into slivers; the camera response lags the picture
 by about 30 lines (the heavier vertical smoothing).
+
+## K6 camera pass (2026-11-15)
+
+- **K6 = Camera**, 0 .. 100 %, default 50 % (512). It scales the source's offset to A: the per-field source
+  table (G l^2 >> 16, G = 320 in v0.1.0) is refilled with G from the glided K6 value k (shared glide, 1/8 of
+  the gap per field, +-4 deadband): **G = 1.25 k up to 50 %, then 320 + 0.625 k**. 0 % = G 0 (exactly the
+  black-input picture); 25 % = 320 (v0.1.0's strength); 50 % = 640 (2 x: white bends a tile 0.9 of a tile,
+  mid grey 0.23); 100 % = 958 (3 x). The table word went from 8 to 9 bits (clamped at 511 = 1 tile), the
+  accumulator to 27 bits. No pixel-path multiply: the gain lives in the table fill (zone clocks 222 .. 480).
+  Source = Osc goes through the same table, so K6 scales it too (Osc keeps its full-swing lattice).
+- GHDL renders (720p60, decimation 2, selfie.jpg, glide started at the K6 value in a sim-only copy):
+  `.kinetic_work/rb_metamorph/k6sheet.png`. 2 x stays clean (bold hooked figures in the bright areas, smooth
+  edges); 4 x frayed the edges into per-line steps and folded tiles into slivers (`k6_1023_4x.png`), so the top
+  is 3 x: a melting-Escher climax with the figures still reading. Osc at 50 % folds the tiles hard where the
+  lattice peaks (its usual full swing doubled).
+- **K5 Spread is fixed at 420** (its default: one metamorphosis across the screen); K6's old function,
+  **Colour (all 16 palettes), moved to K5** (with its hysteresis). Spread was the weakest knob on the control
+  sheet (Rate is the only speed control). The presets' Spread values (300 .. 640) are gone; their palettes
+  moved to K5.
+- Build v0.1.1 (`.kinetic_work/tools/k6build.sh`): **router1, every config on seed 1**. HD Analog 98.35 MHz,
+  HD HDMI 90.44, HD Dual 99.10, SD Analog 92.59, SD HDMI 94.82, SD Dual 100.07. 7,164 .. 7,186 / 7,680 LC
+  (93.6 %), 23 / 32 EBR.
 
 ## Cut / deviations
 

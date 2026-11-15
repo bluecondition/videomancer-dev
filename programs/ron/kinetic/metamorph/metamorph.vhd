@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Metamorph v0.1.0 -- Kinetic.  After M. C. Escher's "Metamorphosis II", "Sky and Water I" and "Day and
+-- Metamorph v0.1.1 -- Kinetic.  After M. C. Escher's "Metamorphosis II", "Sky and Water I" and "Day and
 -- Night": a checkerboard whose edges deform by degrees until the squares are interlocking figures.
 --
 -- Element: a tile.  State: the morph amount A, a continuous field that the wave carries across the picture.
@@ -22,13 +22,14 @@
 --   K2  Shape    the edge profile: S-curve > bird hook > zigzag > jigsaw knob, morphing in eighths
 --   K3  Depth    the wave's swing of A (square law, 0 .. 1/2 tile)
 --   K4  Rate     wave travel, bipolar, centre = still
---   K5  Spread   phase step per tile (square law, 0 .. 1/2 cycle)
---   K6  Colour   the 16 shared Kinetic palettes (ground, A; the accent on the outline)
+--   K5  Colour   the 16 shared Kinetic palettes (ground, A; the accent on the outline)   [K6 before v0.1.1]
+--   K6  Camera   the source's strength: the luma^2 table gain, 0 = none, 25 % = v0.1.0's, 50 % = 2 x, 100 % = 3 x
+--       (Spread, K5 before v0.1.1, is fixed at 420: phase step per tile, one metamorphosis across the screen)
 --   S7  Wave     Smooth / Snap (dwell at the extremes)
 --   S8  Field    Linear (the metamorphosis sweeps across) / Radial (rings from the centre)
 --   S9  Outline  Off / On
 --   S10 Detail   Off / On (echo contour + eye)
---   S11 Source   Video / Osc (luma^2 adds to A: the tiles deform where the picture is bright)
+--   S11 Source   Video / Osc (luma^2 x Camera adds to A: the tiles deform where the picture is bright)
 --   P12 MORPH    base A: 0 % a checkerboard .. 100 % deep interlock
 --
 -- Chassis from riley.vhd ([A] timing and virtual coordinates, [B] controls, the per-field sequencer's
@@ -43,6 +44,7 @@
 --   Detail: 17 .. 22 ring / eye distance, 23 .. 25 coverage.   One latency (42) in every mode.
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 420 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -55,13 +57,15 @@ use work.metamorph_pkg.all;
 use work.all;
 
 architecture metamorph of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(420, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 42;   -- = processing_delay_clks
 
     -- TOML defaults: the glides start there
     constant C_DEF_K1  : integer := 512;
     constant C_DEF_K2  : integer := 341;
     constant C_DEF_K3  : integer := 600;
-    constant C_DEF_K5  : integer := 420;
+    constant C_DEF_K5  : integer := 420;   -- K5 Spread is fixed here since the K6 camera pass (C_KFIX_5)
+    constant C_DEF_K6  : integer := 512;   -- K6 Camera
     constant C_DEF_P12 : integer := 350;
 
     constant C_CY8 : integer := 138240;     -- screen centre y, Q8 virtual lines (540)
@@ -214,7 +218,7 @@ architecture metamorph of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(C_DEF_K1 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(C_DEF_K2 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);
-    signal s_g5 : unsigned(12 downto 0) := to_unsigned(C_DEF_K5 * 8, 13);
+    signal s_g6 : unsigned(12 downto 0) := to_unsigned(C_DEF_K6 * 8, 13);   -- K6 Camera (glide channel 3)
     signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
@@ -322,7 +326,8 @@ architecture metamorph of program_top is
     signal b_V : unsigned(21 downto 0) := (others => '0');
     signal s6_th : unsigned(19 downto 0) := (others => '0');
     signal s7_neg, s8_neg, s9_neg, s10_neg, s11_neg : std_logic := '0';
-    signal s9_mag, s11_dw, s12_src : unsigned(7 downto 0) := (others => '0');
+    signal s9_mag, s11_dw : unsigned(7 downto 0) := (others => '0');
+    signal s12_src : unsigned(8 downto 0) := (others => '0');
     signal s12_a  : signed(10 downto 0) := (others => '0');
     signal s13_A  : signed(9 downto 0) := (others => '0');
     signal s13_g  : signed(9 downto 0) := (others => '0');
@@ -393,15 +398,18 @@ architecture metamorph of program_top is
     signal lb_wa : unsigned(9 downto 0) := (others => '0');
     signal lb_we : std_logic := '0';
     signal lb_rc : unsigned(10 downto 0) := (others => '0');
-    signal s8_q, s8_qp, s9_l, s11_d8, s12_d8 : unsigned(7 downto 0) := (others => '0');
+    signal s8_q, s8_qp, s9_l : unsigned(7 downto 0) := (others => '0');
+    signal s11_d8 : unsigned(8 downto 0) := (others => '0');
     -- weight table: duty / 256 by source level, refilled every field (a second-order DDA, no multiplier)
-    type t_wt is array (0 to 255) of unsigned(7 downto 0);
+    type t_wt is array (0 to 255) of unsigned(8 downto 0);
     signal wt_ram : t_wt := (others => (others => '0'));
     attribute no_rw_check of wt_ram : signal is true;
-    signal wt_q, wt_wd, wt_wa, wt_i : unsigned(7 downto 0) := (others => '0');
+    signal wt_q, wt_wd : unsigned(8 downto 0) := (others => '0');
+    signal wt_wa, wt_i : unsigned(7 downto 0) := (others => '0');
     signal wt_we, wt_run : std_logic := '0';
-    signal wt_acc : unsigned(23 downto 0) := (others => '0');
-    signal wt_d   : unsigned(17 downto 0) := (others => '0');
+    signal wt_acc : unsigned(26 downto 0) := (others => '0');
+    signal wt_d   : unsigned(19 downto 0) := (others => '0');
+    signal c_wg   : unsigned(10 downto 0) := to_unsigned(640, 11);   -- K6 camera gain, 320 = the shipped strength
 
     -- [E] colour out (stage 31; the names p_out reads)
     signal s25_y, s25_u, s25_v : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -593,7 +601,7 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- palette: 16 steps with hysteresis (leave a step only 8 past its edge)
-                v_k := unsigned(registers_in(5));
+                v_k := unsigned(registers_in(4));
                 v_c := signed(resize(v_k, 11)) - signed(resize(s_pal & "100000", 11));
                 if v_c > 40 or v_c < -40 then s_pal <= v_k(9 downto 6); end if;
             end if;
@@ -610,7 +618,7 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
+                            when 3      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -618,7 +626,7 @@ begin
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                        if (s_gd > 16 or s_gd < -16) and (z_gc /= 3 or s_gd > 32 or s_gd < -32) then   -- Camera: +-4
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -629,7 +637,7 @@ begin
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 3      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
@@ -667,7 +675,7 @@ begin
                 case to_integer(z_sel) is
                     when 0  => z_fa <= resize(s_g1, 40);  z_fb <= to_unsigned(704, 16);                  -- octaves above pitch 64
                     when 1  => z_fa <= resize(c_invp, 40); z_fb <= resize(s_ys, 16);                     -- Y step per line
-                    when 2  => z_fa <= resize(s_g5(12 downto 3), 40); z_fb <= resize(s_g5(12 downto 3), 16);  -- spread^2
+                    when 2  => z_fa <= resize(unsigned(C_KFIX_5), 40); z_fb <= resize(unsigned(C_KFIX_5), 16);  -- spread^2 (fixed)
                     when 3  => z_fa <= resize(c_invp, 40); z_fb <= f_acc(20 downto 5);                   -- spread per h
                     when 4  => z_fa <= resize(c_sp, 40);  z_fb <= resize(w_dxm, 16);                     -- theta at the pre-pixel
                     when 5  => z_fa <= resize(c_sp, 40);  z_fb <= resize(s_xs, 16);                      -- its step per pixel
@@ -1176,17 +1184,26 @@ begin
             v_a := resize(s8_q, 9) + resize(s8_qp, 9) + 1;
             s9_l <= v_a(8 downto 1);
             s11_d8 <= wt_q;
-            s12_d8 <= s11_d8;
 
-            -- source table fill (zone, zc 224 .. 480): A units by source level, (320 l^2) >> 16, the square by
-            -- second differences
+            -- K6 camera gain (zc 222, after the glides): G = 1.25 k up to 50 %, then 320 + 0.625 k, so K6 25 % =
+            -- 320 (v0.1.0's 320 l^2), 50 % = 640 (2 x), 100 % = 958 (3 x; 4 x frayed the edges in GHDL)
+            if s_zone = '1' and s_zc = 222 then
+                if s_g6(12) = '0' then
+                    c_wg <= resize(s_g6(12 downto 3), 11) + resize(s_g6(12 downto 5), 11);
+                else
+                    c_wg <= to_unsigned(320, 11) + resize(s_g6(12 downto 4), 11) + resize(s_g6(12 downto 6), 11);
+                end if;
+            end if;
+            -- source table fill (zone, zc 224 .. 480): A units by source level, (G l^2) >> 16 clamped to 511
+            -- (1 tile), the square by second differences
             wt_we <= '0';
             if s_zone = '1' and s_zc = 224 then
-                wt_run <= '1'; wt_i <= (others => '0'); wt_acc <= (others => '0'); wt_d <= to_unsigned(320, 18);
+                wt_run <= '1'; wt_i <= (others => '0'); wt_acc <= (others => '0'); wt_d <= resize(c_wg, 20);
             elsif wt_run = '1' then
                 wt_we <= '1'; wt_wa <= wt_i;
-                wt_wd <= wt_acc(23 downto 16);
-                wt_acc <= wt_acc + wt_d; wt_d <= wt_d + 640; wt_i <= wt_i + 1;
+                if wt_acc(26 downto 25) /= "00" then wt_wd <= (others => '1');
+                else wt_wd <= wt_acc(24 downto 16); end if;
+                wt_acc <= wt_acc + wt_d; wt_d <= wt_d + shift_left(resize(c_wg, 20), 1); wt_i <= wt_i + 1;
                 if wt_i = 255 then wt_run <= '0'; end if;
             end if;
         end if;

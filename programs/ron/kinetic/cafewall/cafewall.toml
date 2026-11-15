@@ -6,7 +6,7 @@
 processing_delay_clks = 22
 program_id = "com.czartroniks.cafewall"
 program_name = "Cafewall"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -58,16 +58,6 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Spread"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 420
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Colour"
 control_mode = "linear"
 display_min_value = 1
@@ -75,6 +65,16 @@ display_max_value = 16
 initial_value = 32
 display_float_digits = 0
 suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -123,7 +123,6 @@ name = "Cafe Wall"
 name = "Munsterberg"
 rotary_potentiometer_2 = 0
 rotary_potentiometer_3 = 250
-rotary_potentiometer_5 = 300
 toggle_switch_9 = 1
 linear_potentiometer_12 = 360
 
@@ -131,30 +130,28 @@ linear_potentiometer_12 = 360
 name = "Brick Flip"
 rotary_potentiometer_1 = 480
 rotary_potentiometer_2 = 420
-rotary_potentiometer_5 = 250
-rotary_potentiometer_6 = 160
+rotary_potentiometer_5 = 160
 toggle_switch_7 = 1
 
 [[preset]]
 name = "Pond Tiles"
 rotary_potentiometer_1 = 420
 rotary_potentiometer_3 = 300
-rotary_potentiometer_5 = 520
-rotary_potentiometer_6 = 224
+rotary_potentiometer_5 = 224
 toggle_switch_8 = 1
 linear_potentiometer_12 = 600
 
 [[preset]]
 name = "Straight Lines"
 rotary_potentiometer_3 = 450
-rotary_potentiometer_6 = 608
+rotary_potentiometer_5 = 608
 toggle_switch_10 = 1
 
 [[preset]]
 name = "Mosaic"
 rotary_potentiometer_1 = 200
 rotary_potentiometer_2 = 80
-rotary_potentiometer_6 = 544
+rotary_potentiometer_5 = 544
 linear_potentiometer_12 = 430
 
 [[preset]]
@@ -162,6 +159,5 @@ name = "Landslide"
 rotary_potentiometer_1 = 620
 rotary_potentiometer_2 = 600
 rotary_potentiometer_4 = 840
-rotary_potentiometer_5 = 180
-rotary_potentiometer_6 = 288
+rotary_potentiometer_5 = 288
 linear_potentiometer_12 = 1023

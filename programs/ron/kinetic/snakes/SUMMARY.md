@@ -1,6 +1,6 @@
 # Snakes (Kinetic)
 
-**v0.1.0 built 2026-11-14, not flashed.** Flash `out/rev_b/ron/kinetic/snakes.vmprog`.
+**v0.1.1 built 2026-11-15 (K6 camera pass), not flashed.** Flash `out/rev_b/ron/kinetic/snakes.vmprog`.
 
 ## What it draws
 
@@ -33,8 +33,8 @@ drive is an angle that advances every field by P12^2; phase advances by Rate.
 | K2 | Segments | 3 .. 16 four-step cycles per ring = 12 .. 64 segments (default 8 = 32 segments), with hysteresis |
 | K3 | Depth | wave swing 0 .. 1/4 turn, square law (default 0.117 turn = 3.7 segments at 32 segments) |
 | K4 | Rate | wave speed, bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
-| K5 | Spread | phase step per disc 0 .. 1/2 cycle (square law; default 0.28), and half of that per ring, so a swing winds each disc into a pinwheel |
-| K6 | Colour | the 16 shared palettes with hysteresis; the page is the palette ground, the four tones are the palette's colours shaded (see deviations) |
+| K5 | Colour | the 16 shared palettes with hysteresis; the page is the palette ground, the four tones are the palette's colours shaded (see deviations) (K6 before v0.1.1) |
+| K6 | Camera | the camera's strength (0 .. 100 %, default 50 %): the ring offset is luma x 8 x k / 256, so 0 = none (the black-input picture), 25 % = v0.1.0's fixed gain, 50 % = 2 x, 100 % = 4 x. Scales Source = Osc too. Glided. (Spread, K5 before v0.1.1, is fixed at 760: 0.28 cycle per disc, the pinwheels) |
 | S7 | Wave | Smooth (sine) / Snap (dwell and quick eased flips) |
 | S8 | Field | Linear (the wave crosses the lattice diagonally) / Radial (octagonal rings of discs from the centre) |
 | S9 | Lattice | Staggered (rows 7/8 pitch apart, alternate rows offset half a pitch) / Square |
@@ -51,7 +51,8 @@ Iris Ripple, Clockwork, Big Wheel.
 (8 bits, less black) -> 1/16 one-pole smear along the line (about 16 px) -> ONE sample per disc, taken at the
 disc's centre column on the first line of its cell row, kept in a 256-entry RAM by disc column and read back
 for the rest of the row, so every disc is rigid. The sample turns the disc's odd and even rings against each
-other (phi +- luma * 8: white is about 0.9 of a step each way), which slides the brick pattern of segments
+other (phi +- luma * 8 in v0.1.0: white is about 0.9 of a step each way; since v0.1.1 x the K6 Camera gain, see
+"K6 camera pass" below), which slides the brick pattern of segments
 toward aligned spokes: bright parts of the picture show as discs whose segments line up. With a black input the
 offset is zero and the wave and drive alone run. Source = Osc substitutes the shell's drifting two-axis triangle
 lattice (640 x 540 virtual px) at twice the camera's gain.
@@ -119,6 +120,28 @@ of each cell row still uses the row above's sample (that line is inside the grou
 - Renders: `.kinetic_work/rb_snakes/cmp_final.png`, `sheet.png` (control sheet), `strip.png` (motion); the
   integer model is `imodel.py` there.
 - Rebuild: `./build_set.sh kinetic snakes`.
+
+## K6 camera pass (2026-11-15)
+
+- **K6 = Camera**, 0 .. 100 %, default 50 % (512), glided (the shared glide, now three channels; +-4 deadband).
+  The smeared sample (8 bits) is multiplied by the glided value k in its own stage before the per-disc hold,
+  and the hold now stores the phi offset itself (13 bits; the RAM word went from 8 to 16 bits, same EBR):
+  **offset = luma x 8 x k / 256** (Osc: x 16, as before twice the camera's). 0 % = no offset (exactly the
+  black-input picture); 25 % = v0.1.0's offset bit for bit (white ~0.9 step each way); 50 % = 2 x (white ~1.9
+  steps); 100 % = 4 x (white ~3.7 steps). The offset is a phase, so it wraps instead of saturating: a stronger
+  camera turns the rings through more brick / spoke alignments over the picture's tones and cannot tear a disc
+  (each disc stays one rigid sample), so the full 4 x is kept at the top.
+- GHDL renders (720p60, decimation 2, selfie.jpg, glide started at the K6 value in a sim-only copy):
+  `.kinetic_work/rb_snakes/k6sheet.png`. At the default Scale only five discs span the screen, so the camera
+  reads as which discs line up into spokes, not as a picture (as in v0.1.0).
+- **K5 Spread is fixed at 760** (its default: 0.28 cycle per disc, half per ring, the pinwheels); K6's old
+  function, **Colour (all 16 palettes), moved to K5** (with its hysteresis). Spread was the weakest knob on the
+  control sheet (760 and 1023 look alike; Rate is the only speed control). The presets' Spread values are gone
+  (Pure Illusion's 0 did nothing anyway with Depth 0); their palettes moved to K5.
+- Build v0.1.1 (`.kinetic_work/tools/k6build.sh`): **router1, every config on seed 1**. HD Analog 76.20 MHz,
+  HD HDMI 77.20, HD Dual 76.38, SD Analog 68.87, SD HDMI 74.85, SD Dual 75.56. 7,184 .. 7,211 / 7,680 LC
+  (93.9 %, at the fit limit), 23 / 32 EBR. The HD margin is thin (2 MHz); if a rebuild misses, the ring-coverage
+  stage note under Status still applies, and the camera multiply could become a 4-step shift-select.
 
 ## Cut / deviations
 

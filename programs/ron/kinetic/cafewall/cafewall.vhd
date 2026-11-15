@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Cafewall v0.1.0 -- Kinetic.
+-- Cafewall v0.1.1 -- Kinetic.
 --
 -- The cafe wall illusion (Gregory and Heard, 1979): rows of alternating dark and light tiles, each row shifted
 -- against the next, with thin mid-tone mortar lines between the rows.  The mortar lines are parallel and
@@ -18,14 +18,20 @@
 --              tiles by the edge's position in it (16 steps)
 --   source   luma (or the Osc lattice) filtered 1/16 along x, sampled at each tile's last pixel on the row's
 --              first line (all mortar) into a RAM indexed by tile number and held for the row: 16 tone steps
---              per tile from a per-field table (ground tiles toward A, A tiles toward B)
+--              per tile from a per-field table (ground tiles toward A, A tiles toward B); the step is the
+--              sample through the Camera law (see K6)
 --
 --   K1  Scale    row height 24 .. 288 virtual lines (exponential, glided)
 --   K2  Shape    tile aspect 1 .. 4 (squares .. long bricks)
 --   K3  Mortar   thickness 2.5 % .. 37 % of the row (square law) and tone 1/4 .. 3/4 between the tile tones
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
---   K5  Spread   phase step per row 0 .. 1/2 cycle (square law)
---   K6  Colour   the 16 shared palettes (ground and A = the tiles, B = the picture's tint, accent = Reveal's mortar)
+--   K5  Colour   the 16 shared palettes (ground and A = the tiles, B = the picture's tint, accent = Reveal's mortar)
+--                [K6 before v0.1.1]
+--   K6  Camera   the picture's tone strength (glided), g = k / 256: up to 25 % the step is g * (v0.1.0's step)
+--                (0 = none, 25 % = v0.1.0's); above, the step's contrast is stretched g times about the middle
+--                of the 16 steps (50 % = 2 x, 100 % = 4 x), clamped to the v0.1.0 range so the two tile sets
+--                never meet (2 x in amplitude washed the wall to one grey)
+--       (Spread, K5 before v0.1.1, is fixed at 420: phase step per row, one slow S down the wall)
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Rows     Same / Alternate
@@ -42,6 +48,7 @@
 --   [F] output conditioning: luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1] with resync, luma 13/16, blanking gate
 -- One latency (C_LAT = 22) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 420 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -54,8 +61,10 @@ use work.cafewall_pkg.all;
 use work.all;
 
 architecture cafewall of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(420, 10));   -- K6 camera pass: fixed knob
     constant C_LAT      : integer := 22;      -- = processing_delay_clks
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
+    constant C_DEF_K6   : integer := 512;     -- K6 Camera (TOML default; the glide starts there)
 
     -- [A] virtual-1080 steps from the timing ID: y step per field line (Q8), x step in half virtual px
     function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
@@ -163,6 +172,9 @@ architecture cafewall of program_top is
     -- knobs: glided (Q3), raw rate, switches, palette
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(560 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_g6 : unsigned(12 downto 0) := to_unsigned(C_DEF_K6 * 8, 13);   -- K6 Camera
+    signal c_kg : unsigned(9 downto 0) := to_unsigned(C_DEF_K6, 10);        -- its per-field value
+    signal c_ko : unsigned(16 downto 0) := to_unsigned(120 * (C_DEF_K6 - 256), 17);   -- the stretch offset
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -241,6 +253,9 @@ architecture cafewall of program_top is
     signal s_dd  : unsigned(9 downto 0) := (others => '0');
     signal s_av0, s_sav, s_savd : std_logic := '0';
     signal s_y1  : unsigned(13 downto 0) := (others => '0');
+    signal s_ymv : unsigned(7 downto 0) := (others => '0');     -- the filtered sample (Osc: x 2, clipped)
+    signal s_ym  : unsigned(17 downto 0) := (others => '0');    -- ... x Camera (/ 4096 = the v0.1.0 step x g)
+    signal s_yl  : unsigned(3 downto 0) := (others => '0');     -- the tone step after the stretch and clamp
 
     -- [D] row registers (the NEXT line's values) and the per-line engine
     signal ls_sk  : signed(27 downto 0) := (others => '0');
@@ -408,19 +423,21 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9); s_sd <= '0'; c_hm1 <= to_unsigned(959, 12);
                 end case;
                 -- Colour: 16 palettes with hysteresis
-                v_d := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(s_pal & "100000", 11));
-                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(5)(9 downto 6)); end if;
+                v_d := signed(resize(unsigned(registers_in(4)), 11)) - signed(resize(s_pal & "100000", 11));
+                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(4)(9 downto 6)); end if;
             end if;
             g_wm1 <= s_w - 1;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
 
-            -- shared glide for Scale and SHIFT (1/8 of the gap per field, +-2 deadband): four clocks per channel
+            -- shared glide for Scale, SHIFT and Camera (1/8 of the gap per field, +-2 deadband, Camera +-4):
+            -- four clocks per channel
             if s_zgo = '1' then
                 z_gp <= "00"; z_gc <= "000"; z_grun <= '1';
             elsif z_grun = '1' then
                 case z_gp is
                     when "00" =>
-                        if z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
+                        if z_gc(1) = '1' then s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                        elsif z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                         else s_gm <= s_gp; s_gr <= unsigned(registers_in(7)); end if;
                         z_gp <= "11";
                     when "11" =>
@@ -429,19 +446,28 @@ begin
                     when "01" =>
                         if C_SIM_SNAP then
                             null;
-                        elsif s_gd > 16 or s_gd < -16 then
+                        elsif (s_gd > 16 or s_gd < -16) and (z_gc(1) = '0' or s_gd > 32 or s_gd < -32) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
                         end if;
                         z_gp <= "10";
                     when others =>
-                        if z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        if z_gc(1) = '1' then s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        elsif z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         else s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0)); end if;
                         z_gp <= "00";
-                        if z_gc = 1 then z_grun <= '0'; end if;
+                        if z_gc = 2 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
+            end if;
+
+            -- K6 Camera: the glided value, latched once the glides are done (zone clock 24), and the stretch
+            -- offset 7.5 (g - 1) steps = 120 (k - 256) in product units (k >= 256; 0 below)
+            if s_zone = '1' and s_zc = 24 then c_kg <= s_g6(12 downto 3); end if;
+            if s_zone = '1' and s_zc = 25 then
+                if c_kg(9 downto 8) = "00" then c_ko <= (others => '0');
+                else c_ko <= shift_left(resize(c_kg - 256, 17), 7) - shift_left(resize(c_kg - 256, 17), 3); end if;
             end if;
 
             -- serial products: slot k loads at zc = 32 + 32 k, 24 iterations, stored at 60 + 32 k.  The slot
@@ -461,7 +487,7 @@ begin
                     when 3  => z_fa(16 downto 0) <= c_p;                  z_fb <= resize(z_mf, 24);           -- mortar
                     when 4  => z_fa(12 downto 0) <= s_gp;                 z_fb <= resize(s_gp, 24);           -- shift^2
                     when 7  =>                                                                                -- spread^2
-                        z_fa(12 downto 3) <= unsigned(registers_in(4)); z_fb(12 downto 3) <= unsigned(registers_in(4));
+                        z_fa(12 downto 3) <= unsigned(C_KFIX_5); z_fb(12 downto 3) <= unsigned(C_KFIX_5);
                     when 12 => z_fa(8 downto 0)  <= s_vm;                 z_fb <= to_unsigned(900, 24);       -- rate exponent
                     when others => z_fa(15 downto 0) <= z_mt;             z_fb <= to_unsigned(1193046, 24);   -- rate (14)
                 end case;
@@ -712,6 +738,7 @@ begin
         variable v_s9 : unsigned(8 downto 0);
         variable v_x  : unsigned(13 downto 0);
         variable v_d1 : signed(14 downto 0);
+        variable v_yo : signed(18 downto 0);
     begin
         if rising_edge(clk) then
             -- oscillator
@@ -746,6 +773,18 @@ begin
                 v_d1 := signed(resize(v_x, 15)) - signed(resize(s_y1, 15));
                 s_y1 <= unsigned(signed(s_y1) + resize(shift_right(v_d1, 4), 14));
             end if;
+            -- K6 Camera: the filtered sample (Osc twice the camera's, clipped), x k in its own stage, less the
+            -- stretch offset, clamped to 0 .. 15 steps (k = 256: exactly the v0.1.0 step, y1 bits 13 .. 10).
+            -- Three clocks behind s_y1, so the sample sits three pixels further along (inside the 16-pixel
+            -- filter).
+            if s_src = '0' then s_ymv <= s_y1(13 downto 6);
+            elsif s_y1(13) = '1' then s_ymv <= (others => '1');
+            else s_ymv <= s_y1(12 downto 5); end if;
+            s_ym <= s_ymv * c_kg;
+            v_yo := signed(resize(s_ym, 19)) - signed(resize(c_ko, 19));
+            if v_yo < 0 then s_yl <= (others => '0');
+            elsif v_yo(18 downto 16) /= "000" then s_yl <= (others => '1');
+            else s_yl <= unsigned(v_yo(15 downto 12)); end if;
         end if;
     end process p_src;
 
@@ -914,9 +953,7 @@ begin
             lh_ra <= v_bk & q2_col;
             if a_top = '1' then v_bk := '1' & s_fpar; else v_bk := "00"; end if;
             lh_wa <= v_bk & q2_col;
-            if s_src = '0' then lh_wd <= "0000" & std_logic_vector(s_y1(13 downto 10));
-            elsif s_y1(13) = '1' then lh_wd <= "00001111";
-            else lh_wd <= "0000" & std_logic_vector(s_y1(12 downto 9)); end if;
+            lh_wd <= "0000" & std_logic_vector(s_yl);
             lh_we <= a_samp and s_gav_sr(0) and (q2_cross or not g_avid);
             -- 4: RAM; 5: fabric copy
             q4_par <= q3_par; q4_f <= q3_f;

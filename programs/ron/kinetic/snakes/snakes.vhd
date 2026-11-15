@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Snakes v0.1.0 -- Kinetic.
+-- Snakes v0.1.1 -- Kinetic.
 --
 -- After Akiyoshi Kitaoka, "Rotating Snakes" (2003): discs of concentric rings of segments stepping
 -- black -> dark colour -> white -> light colour around each ring.  That luminance order makes a still disc seem
@@ -24,8 +24,11 @@
 --   K2  Segments  3 .. 16 cycles (12 .. 64 segments) per ring
 --   K3  Depth     wave swing 0 .. 1/4 turn (square law)
 --   K4  Rate      bipolar, centre = still; 60 s per cycle .. 2 cycles per second
---   K5  Spread    phase step per disc 0 .. 1/2 cycle (square law), half of it per ring
---   K6  Colour    the 16 shared palettes; the four tones are the palette colours shaded to fixed luma bands
+--   K5  Colour    the 16 shared palettes; the four tones are the palette colours shaded to fixed luma bands
+--                 [K6 before v0.1.1]
+--   K6  Camera    the source's strength: phi offset = luma * 8 * k / 256 (0 = none, 25 % = v0.1.0's, 50 % = 2 x,
+--                 100 % = 4 x; glided).  (Spread, K5 before v0.1.1, is fixed at 760: phase step per disc 0.28
+--                 cycle, half of it per ring: the pinwheels)
 --   S7  Wave      Smooth / Snap
 --   S8  Field     Linear / Radial
 --   S9  Lattice   Staggered / Square
@@ -42,6 +45,7 @@
 --   [F] output conditioning: luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1] with resync, luma 13/16, blanking gate
 -- One latency (C_LAT = 46) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 760 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -54,8 +58,10 @@ use work.snakes_pkg.all;
 use work.all;
 
 architecture snakes of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(760, 10));   -- K6 camera pass: fixed knob
     constant C_LAT      : integer := 46;      -- = processing_delay_clks
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
+    constant C_DEF_K6   : integer := 512;     -- K6 Camera (TOML default; the glide starts there)
 
     -- [A] virtual-1080 steps from the timing ID: y step per field line (Q8), x step in half virtual px
     function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
@@ -125,15 +131,15 @@ architecture snakes of program_top is
     signal r_pl_a : unsigned(7 downto 0) := (others => '0');
     signal r_pl_q : std_logic_vector(31 downto 0) := (others => '0');
 
+    type t_r16 is array (0 to 255) of std_logic_vector(15 downto 0);
     -- [C] source hold: one smeared luma sample per disc column, written on the first line of each cell row
-    type t_r8 is array (0 to 255) of std_logic_vector(7 downto 0);
-    signal hl : t_r8 := (others => x"00");
+    -- (since the K6 camera pass the word is the sample's phi offset, luma x Camera, 13 bits)
+    signal hl : t_r16 := (others => x"0000");
     attribute no_rw_check of hl : signal is true;
     signal hl_ra, hl_wa : unsigned(7 downto 0) := (others => '0');
-    signal hl_q, hl_wd  : std_logic_vector(7 downto 0) := x"00";
+    signal hl_q, hl_wd  : std_logic_vector(15 downto 0) := x"0000";
     signal hl_we : std_logic := '0';
     -- delay rings (write at rc + d, read at rc, RAM register, fabric register: d + 2 stages)
-    type t_r16 is array (0 to 255) of std_logic_vector(15 downto 0);
     signal ra : t_r16 := (others => (others => '0'));          -- larger |coordinate|, signs: stage 3 -> 13
     attribute no_rw_check of ra : signal is true;
     signal ra_d, ra_q, ra_f : std_logic_vector(15 downto 0) := (others => '0');
@@ -189,6 +195,8 @@ architecture snakes of program_top is
     -- knobs: glided (Q3), raw rate, switches, palette
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(409 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(400 * 8, 13);
+    signal s_g6 : unsigned(12 downto 0) := to_unsigned(C_DEF_K6 * 8, 13);   -- K6 Camera
+    signal c_kg : unsigned(9 downto 0) := to_unsigned(C_DEF_K6, 10);        -- its per-field value
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -269,6 +277,7 @@ architecture snakes of program_top is
     signal s_sv  : unsigned(7 downto 0) := (others => '0');
     signal s_sav, s_savd : std_logic := '0';
     signal s_y1 : unsigned(13 downto 0) := (others => '0');
+    signal s_ym : unsigned(17 downto 0) := (others => '0');    -- K6 Camera: the smeared sample x the gain
     signal s_u23d : std_logic := '0';
 
     -- [D] lattice: line registers (the NEXT line's start values), this line's values, pixel accumulators
@@ -306,7 +315,7 @@ architecture snakes of program_top is
     signal s_rodd : std_logic_vector(20 to 30) := (others => '0');
     signal s_par  : std_logic_vector(28 to 32) := (others => '0');
     signal k28    : unsigned(7 downto 0) := (others => '0');
-    signal p30_hold : unsigned(7 downto 0) := (others => '0');
+    signal p30_hold : unsigned(12 downto 0) := (others => '0');
 
     -- [E] the look
     signal p2_ax  : unsigned(10 downto 0) := (others => '0');
@@ -486,8 +495,8 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- Colour: 16 palettes with hysteresis
-                v_d := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(s_pal & "100000", 11));
-                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(5)(9 downto 6)); end if;
+                v_d := signed(resize(unsigned(registers_in(4)), 11)) - signed(resize(s_pal & "100000", 11));
+                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(4)(9 downto 6)); end if;
                 -- Segments: 3 .. 16 cycles with hysteresis
                 v_n14 := shift_left(resize(unsigned(registers_in(1)), 14), 4) - shift_left(resize(unsigned(registers_in(1)), 14), 1);
                 v_nd := signed(resize(v_n14, 15)) - signed(resize(s_nq & "1000000000", 15));
@@ -497,13 +506,15 @@ begin
             g_wm1 <= s_w - 1;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
 
-            -- shared glide for Scale and Drive (1/8 of the gap per field, +-2 deadband): four clocks per channel
+            -- shared glide for Scale, Drive and Camera (1/8 of the gap per field, +-2 deadband, Camera +-4):
+            -- four clocks per channel
             if s_zgo = '1' then
                 z_gp <= "00"; z_gc <= "000"; z_grun <= '1';
             elsif z_grun = '1' then
                 case z_gp is
                     when "00" =>
-                        if z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
+                        if z_gc(1) = '1' then s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                        elsif z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                         else s_gm <= s_gp; s_gr <= unsigned(registers_in(7)); end if;
                         z_gp <= "11";
                     when "11" =>
@@ -512,20 +523,24 @@ begin
                     when "01" =>
                         if C_SIM_SNAP then
                             null;
-                        elsif s_gd > 16 or s_gd < -16 then
+                        elsif (s_gd > 16 or s_gd < -16) and (z_gc(1) = '0' or s_gd > 32 or s_gd < -32) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
                         end if;
                         z_gp <= "10";
                     when others =>
-                        if z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        if z_gc(1) = '1' then s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        elsif z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         else s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0)); end if;
                         z_gp <= "00";
-                        if z_gc = 1 then z_grun <= '0'; end if;
+                        if z_gc = 2 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
+
+            -- K6 Camera: the glided value, latched once the glides are done (zone clock 24)
+            if s_zone = '1' and s_zc = 24 then c_kg <= s_g6(12 downto 3); end if;
 
             -- serial products: slot k loads at zc = 32 + 32 k, 24 iterations, stored at 60 + 32 k.  The slot
             -- number is decoded at 30 + 32 k and the operands pre-muxed at 31 + 32 k (no zc decode on the
@@ -546,7 +561,7 @@ begin
                     when 4  =>                                                                                -- depth^2
                         z_fa(12 downto 3) <= unsigned(registers_in(2)); z_fb(12 downto 3) <= unsigned(registers_in(2));
                     when 5  =>                                                                                -- spread^2
-                        z_fa(12 downto 3) <= unsigned(registers_in(4)); z_fb(12 downto 3) <= unsigned(registers_in(4));
+                        z_fa(12 downto 3) <= unsigned(C_KFIX_5); z_fb(12 downto 3) <= unsigned(C_KFIX_5);
                     when 6  => z_fa(12 downto 0) <= s_gp;                 z_fb <= resize(s_gp, 24);           -- drive^2
                     when 7  => z_fa(19 downto 0) <= c_dm;                 z_fb <= resize(c_n, 24);            -- segments * pixel size
                     when 12 => z_fa(8 downto 0)  <= s_vm;                 z_fb <= to_unsigned(900, 24);       -- rate exponent
@@ -859,7 +874,11 @@ begin
             if g_avid = '1' then s_u23d <= a_uf(23); else s_u23d <= '0'; end if;
             hl_we <= g_avid and a_uf(23) and (not s_u23d) and l_new;
             hl_wa <= a_i;
-            hl_wd <= std_logic_vector(s_y1(13 downto 6));
+            -- K6 Camera: the sample x the gain in its own stage (one pixel behind s_y1), then the phi offset
+            -- (Video: luma * 8 * k / 256; Osc twice that, mod one cycle); k = 256 gives v0.1.0's offsets
+            s_ym <= s_y1(13 downto 6) * c_kg;
+            if s_src = '1' then hl_wd <= "000" & std_logic_vector(s_ym(16 downto 4));
+            else hl_wd <= "000" & std_logic_vector(s_ym(17 downto 5)); end if;
         end if;
     end process p_src;
 
@@ -1102,9 +1121,10 @@ begin
             if s_gav_sr(25) = '1' and s_gav_sr(26) = '0' then v_k := l_i0;
             elsif s_nw(27) = '1' then v_k := k28 + 1; end if;
             k28 <= v_k; hl_ra <= v_k;
-            if s_nw(29) = '1' or (s_gav_sr(27) = '1' and s_gav_sr(28) = '0') then p30_hold <= unsigned(hl_q); end if;
-            -- 31: odd rings: half a step, source the other way (Video: white ~ 0.9 step; Osc twice that)
-            if s_src = '1' then v_st := '0' & p30_hold & "0000"; else v_st := "00" & p30_hold & "000"; end if;
+            if s_nw(29) = '1' or (s_gav_sr(27) = '1' and s_gav_sr(28) = '0') then p30_hold <= unsigned(hl_q(12 downto 0)); end if;
+            -- 31: odd rings: half a step, source the other way (the held offset is luma x Camera: at 25 %
+            -- white ~ 0.9 step, Osc twice that)
+            v_st := p30_hold;
             if s_rodd(30) = '1' then p31_st <= to_unsigned(1024, 13) - v_st; else p31_st <= v_st; end if;
             -- 32: the segment phase
             p32_phi1 <= p31_phi0 + p31_st;

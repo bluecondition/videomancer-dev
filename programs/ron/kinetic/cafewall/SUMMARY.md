@@ -1,6 +1,6 @@
 # Cafewall (Kinetic)
 
-**v0.1.0 built 2026-11-14, not flashed.** Flash `out/rev_b/ron/kinetic/cafewall.vmprog`.
+**v0.1.1 built 2026-11-15 (K6 camera pass), not flashed.** Flash `out/rev_b/ron/kinetic/cafewall.vmprog`.
 
 ## What it draws
 
@@ -33,8 +33,8 @@ Row 0 is centred on the screen centre, so Scale zooms about the centre.
 | K2 | Shape | tile aspect 1 .. 4: squares .. long bricks (default 1.6) |
 | K3 | Mortar | thickness 2.5 % .. 37 % of the row height (square law; never under 2 field lines) and tone 1/4 .. 3/4 of the way from the ground tile to the A tile (default: 7 % and a little under the mid tone) |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
-| K5 | Spread | phase step per row 0 .. 1/2 cycle, square law. 0 = all rows move together; low = one slow S down the wall; high = neighbouring rows in antiphase |
-| K6 | Colour | the 16 shared palettes with hysteresis: ground and A = the two tiles, mortar between them, B = the tint the picture gives the A tiles, accent = Reveal's mortar |
+| K5 | Colour | the 16 shared palettes with hysteresis: ground and A = the two tiles, mortar between them, B = the tint the picture gives the A tiles, accent = Reveal's mortar (K6 before v0.1.1) |
+| K6 | Camera | the picture's tone strength (0 .. 100 %, default 50 %), glided. 0 = none (the plain wall), 25 % = v0.1.0's tones, 50 % = the picture's contrast doubled, 100 % = x 4 (a near two-tone mosaic), always inside v0.1.0's tone range so the two tile sets never meet. Scales Source = Osc too. (Spread, K5 before v0.1.1, is fixed at 420: one slow S down the wall) |
 | S7 | Wave | Smooth (sine) / Snap (rows dwell at the two ends and flip quickly: at SHIFT 50 % a brick bond with fault lines that travel) |
 | S8 | Field | Linear (the wave runs down the wall) / Radial (rows above and below the centre move alike and every row is mirrored about the centre, so the wall is four-fold symmetric and the tiles stream out of the centre axis) |
 | S9 | Rows | Same / Alternate (every other row moves the opposite way: the Munsterberg zigzag) |
@@ -51,7 +51,8 @@ Presets: Cafe Wall (defaults), Munsterberg, Brick Flip, Pond Tiles, Straight Lin
 element, its tiles' TONE: luma x 1.5 -> 1/16 one-pole filter along x (restarted every line) -> sampled at each
 tile's last pixel on the row's first line (which is always all mortar) into a block RAM indexed by tile number
 -> held for the rest of the row, so every tile is one flat tone. 16 steps: ground tiles go toward A (0.70 of
-the way at full luma), A tiles go toward B (0.23). The picture shows as a mosaic in the wall while the two
+the way at full luma), A tiles go toward B (0.23). Since v0.1.1 the step goes through the K6 Camera law first
+(see "K6 camera pass" below). The picture shows as a mosaic in the wall while the two
 tile sets stay apart, so the illusion holds; it reads as a picture at small Scale. With a black input both
 steps are zero and the wall is the plain two-tone one. Source = Osc substitutes the shell's drifting
 640 x 540 triangle lattice at twice the gain (clipped), so diamonds of tone drift through the wall.
@@ -111,6 +112,32 @@ Reveal divides the picture's contrast by four along with the tiles'.
   only, the VHDL is the simulated one).
 - Renders: `.kinetic_work/rb_cafewall/cmp_final.png`, `sheet.png` (control sheet), `strip.png` (motion); both
   sheets are from the integer model.
+
+## K6 camera pass (2026-11-15)
+
+- **K6 = Camera**, 0 .. 100 %, default 50 % (512), glided (the shared glide, now three channels; +-4 deadband).
+  The filtered sample s (8 bits; Osc keeps its x 2, clipped) is multiplied by the glided value k in its own
+  stage, then the tone step is **l = clamp((s k - 120 (k - 256)) >> 12, 0, 15)**, with the offset 0 below
+  k = 256. So up to 25 % the step is k / 256 of v0.1.0's (0 % = the plain wall, exactly the black-input
+  picture; 25 % = v0.1.0's step bit for bit); above 25 % the picture's contrast is stretched g = k / 256 times
+  about the middle of the 16 steps (50 % = 2 x, 100 % = 4 x, a near two-tone mosaic), clamped to v0.1.0's tone
+  range. The tile table (16 steps) is unchanged.
+- Why not 2 x in amplitude: v0.1.0 already takes the ground tiles 0.70 of the way to A at full luma, so doubling
+  the deflection crosses the two tile sets and the wall washes to one light grey on a bright picture (tried
+  first: last panel of the sheet). Inside the v0.1.0 range the two tile sets never meet, so the illusion holds
+  at every K6 setting; at 100 % on a bright picture most ground tiles sit at the top step (grey next to the
+  off-white A tiles), on a dark one they split black / grey.
+- GHDL renders (720p60, decimation 2, selfie.jpg, glide started at the K6 value in a sim-only copy):
+  `.kinetic_work/rb_cafewall/k6sheet.png`.
+- **K5 Spread is fixed at 420** (its default: one slow S down the wall); K6's old function, **Colour (all 16
+  palettes), moved to K5** (with its hysteresis). The presets' Spread values (180 .. 520) are gone; their
+  palettes moved to K5.
+- The hold sample now sits 3 pixels further along the line (the multiply and the stretch stages), inside the
+  16-pixel filter.
+- Build v0.1.1 (`.kinetic_work/tools/k6build.sh`): **router1**. HD Analog 98.48 MHz on **seed 2** (seed 1
+  stalled the router, 600 s timeout), HD HDMI 97.74 (seed 1), HD Dual 97.54 on **seed 3** (seeds 1 and 2
+  stalled), SD Analog 97.01, SD HDMI 101.71, SD Dual 95.49 (seed 1). 6,125 .. 6,144 / 7,680 LC (80 %), 11 / 32
+  EBR.
 
 ## Cut / deviations
 
