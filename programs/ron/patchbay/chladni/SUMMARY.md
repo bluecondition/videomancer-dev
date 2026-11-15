@@ -1,6 +1,6 @@
 # Chladni: standing waves on a plate
 
-**v0.1.0 built 2026-11-14, not flashed.** Patchbay. Two H-locked and two V-locked sine VCOs, two multipliers and
+**v0.1.1 built 2026-11-15 (K6 camera pass), not flashed.** Patchbay. Two H-locked and two V-locked sine VCOs, two multipliers and
 a mixer make the field of a vibrating square plate; a window comparator at zero draws the sand along the nodal
 lines and a colouriser bands the antinodes. Presets are hand-written placeholders.
 
@@ -42,8 +42,8 @@ out of the nodes at a third rate. Speed at its centre locks all three: the still
 | K2 Mode M | VCO M (frequency) | 1 .. 9, as K1. 512 = 5. The two VCOs never sit on the same harmonic: M is pushed one away (F would vanish) |
 | K3 Mix | mixer | an angle, constant power: 0 = plate B alone (-90 deg, an m x n grid of cells) .. 256-383 detent = the minus figure (-45 deg, the default 320) .. 640-767 detent = plate A alone (an n x m grid) .. 1023 = the plus figure (+45 deg) |
 | K4 Speed | VCO N phase, colouriser offset | bipolar, square law, +-8 deadband: phase drift of VCO N across (full = 0.68 cycles/s) and down (a third, opposite), band flow (0.9 periods/s). In the deadband the drift phases snap to zero: the still figure. 660 = the default drift |
-| K5 Sand | window comparator (width) | nodal line weight: hairlines (0) .. heavy (1023), 11x. The window tracks the tone generator (4 + (n + m) / 2), so the lines keep their weight as the modes climb |
-| K6 Bands | colouriser (gain) | 0.4 .. 3.4 palette cycles per unit of F: one or two wide bands per lobe .. tight rings |
+| K5 Bands | colouriser (gain) | 0.4 .. 3.4 palette cycles per unit of F: one or two wide bands per lobe .. tight rings (K6 until v0.1.0) |
+| K6 Camera | source gain (camera or Osc) | 0 % = no source (the black-input figure) .. 25 % = v0.1.0's fixed gain (0.30 of F's unit for full white) .. 50 % (default) = 2x .. 100 % = 4x. Sand (K5 until v0.1.0) is fixed at its old default 512: the window still tracks the tone generator |
 | S7 Plate | plate key | Square (bordered square plate, black outside) / Screen (the field fills the picture: n across the width, m down the height) |
 | S8 Look | colouriser (palette bank) | Bands / Sand: pale sand on black, with a thin dust ring where each colouriser period ends (so Bands still counts rings) |
 | S9 Twin | H VCOs (triangle sweep) | one plate / two plates mirrored about the screen centre (Square: two 900-px plates; Screen: two half-width fields) |
@@ -85,6 +85,36 @@ out of the nodes at a third rate. Speed at its centre locks all three: the still
   in the hardware convention (U = Cr, V = Cb); drawn whites about 777.
 - **Block RAM (24).** Colouriser 8, three sine tables 6, luma cells 2, box delay rings 4, line store 4. All the
   RAMs that are written carry `no_rw_check` (no transparency emulation in the yosys log).
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. K6 is now **Camera**, the strength of the source term added to F (the slewed camera luma, or the Osc
+lattice when S11 = Osc), 0 .. 100 %, default 50 %.
+
+- **Law.** The glided K6 (k, 0 .. 1023; deadband +-4 codes, ease 1/8 per field, shared glide channel 3)
+  multiplies v0.1.0's source gain on the vblank sequencer's serial multiplier (a new slot 18 after the old
+  source-gain slot 17): `c_gl = gain_v010 x k / 1024`, and the pixel path's existing camera multiply now keeps
+  4x more of its product (`s_lterm = v_p(20 downto 4)`, was `(20 downto 6)`). So the term is linear in K6:
+  - 0 % = no source at all (the black-input figure, bit for bit);
+  - 25 % (k 256) = v0.1.0's fixed gain, 0.30 of F's unit amplitude for full white;
+  - 50 % (default) = 2x: the sand cross bends well away from the diagonals, the plate's edge sand turns to bands;
+  - 100 % = 4x (1.2 of F's unit for full white): bright areas lift F off zero, so the sand only survives over the
+    darker parts of the picture and the bands follow the picture there; still a clean banded plate.
+  No new pixel-path multiplier: the gain rides the existing 4 x 13-bit split multiply. |F| is 17 bits, so even
+  Osc at 100 % does not overflow (the colouriser phase wraps, as it always did).
+- **Osc** keeps its 3.5x level relative to the camera and scales with K6 too: at 50 % it floods every lobe
+  (the sand mostly disappears, the lattice's own bands take over the plate), at 25 % it is v0.1.0's Osc.
+- **K5 Sand frozen** at its default 512 (window `612` before the tone-generator tracking, `z_wk` is now a
+  constant). Sand was the weakest knob on the sheet (hairline .. heavy line weight of the same figure).
+  **K6's old function Bands moved to K5** (same law, 0.4 .. 3.4 palette cycles, default 400). Presets: the old
+  K6 values moved to K5, the old K5 (Sand) values were dropped.
+- **Sims** (`.patchbay_work/rb_chladni/k6/`, sim-only copy with the glide bypassed, NTSC full raster,
+  selfie.jpg): `k6sheet.png` = K6 0 / 25 / 50 / 100 % and Osc at 50 %. Every step is a distinct, clean figure;
+  no ragged edges.
+- **Build (v0.1.1, router1, all six configs on seed 1).** HD Analog 77.65, SD Analog 89.35, HD HDMI 87.18,
+  SD HDMI 94.92, HD Dual 93.72, SD Dual 94.51 MHz; 6,999 - 7,011 / 7,680 LC (91 %), 24 / 32 EBR. Worst HD 77.65
+  (HD Analog); HD HDMI, the thin config of v0.1.0 at 75.27 (router2), is now 87.18.
+  `out/rev_b/ron/patchbay/chladni.vmprog` (473,636 bytes).
 
 ## Status
 
@@ -136,7 +166,7 @@ out of the nodes at a third rate. Speed at its centre locks all three: the still
 - **Sand is a hard key** with a dark fringe, softened by the output filter, not an alpha blend: the first RTL
   (blended, 8,734 LC) did not fit. The vertical [1 1]/2 mix replaced the blend's anti-aliasing.
 - **Speed's lock snaps** the drift phases to zero rather than easing them.
-- **The camera's gain is fixed** (no knob left for it). Its slews trail it about 30 px to the right and about
+- **The camera's gain is K6** (v0.1.1; it was fixed in v0.1.0). Its slews trail it about 30 px to the right and about
   30 lines down, so the picture leans on the figure a little late and below itself.
 - **Row 0** of each field is mixed with the last row of the field before (the line store is not cleared).
 - **Resolutions.** 720p and 1080p show the same picture. SD shows the centre 4:3: the single square plate is

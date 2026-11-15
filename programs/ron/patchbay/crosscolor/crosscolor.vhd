@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Crosscolor v0.1.0 -- Patchbay: composite artifact colour.
+-- Crosscolor v0.1.1 -- Patchbay: composite artifact colour.
 --
 -- The patch:
 --   pattern VCO (zone plate, or a sheared chirped grating)  -> soft clip -> luma
@@ -20,7 +20,9 @@
 --   K3  Saturation  the limiter's level (the chroma's peak)
 --   K4  Speed       bipolar: the pattern's phase drifts (rings stream out / in)
 --   K5  Bandwidth   the box length, 0.5 .. 8 subcarrier cycles (fine fringes .. broad pastel smears)
---   K6  Hue         burst phase
+--   K6  Camera      how much of the camera (or the Osc) goes into the mixer and the decoder: 0 = none
+--                   (the patch alone), 25 % = v0.1.0's level, 50 % (default) = 1.5x, 100 % = 2x (compressive:
+--                   a linear 3x already washes the plate out under a bright picture)
 --   S7  Pattern     Zone Plate / Gratings
 --   S8  Comb        On (compact ghosts) / Off (the raw line-striped decoder)
 --   S9  Dot Crawl   Off / On
@@ -35,6 +37,8 @@
 -- [1 2 2 2 2 2 2 2 1]/16, luma [1 2 1] and 13/16) before the blanking gate; one latency (48) in every mode.
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K6 Hue (burst phase) dropped, fixed at 512
+-- (C_KFIX_6); nothing moved.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -47,6 +51,7 @@ use work.crosscolor_pkg.all;
 use work.all;
 
 architecture crosscolor of program_top is
+    constant C_KFIX_6 : unsigned(9 downto 0) := to_unsigned(512, 10);   -- K6 camera pass: Hue fixed at its default
     constant C_LAT : integer := 48;   -- = processing_delay_clks
     constant C_LD  : integer := 25;   -- the chroma stream runs 25 pixels ahead of the luma it is laid over
 
@@ -149,6 +154,8 @@ architecture crosscolor of program_top is
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(585 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(440 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(500 * 8, 13);
+    signal s_gk : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera (glided x8)
+    signal c_cg : unsigned(9 downto 0) := to_unsigned(384, 10);       -- camera gain, Q8 of 2 l (256 = v0.1.0)
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -157,7 +164,7 @@ architecture crosscolor of program_top is
     signal s_vneg : std_logic := '0';
     signal s_grat, s_ncomb, s_dots, s_stdb, s_src, s_sd : std_logic := '0';
     signal z_gp  : std_logic_vector(1 downto 0) := "00";
-    signal z_gc  : unsigned(1 downto 0) := (others => '0');
+    signal z_gc  : unsigned(2 downto 0) := (others => '0');
     signal z_grun : std_logic := '0';
 
     -- modulators: free-running phase counters, folded to triangles
@@ -244,7 +251,8 @@ architecture crosscolor of program_top is
     signal p4_amp : unsigned(6 downto 0) := (others => '0');
     signal p5_m   : unsigned(8 downto 0) := (others => '0');
     signal p3_cam : unsigned(7 downto 0) := (others => '0');
-    signal p4_cam, p5_cam : signed(8 downto 0) := to_signed(-255, 9);
+    signal p4_cg : unsigned(17 downto 0) := (others => '0');          -- camera x gain
+    signal p5_cam : signed(8 downto 0) := to_signed(-255, 9);
     signal p6_yc  : signed(8 downto 0) := (others => '0');
     signal p6_cnt : unsigned(4 downto 0) := (others => '0');
     signal p7_ybp : signed(10 downto 0) := (others => '0');
@@ -375,6 +383,7 @@ begin
         variable v_n  : unsigned(8 downto 0);
         variable v_l  : signed(12 downto 0);
         variable v_k5 : unsigned(9 downto 0);
+        variable v_kc : unsigned(9 downto 0);
         variable v_fa : unsigned(37 downto 0);
         variable v_fb : unsigned(16 downto 0);
         variable v_fk : unsigned(2 downto 0);
@@ -458,7 +467,7 @@ begin
             -- shared glide (1/8 of the gap per field, +-2 deadband): four clocks per channel, run
             -- from the zone start by its own phase / channel counters (no zc decode on these enables)
             if s_zgo = '1' then
-                z_gp <= "00"; z_gc <= "00"; z_grun <= '1';
+                z_gp <= "00"; z_gc <= "000"; z_grun <= '1';
             elsif z_grun = '1' then
                 case z_gp is
                     when "00" =>
@@ -466,14 +475,16 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
+                            when 3      => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
+                            when others => s_gm <= s_gk; s_gr <= unsigned(registers_in(5));
                         end case;
                         z_gp <= "11";
                     when "11" =>
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                        -- deadband +-2 knob codes (+-4 on the camera channel, 4)
+                        if s_gd > 32 or s_gd < -32 or (z_gc /= 4 and (s_gd > 16 or s_gd < -16)) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -484,10 +495,11 @@ begin
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 3      => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when others => s_gk <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 3 then z_grun <= '0'; end if;
+                        if z_gc = 4 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -527,6 +539,12 @@ begin
                         if s_stdb = '1' then v_l := v_l - 150; end if;
                         z_l8 <= z_l8 + v_l + 128;
                     when 31 =>
+                        -- camera gain (K6), compressive: k (0 .. 256: off .. v0.1.0's 2 l), 128 + k / 2 (.. 384 = 1.5x
+                        -- at 512), 256 + k / 4 (.. 512 = 2x at 1023).  Linear 3x already washes the plate out.
+                        v_kc := s_gk(12 downto 3);
+                        if v_kc <= 256 then c_cg <= v_kc;
+                        elsif v_kc <= 512 then c_cg <= to_unsigned(128, 10) + v_kc(9 downto 1);
+                        else c_cg <= to_unsigned(256, 10) + v_kc(9 downto 2); end if;
                         if s_ncomb = '1' then c_nc <= "000"; c_rnd <= (others => '0');
                         elsif z_l8 < 512 then c_nc <= "001"; c_rnd <= to_unsigned(1, 6);
                         elsif z_l8 >= 1536 then c_nc <= "110"; c_rnd <= to_unsigned(32, 6);
@@ -816,7 +834,7 @@ begin
                         if s_stdb = '1' then v_lo := v_ph(19 downto 18); v_lo2 := v_p2(19 downto 18);
                         else v_lo := v_ph(18) & '0'; v_lo2 := v_p2(18) & '0'; end if;
                         -- line-start phase (top 12 bits): burst phase (Hue) + the SD window offset + the line's quadrant
-                        n_th <= (unsigned(registers_in(5)) & "00") + c_wx + (v_lo & "0000000000");
+                        n_th <= (C_KFIX_6 & "00") + c_wx + (v_lo & "0000000000");
                         n_doff <= v_lo2 - v_lo;
                         e_lc <= to_unsigned(0, 3);
                     when others => null;
@@ -880,20 +898,24 @@ begin
             p3_sg <= p2_sg;
             p3_cam <= unsigned(s_lb_q);
             -- 4: sine (fabric copy); amplitude: the oscillator's bandwidth roll-off (1 -> 1/2 by a quarter cycle
-            -- per pixel or line), then the fade to nothing before Nyquist; camera as 2 l - 255 (black = -255)
+            -- per pixel or line), then the fade to nothing before Nyquist; camera x gain
             p4_sin <= r_sin_q;
             p4_sg <= p3_sg;
             if p3_fm(11 downto 10) = "00" then p4_amp <= to_unsigned(64, 7) - resize(p3_fm(9 downto 5), 7);
             elsif p3_fm < 1408 then p4_amp <= to_unsigned(32, 7);
             elsif p3_fm < 1664 then p4_amp <= resize(shift_right(to_unsigned(1664, 12) - p3_fm, 3), 7);
             else p4_amp <= (others => '0'); end if;
-            v_c := signed(resize(p3_cam & '0', 10)) - 255;
-            if v_c > 255 then p4_cam <= to_signed(255, 9); else p4_cam <= v_c(8 downto 0); end if;
+            p4_cg <= p3_cam * c_cg;                     -- camera x gain (K6), its own stage
             -- 5: |pattern luma|
             v_p := p4_sin * p4_amp;
             p5_m <= v_p(14 downto 6);
             p5_sg <= p4_sg;
-            p5_cam <= p4_cam;
+            -- camera as g l - 255, clipped at 255 (v0.1.0: 2 l - 255, black = -255)
+            if p4_cg(17 downto 16) /= "00" then p5_cam <= to_signed(255, 9);
+            else
+                v_c := signed(resize(p4_cg(15 downto 7), 10)) - 255;
+                if v_c > 255 then p5_cam <= to_signed(255, 9); else p5_cam <= v_c(8 downto 0); end if;
+            end if;
             -- 6: signed; the non-additive mix with the camera
             if p5_sg = '1' then v_m := -signed(p5_m); else v_m := signed(p5_m); end if;
             if p5_cam > v_m then p6_yc <= p5_cam; else p6_yc <= v_m; end if;

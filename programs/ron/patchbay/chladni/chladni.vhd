@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Chladni v0.1.0 -- Patchbay: standing waves on a plate.
+-- Chladni v0.1.1 -- Patchbay: standing waves on a plate.
 --
 -- The patch:
 --   H-locked sine VCO "N" (n half-cycles across the plate) --\
@@ -21,8 +21,10 @@
 --                  .. the plus figure (+45)
 --   K4  Speed      bipolar phase drift of VCO N (H across, V down at a third of the rate, opposite) and the
 --                  colouriser's band flow; centre = locked (the drift phases snap to zero): the still classic figure
---   K5  Sand       window comparator width (tracks the tone generator, so the lines keep their weight)
---   K6  Bands      colouriser gain: 0.4 .. 3.4 palette cycles per unit of |F|
+--   K5  Bands      colouriser gain: 0.4 .. 3.4 palette cycles per unit of |F|
+--   K6  Camera     source strength (camera or Osc) into F: 0 = none (the black-input picture), 25 % =
+--                  v0.1.0's fixed gain (0.30 of F's unit for full white), 50 % (default) = 2x, 100 % = 4x.
+--                  (The sand window, K5 in v0.1.0, is fixed at its default 512.)
 --   S7  Plate      Square (bordered square plate) / Screen (the field fills the picture)
 --   S8  Look       Bands / Sand (pale sand on black, a dust ring per colouriser period)
 --   S9  Twin       one plate / two mirrored plates
@@ -36,6 +38,7 @@
 -- output conditioning (Y, U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes, luma 13/16, then a vertical
 -- [1 1]/2 with the line above) before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Bands (was K6); K5 Sand fixed at 512 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -48,6 +51,7 @@ use work.chladni_pkg.all;
 use work.all;
 
 architecture chladni of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(512, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 24;   -- = processing_delay_clks
 
     function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
@@ -117,7 +121,7 @@ architecture chladni of program_top is
     signal s_lv    : unsigned(11 downto 0) := (others => '0');
     signal s_h1, s_h2 : unsigned(15 downto 0) := (others => '0');
     signal s_la, s_lbh : unsigned(16 downto 0) := (others => '0');
-    signal s_lterm : unsigned(14 downto 0) := (others => '0');
+    signal s_lterm : unsigned(16 downto 0) := (others => '0');
 
     -- ROMs (one read port each, registered address and data)
     signal r_sn_a, r_sm_a, r_sy_a : unsigned(8 downto 0) := (others => '0');
@@ -174,7 +178,7 @@ architecture chladni of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(256 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(320 * 8, 13);
-    signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_gk : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera (glided x8)
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(400 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
@@ -196,7 +200,7 @@ architecture chladni of program_top is
     signal c_me   : unsigned(12 downto 0) := to_unsigned(1280, 13);   -- mode M, Q8
     signal z_th   : signed(10 downto 0) := to_signed(-256, 11);       -- mixer angle, 2048 per turn
     signal c_gq   : unsigned(9 downto 0) := to_unsigned(402, 10);     -- colouriser gain, Q8 periods per unit F
-    signal z_wk   : unsigned(10 downto 0) := to_unsigned(612, 11);
+    constant z_wk : unsigned(10 downto 0) := to_unsigned(612, 11);     -- sand 512 + 100 (K6 camera pass: fixed)
     signal z_trk  : unsigned(8 downto 0) := to_unsigned(128, 9);
     signal z_wt   : unsigned(14 downto 0) := (others => '0');
     signal c_c12, c_s12 : unsigned(11 downto 0) := (others => '0');
@@ -206,7 +210,8 @@ architecture chladni of program_top is
     signal z_p    : unsigned(3 downto 0) := to_unsigned(9, 4);
     signal c_p    : unsigned(3 downto 0) := to_unsigned(9, 4);        -- msb of the window
     signal c_minv : unsigned(4 downto 0) := to_unsigned(24, 5);       -- 4096 / normalised window
-    signal c_gl   : unsigned(12 downto 0) := (others => '0');         -- source gain
+    signal c_gl   : unsigned(12 downto 0) := (others => '0');         -- source gain x camera / 1024
+    signal z_gl   : unsigned(12 downto 0) := (others => '0');         -- v0.1.0's source gain
     signal c_vsq  : unsigned(17 downto 0) := (others => '0');
     signal c_a, c_d : unsigned(25 downto 0) := (others => '0');       -- drift phases
     signal c_flq  : unsigned(23 downto 0) := (others => '0');         -- band flow, Q12.12 phase units
@@ -421,15 +426,16 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when others => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 3      => s_gm <= s_gk; s_gr <= unsigned(registers_in(5));
+                            when others => s_gm <= s_g6; s_gr <= unsigned(registers_in(4));
                         end case;
                         z_gp <= "11";
                     when "11" =>
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                        -- deadband +-2 knob codes (+-4 on the camera channel, 3)
+                        if s_gd > 32 or s_gd < -32 or (z_gc /= 3 and (s_gd > 16 or s_gd < -16)) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -440,7 +446,7 @@ begin
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 3      => s_gk <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
@@ -473,6 +479,7 @@ begin
                     when 390 => z_sel <= to_unsigned(15, 5); z_pre <= '1';
                     when 414 => z_sel <= to_unsigned(16, 5); z_pre <= '1';
                     when 438 => z_sel <= to_unsigned(17, 5); z_pre <= '1';
+                    when 462 => z_sel <= to_unsigned(18, 5); z_pre <= '1';
                     when others => null;
                 end case;
             end if;
@@ -504,6 +511,7 @@ begin
                                z_pl <= c_d; z_ng <= '1';
                     when 16 => z_fa <= resize(c_me, 32);   z_fb <= c_cyt;
                                z_ng <= '1';
+                    when 18 => z_fa <= resize(z_gl, 32);   z_fb <= resize(s_gk(12 downto 3), 16); -- x camera
                     when others =>                                                              -- source gain
                         z_fa <= resize(c_gq, 32);
                         if s_src = '1' then z_fb <= to_unsigned(77, 16); else z_fb <= to_unsigned(11, 16); end if;
@@ -592,10 +600,9 @@ begin
                         elsif v_k < 640 then z_th <= signed(resize(v_k, 11)) - 640;
                         elsif v_k < 768 then z_th <= (others => '0');
                         else z_th <= signed(resize(v_k, 11)) - 768; end if;
-                        -- colouriser gain 102 + 3 k / 4; sand k + 100
+                        -- colouriser gain 102 + 3 k / 4 (the sand, k + 100, is fixed at 612)
                         v_w := shift_left(resize(s_g6(12 downto 3), 14), 1) + resize(s_g6(12 downto 3), 14);
                         c_gq <= resize(v_w(13 downto 2), 10) + 102;
-                        z_wk <= resize(s_g5(12 downto 3), 11) + 100;
                     when 27 =>
                         z_ne <= signed(resize(z_n0, 14)) + signed(resize(s_rq, 14)) - 512;
                         z_me <= signed(resize(z_m0, 14)) + signed(resize(s_rq, 14)) - 512;
@@ -662,7 +669,8 @@ begin
                     when 410 => c_pyn0 <= f_acc(25 downto 0);
                     when 434 => c_pym0 <= f_acc(25 downto 0);
                     when 458 =>
-                        if s_src = '1' then c_gl <= f_acc(16 downto 4); else c_gl <= f_acc(15 downto 3); end if;
+                        if s_src = '1' then z_gl <= f_acc(16 downto 4); else z_gl <= f_acc(15 downto 3); end if;
+                    when 482 => c_gl <= f_acc(22 downto 10);   -- v0.1.0's gain x camera / 1024 (x 4 in the pixel path)
                     when others => null;
                 end case;
             end if;
@@ -800,7 +808,7 @@ begin
             s_la  <= s_h2(11 downto 8) * c_gl;
             s_lbh <= s_h2(15 downto 12) * c_gl;
             v_p := resize(s_la, 21) + shift_left(resize(s_lbh, 21), 4);
-            s_lterm <= v_p(20 downto 6);
+            s_lterm <= v_p(20 downto 4);       -- luma x c_gl / 16 (v0.1.0: / 64 at the shipped gain)
         end if;
     end process p_src;
 

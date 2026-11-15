@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Skyline v0.1.0 -- Patchbay: a sample-and-hold bar graph that dances like a spectrum analyser.
+-- Skyline v0.1.1 -- Patchbay: a sample-and-hold bar graph that dances like a spectrum analyser.
 --
 -- The patch:
 --   slow noise (an LFSR, resampled per column at the Speed clock) x two drifting formant LFOs
@@ -18,8 +18,10 @@
 --   K2  Segments  LED segment pitch 32 .. 283 lines, solid bars at the top of the travel
 --   K3  Level     DC offset into the mixer: sparse towers .. the default .. a high wall
 --   K4  Speed     bipolar: the S&H clock rate and the LFO drift (left / right)
---   K5  Decay     release of the bars, hold and fall of the caps: snappy .. slow melt
---   K6  Colour    rotates the colouriser: cool ladder .. green / yellow / red (512) .. hot ladder
+--   K5  Colour    rotates the colouriser: cool ladder .. green / yellow / red (512) .. hot ladder
+--   K6  Camera    source strength (camera or Osc) into the mixer: 0 = none (the pure noise analyser),
+--                 25 % = v0.1.0's fixed x4, 50 % (default) = x8, 100 % = x16.  (Decay is fixed at
+--                 v0.1.0's default 600: release 12 lines a field, caps hold 0.7 s.)
 --   S7  Shape     Spectrum (noise under two formant humps) / Wave (a travelling sine plus noise)
 --   S8  Mirror    Reflection (a dim rippled mirror below the horizon) / Centre (bars grow both ways)
 --   S9  Peaks     Caps / Trails (the space under the peak glows instead)
@@ -36,6 +38,7 @@
 -- [1 2 2 2 2 2 2 2 1]/16 boxes, luma 13/16) before the blanking gate.  Colours in the hardware
 -- convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Decay fixed at 600 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -48,6 +51,7 @@ use work.skyline_pkg.all;
 use work.all;
 
 architecture skyline of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(600, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 20;   -- = processing_delay_clks
 
     constant C_HY0R : integer := 199680;    -- Reflection: the horizon, 780 virtual lines (Q8)
@@ -136,7 +140,8 @@ architecture skyline of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(300 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(100 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
-    signal s_g5 : unsigned(12 downto 0) := to_unsigned(600 * 8, 13);
+    signal s_gk : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera (glided x8)
+    signal c_vsc : unsigned(13 downto 0) := to_unsigned(580, 14);      -- column-sum scale x camera / 256
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
@@ -158,9 +163,11 @@ architecture skyline of program_top is
     signal z_dk   : unsigned(12 downto 0) := (others => '0');
     signal c_prob : unsigned(9 downto 0) := to_unsigned(62, 10);
     signal c_d1, c_d2, c_dw : unsigned(11 downto 0) := (others => '0');
-    signal c_rel  : unsigned(10 downto 0) := to_unsigned(190, 11);
-    signal c_hold : unsigned(6 downto 0) := to_unsigned(43, 7);
-    signal c_grav : unsigned(7 downto 0) := to_unsigned(25, 8);
+    -- Decay fixed at 600 (K6 camera pass): release (423^2 >> 10) + 16 = 190 Q4 lines a field, hold 37 + 6
+    -- fields, gravity 190 / 8 + 2 = 25
+    constant c_rel  : unsigned(10 downto 0) := to_unsigned(190, 11);
+    constant c_hold : unsigned(6 downto 0) := to_unsigned(43, 7);
+    constant c_grav : unsigned(7 downto 0) := to_unsigned(25, 8);
     signal c_g    : unsigned(10 downto 0) := to_unsigned(461, 11);
     signal c_bias : unsigned(8 downto 0) := (others => '0');
     signal c_ofs  : signed(10 downto 0) := (others => '0');
@@ -177,7 +184,7 @@ architecture skyline of program_top is
     signal c_dka, c_dkb : unsigned(12 downto 0) := to_unsigned(256, 13);
     signal c_xb0  : unsigned(11 downto 0) := to_unsigned(16, 12);     -- beam start x (h)
     signal c_fld  : unsigned(7 downto 0) := (others => '0');
-    signal c_vmean : unsigned(9 downto 0) := (others => '0');
+    signal c_vmean : unsigned(11 downto 0) := (others => '0');
 
     -- field serial multiplier
     signal f_a   : unsigned(35 downto 0) := (others => '0');
@@ -214,9 +221,10 @@ architecture skyline of program_top is
     signal e_t    : unsigned(8 downto 0) := (others => '0');
     signal e_a    : unsigned(9 downto 0) := (others => '0');
     signal e_b    : unsigned(9 downto 0) := (others => '0');
-    signal e_m    : unsigned(9 downto 0) := (others => '0');
-    signal e_vsum : unsigned(16 downto 0) := (others => '0');
-    signal e_sr, e_src : signed(11 downto 0) := (others => '0');
+    signal e_m    : unsigned(11 downto 0) := (others => '0');   -- 4 x mean luma x camera / 256
+    signal e_vsum : unsigned(18 downto 0) := (others => '0');
+    signal e_sr   : signed(13 downto 0) := (others => '0');
+    signal e_src  : signed(11 downto 0) := (others => '0');
     signal e_tt   : unsigned(10 downto 0) := (others => '0');
     signal e_rs1, e_rs : signed(13 downto 0) := (others => '0');
     signal e_rw, e_raw : unsigned(12 downto 0) := (others => '0');
@@ -425,8 +433,8 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 3      => s_gm <= s_gk; s_gr <= unsigned(registers_in(5));
+                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(4));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -434,7 +442,8 @@ begin
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                        -- deadband +-2 knob codes (+-4 on the camera channel, 3)
+                        if s_gd > 32 or s_gd < -32 or (z_gc /= 3 and (s_gd > 16 or s_gd < -16)) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -445,7 +454,7 @@ begin
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 3      => s_gk <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
@@ -479,10 +488,10 @@ begin
                     when 0  => z_fa <= resize(s_g1(12 downto 3), 36);       z_fb <= to_unsigned(89, 16);                 -- columns
                     when 1  => z_fa <= resize(c_n, 36);                     z_fb <= resize(c_rinc, 16);                  -- column phase step
                     when 2  => z_fa <= resize(s_vm, 36);                    z_fb <= resize(s_vm, 16);                    -- speed^2
-                    when 3  => z_fa <= resize(not s_g5(12 downto 3), 36);   z_fb <= resize(not s_g5(12 downto 3), 16);   -- (1 - decay)^2
+                    when 3  => z_fa <= resize(c_inc(19 downto 8), 36);      z_fb <= resize(s_gk(12 downto 3), 16);       -- column-sum scale x camera
                     when 4  => z_fa <= resize(s_gp(12 downto 3), 36);       z_fb <= resize(s_gp(12 downto 3), 16);       -- drive^2
                     when 5  => z_fa <= resize(s_g6(12 downto 3), 36);       z_fb <= to_unsigned(51, 16);                 -- colour rotation
-                    when 8  => z_fa <= resize(unsigned(v_rq(23 downto 0)), 36); z_fb <= resize(c_inc(19 downto 8), 16);  -- column sum -> mean
+                    when 8  => z_fa <= resize(unsigned(v_rq(23 downto 0)), 36); z_fb <= resize(c_vsc, 16);              -- column sum -> mean x camera
                     when 9  => z_fa <= resize(e_r, 36);                     z_fb <= resize(e_a, 16);                     -- noise x envelope
                     when 10 => z_fa <= resize(e_raw, 36);                   z_fb <= resize(c_g, 16);                     -- mixer x drive
                     when others => z_fa <= resize(e_vsum, 36);              z_fb <= c_rcp;                               -- field mean
@@ -507,12 +516,10 @@ begin
                         c_d1 <= resize(f_acc(17 downto 9), 12) + 16;
                         c_d2 <= resize(f_acc(17 downto 8), 12) + 24;
                         c_dw <= resize(f_acc(17 downto 8) & '0', 12) + 32;
-                    when 122 => c_rel <= resize(f_acc(19 downto 10), 11) + 16;
+                    when 122 => c_vsc <= f_acc(21 downto 8);                         -- c_inc(19:8) x k6 / 256
                     when 146 => z_t <= resize(f_acc(19 downto 10), 11) + f_acc(19 downto 11);
                     when 151 =>
-                        c_hold <= resize(s_g5(12 downto 7), 7) + 6;
                     when 152 =>
-                        c_grav <= resize(c_rel(10 downto 3), 8) + 2;
                         c_g <= z_t + 77;
                         if s_gp(12 downto 3) > 768 then
                             c_bias <= resize(s_gp(10 downto 3) & '0', 9);     -- (p - 768) * 2
@@ -611,7 +618,7 @@ begin
                 e_pc <= e_pc + 1;
                 if e_pc = 0 then e_mreq <= '1'; e_msel <= "11"; end if;
                 if e_pc = 24 then
-                    c_vmean <= f_acc(25 downto 16);
+                    c_vmean <= f_acc(27 downto 16);
                     e_fin <= '0';
                 end if;
             end if;
@@ -633,10 +640,10 @@ begin
                 e_b <= (others => '0');
             end if;
             -- source: (column mean - field mean) x 4, clipped
-            e_sr <= signed(resize(e_m, 12)) - signed(resize(c_vmean, 12));
+            e_sr <= signed(resize(e_m, 14)) - signed(resize(c_vmean, 14));
             if e_sr > 511 then e_src <= to_signed(2047, 12);
             elsif e_sr < -511 then e_src <= to_signed(-2047, 12);
-            else e_src <= shift_left(e_sr, 2); end if;
+            else e_src <= shift_left(resize(e_sr, 12), 2); end if;
             -- mixer: shaped noise + source + level, clipped at 0, + bias
             e_rs1 <= signed(resize(e_tt, 14)) + resize(e_src, 14);
             e_rs  <= e_rs1 + resize(c_ofs, 14);
@@ -697,7 +704,7 @@ begin
                         e_ht <= unsigned(s_rq(3 downto 0));
                         e_s2 <= r_tb_q(7 downto 0);
                     when 19 =>
-                        if f_acc(35 downto 29) /= 0 then e_m <= (others => '1'); else e_m <= f_acc(28 downto 19); end if;
+                        if f_acc(35 downto 31) /= 0 then e_m <= (others => '1'); else e_m <= f_acc(30 downto 19); end if;
                         e_mreq <= '1'; e_msel <= "01";
                     when 20 => e_vsum <= e_vsum + e_m;
                     when 33 => e_tt <= f_acc(20 downto 10) + e_b;

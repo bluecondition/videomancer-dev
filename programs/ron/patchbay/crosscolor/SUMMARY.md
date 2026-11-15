@@ -1,6 +1,6 @@
 # Crosscolor — a zone plate through a fake composite decoder: rainbow ghost rings where its pitch meets the subcarrier
 
-**v0.1.0 built 2026-11-14, not flashed.** Patchbay (a patch that was never built). A luma-only pattern oscillator
+**v0.1.1 built 2026-11-15 (K6 camera pass), not flashed.** Patchbay (a patch that was never built). A luma-only pattern oscillator
 is fed to a fake composite decoder; the decoder mistakes luma detail near its colour subcarrier for chroma, so the
 fine rings turn into rainbow moire (cross-colour), and the false chroma can be sent back into luma as crawling
 dots. Working files: `.patchbay_work/rb_crosscolor/` (`notes.md`, `proto.py`, `imodel.py`, `cmp_final.png`,
@@ -55,7 +55,7 @@ modulators:     pattern phase drift (Speed) | subcarrier field advance | the pla
 | K3 Saturation | limiter | the limiter's level = the chroma's peak, 60 .. 389 (10-bit chroma units): pale pastel .. vivid |
 | K4 Speed | pattern VCO phase | bipolar (+-8 deadband, square law): the rings stream out (right) or in (left), up to 3.6 cycles/s; 680 = the default drift. The subcarrier's crawl and the Lissajous never stop |
 | K5 Bandwidth | decoder low-pass (box) | box length 0.5 .. 8 subcarrier cycles: wide band = large ghosts with fine rainbow fringes; narrow band = broad flat pastel smears. Above 2 cycles the line comb lengthens too |
-| K6 Hue | subcarrier VCO (burst phase) | rotates every decoded colour, one full turn over the knob |
+| K6 Camera | camera gain into the mixer | how much of the camera (or the Osc) goes into the non-additive mixer and on through the decoder: 0 % = none (the patch alone) .. 25 % = v0.1.0's level .. 50 % (default) = 1.5x .. 100 % = 2x (compressive law). Until v0.1.0 K6 was Hue (burst phase); it is now fixed at its old default (512) |
 | S7 Pattern | pattern VCO | Zone Plate / Gratings: a chirped grating sheared 19 .. 40 deg, swaying. The rainbow becomes long diagonal bands that open wide when the grating's tilt matches the subcarrier's line phase (striped-shirt moire) |
 | S8 Comb | line comb | On: a recursive vertical average of the decoded chroma: compact smooth ghosts / Off: the raw decoder, every strip its own hue (Hanover bars) in full-height bands |
 | S9 Dot Crawl | second encoder | Off / On: the decoded chroma is remodulated on a second subcarrier and added to luma: a crawling checker of dots wherever there is colour |
@@ -100,6 +100,37 @@ Pastel Smear.
   in the hardware convention (U = Cr, V = Cb); every running sum has a resync.
 - **Memory.** 21 EBR: line buffer 4, comb store 8, product ring 2, chroma 8-sum ring 2, luma rings 2, sine 1,
   exp2 1, sync ring 1.
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. K6 is now **Camera**: how much of the camera (or the Osc, S11) goes into the non-additive mixer, and so
+how much of it the fake decoder turns into rainbow. 0 .. 100 %, default 50 %.
+
+- **Law.** The camera sample (l = (Y >> 2) - 16, or the Osc value) enters the mixer as `l x g / 128 - 255`,
+  clipped at +255 (v0.1.0: `2 l - 255`, black = -255, below every pattern level). g comes from the glided K6
+  (k, deadband +-4 codes, ease 1/8 per field, a fifth channel on the shared glide), once per field in zone
+  state 31, compressive:
+  - k 0 .. 256: g = k (0 % = g 0 = the camera never rises above -255: exactly the black-input patch);
+  - k 256 .. 512: g = 128 + k / 2 (25 % = g 256 = v0.1.0; 50 % default = g 384 = 1.5x);
+  - k 512 .. 1023: g = 256 + k / 4 (100 % = g 511 = 2x).
+  Applied per pixel by one 8 x 10-bit multiply in its own stage (stage 4, where the old `2 l - 255` was), the
+  subtract and clip moved to stage 5 (which was a plain copy): the same latency (48) in every mode.
+- **Why not 2x at the default.** Linear sims (`lin_*.png`): 1.5x shows the camera clearly through every dark
+  ring with its detail decoded to rainbow, the four ghosts intact; 2x floods the bright parts of the picture
+  with pale speckle and half-covers the upper ghosts (a bold climax, so it is 100 %); 3x and 4x wash the plate
+  out to flat white under the bright picture. So 2x went to 100 % and the default is 1.5x, the strongest level
+  that stays clean.
+- **Osc** goes through the same line buffer, so it scales with K6 too and keeps its fuller range (a 0 .. 255
+  lattice + grating against the camera's 0 .. 219).
+- **K6 Hue dropped** (Ron's call: the ghosts already pulse through the hue wheel): the burst phase is fixed at
+  its old default 512 (`C_KFIX_6`), nothing moved. Preset Pastel Smear lost its Hue value (200).
+- **Sims** (`.patchbay_work/rb_crosscolor/k6/`, sim-only copy with the glide bypassed, NTSC full raster,
+  selfie.jpg): `k6sheet.png` = K6 0 / 25 / 50 / 100 % (from the linear sims at the same gain: g 0, 256, 384,
+  512) and Osc at 50 % with the final law.
+- **Build (v0.1.1, router1, all six configs on seed 1).** HD Analog 86.58, SD Analog 85.24, HD HDMI 84.53,
+  SD HDMI 81.90, HD Dual 92.40, SD Dual 92.40 MHz; 7,110 - 7,139 / 7,680 LC (93 %, +200 over v0.1.0: the camera
+  multiply and the fifth glide channel), 21 / 32 EBR. Worst HD 84.53. Near the ~94 % line: a later feature
+  should take logic out first. `out/rev_b/ron/patchbay/crosscolor.vmprog` (463,936 bytes).
 
 ## Status
 - **v0.1.0 built 2026-11-14 with router2, NOT flashed.** `out/rev_b/ron/patchbay/crosscolor.vmprog`.

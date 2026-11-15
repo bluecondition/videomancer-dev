@@ -1,6 +1,6 @@
 # Skyline — a sample-and-hold bar graph that dances like a spectrum analyser
 
-**v0.1.0 built 2026-11-14, not flashed.** Patchbay. Columns of LED segments in a green / yellow / red ladder
+**v0.1.1 built 2026-11-15 (K6 camera pass), not flashed.** Patchbay. Columns of LED segments in a green / yellow / red ladder
 dance to slow noise (or to the picture), each with a peak cap floating above it and a dim rippled reflection
 below a violet horizon line. Presets are hand-written placeholders.
 
@@ -56,8 +56,8 @@ reflection is the V ramp folded at the horizon, the hot tops are the overdrive.
 | K2 Segments | V ramp quantiser | LED pitch 32 lines (20 LEDs) .. 283 lines (2 LEDs); the top eighth of the travel = solid bars. Default 60 lines |
 | K3 Level | mixer DC offset | bipolar: −0.44 (only the tallest humps poke up: sparse towers) .. 0 (512) .. +0.44 (a high wall with a dancing top) |
 | K4 Speed | S&H clock + LFO rates | bipolar, ±8 deadband, square law. Magnitude: resample chance per column per field 1.2 % .. 50 %, LFO drift ×1 .. ×30. Sign: which way the humps and the wave travel. Never fully still |
-| K5 Decay | envelope follower + peak-hold | release 65 lines/field (0: twitchy, caps drop at once) .. 1 line/field (1023: a slow melt, caps hang for over a second and sink) |
-| K6 Colour | colouriser rotation | bipolar: −100 = violet / blue / cyan ladder with warm caps .. 0 = green / yellow / red (512) .. +100 = pink / white / violet / blue with green caps |
+| K5 Colour | colouriser rotation | bipolar: −100 = violet / blue / cyan ladder with warm caps .. 0 = green / yellow / red (512) .. +100 = pink / white / violet / blue with green caps (K6 until v0.1.0) |
+| K6 Camera | source gain (camera or Osc) | 0 % = no source (the pure noise analyser, as with a black input) .. 25 % = v0.1.0's fixed x4 .. 50 % (default) = x8 .. 100 % = x16. Decay (K5 until v0.1.0) is fixed at its old default 600: release 12 lines a field, caps hold 0.7 s |
 | S7 Shape | noise shaping | Spectrum (noise under two drifting formant humps) / Wave (a clean travelling sine, two cycles across, lightly noised) |
 | S8 Mirror | V ramp fold | Reflection (horizon at 72 % height, dim mirror below) / Centre (bars grow both ways from the mid-line, both halves bright) |
 | S9 Peaks | peak key | Caps (one LED floating at the peak) / Trails (the whole span from the bar top to the peak glows in the cap colours, brighter with depth) |
@@ -102,6 +102,38 @@ reflection is the V ramp folded at the horizon, the hot tops are the overdrive.
 - **Contracts:** generated avid, one latency (C_LAT 20 = processing_delay_clks) in every mode, blanking gate,
   Y / U / V through two [1 2 2 2 2 2 2 2 1]/16 boxes with the per-line resync, luma 13/16, virtual 1080-line
   coordinates, colours in the hardware convention (U = Cr).
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. K6 is now **Camera**, the strength of the source term in the mixer (the camera's column profile, or the
+Osc lattice when S11 = Osc), 0 .. 100 %, default 50 %.
+
+- **Law.** The glided K6 (k, 0 .. 1023; deadband +-4 codes, ease 1/8 per field, the shared glide's channel 3,
+  which used to carry Decay) scales the column-sum-to-mean factor once per field on the sequencer's serial
+  multiplier (zone slot 3, which used to square Decay): `c_vsc = c_inc(19:8) x k / 256`. The column means, the
+  field mean and so the AC-coupled source term all scale by k / 256; the source then goes through the old x4
+  and the old +-2047 clip. So the source gain is linear in K6, x(k / 64):
+  - 0 % = no source (the pure noise analyser, exactly the black-input picture);
+  - 25 % (k 256) = v0.1.0's fixed x4;
+  - 50 % (default) = x8: the picture's profile clearly leads the bars (the bright columns stand tall and hot,
+    the dark ones sink to the dim ladder) while the noise still dances on the rest;
+  - 100 % = x16: nearly a two-level skyline of the picture, bright columns pinned hot with caps at the ceiling,
+    dark columns empty. Never washed out: one value per column per field, it cannot shred.
+  The mean / field-mean path widened from 10 to 12 bits (e_m, c_vmean, e_sr 14-bit) so 4x the mean does not
+  clip before the AC coupling.
+- **Osc** goes through the same accumulators, so it keeps its 2-4x extra level and scales with K6 too: at 50 %
+  two (SD) or three (HD) towers pinned hot with empty gaps.
+- **K5 Decay frozen** at its default 600 (release 190 Q4 = 12 lines a field, hold 43 fields = 0.7 s, gravity 25:
+  constants now). Decay was the weakest knob on the sheet (it only changes the motion; the stills barely
+  differ). **K6's old function Colour moved to K5** (same bipolar rotation, default 512). Presets: old K6 values
+  moved to K5, old K5 (Decay) values dropped (Pinned 420, Night City 860).
+- **Sims** (`.patchbay_work/rb_skyline/k6/`): the program draws at its timing ID's scale, so a decimated sim
+  shows only a quarter of the picture and starves the AC coupling (the unseen columns read black); the K6 sims
+  are NTSC at decimation 1 instead. Sim-only copy: glide bypassed, Decay 0 (so the bars reach their heights in
+  six fields) and the start-up kick suppressed. `k6sheet.png` = K6 0 / 25 / 50 / 100 % and Osc at 50 %.
+- **Build (v0.1.1, router1, all six configs on seed 1).** HD Analog 99.03, SD Analog 99.48, HD HDMI 102.70,
+  SD HDMI 96.10, HD Dual 99.41, SD Dual 99.44 MHz; 6,697 - 6,725 / 7,680 LC (88 %), 12 / 32 EBR. Worst HD 99.03.
+  `out/rev_b/ron/patchbay/skyline.vmprog` (436,979 bytes).
 
 ## Status
 

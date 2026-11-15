@@ -6,7 +6,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.chladni"
 program_name = "Chladni"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -58,21 +58,21 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Sand"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 512
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
 initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -122,16 +122,14 @@ name = "Plate"
 [[preset]]
 name = "Sand Alone"
 rotary_potentiometer_4 = 512
-rotary_potentiometer_5 = 420
-rotary_potentiometer_6 = 620
+rotary_potentiometer_5 = 620
 toggle_switch_8 = 1
 linear_potentiometer_12 = 460
 
 [[preset]]
 name = "Lace"
 rotary_potentiometer_4 = 600
-rotary_potentiometer_5 = 380
-rotary_potentiometer_6 = 300
+rotary_potentiometer_5 = 300
 toggle_switch_7 = 1
 toggle_switch_9 = 1
 linear_potentiometer_12 = 1023
@@ -148,7 +146,7 @@ toggle_switch_10 = 1
 [[preset]]
 name = "Big Cross"
 rotary_potentiometer_4 = 720
-rotary_potentiometer_6 = 760
+rotary_potentiometer_5 = 760
 toggle_switch_7 = 1
 linear_potentiometer_12 = 0
 
@@ -158,6 +156,6 @@ rotary_potentiometer_1 = 640
 rotary_potentiometer_2 = 256
 rotary_potentiometer_3 = 520
 rotary_potentiometer_4 = 860
-rotary_potentiometer_6 = 560
+rotary_potentiometer_5 = 560
 toggle_switch_7 = 1
 toggle_switch_11 = 1
