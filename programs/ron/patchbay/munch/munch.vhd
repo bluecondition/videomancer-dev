@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Munch v0.1.0 -- Patchbay: a digital-logic patch (munching squares through a 3-channel DAC).
+-- Munch v0.1.1 -- Patchbay: a digital-logic patch (munching squares through a 3-channel DAC).
 --
 -- The patch:
 --   H ramp, V ramp   -> (Mirror: both folded about the centre) -> two 8-bit ADCs clocked by the divided
@@ -20,8 +20,10 @@
 --   K2  Logic    XOR / AND / OR / ADD / Lattice / Carry / Mul / Rings
 --   K3  Window   comparator width
 --   K4  Speed    bipolar: munch rate and direction, ramp drift
---   K5  Bits     which six bit planes reach the DACs (8 rotations)
---   K6  Colour   the DAC channel colours, turned through 270 degrees of hue
+--   K5  Colour   the DAC channel colours, turned through 270 degrees of hue
+--   K6  Camera   camera strength: the keyed-through picture fades in to full level at 25 %, and the per-cell
+--                luma narrows the windows by g x the v0.1.0 amount, g = K6 / 256 to x 2 at 50 %, then up to x 3
+--                at 100 % (the picture takes the bright cells).  Bits (the old K5) is fixed at "7-2".
 --   S7  Mirror   On (4-way fold) / Off
 --   S8  Code     Binary / Gray
 --   S9  Skew     Off / On (diagonals)
@@ -36,6 +38,7 @@
 -- [1 2 2 2 2 2 2 2 1]/16, luma [1 3 4 4 3 1]/16 with a little peaking, luma 13/16) before the blanking gate.
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Bits fixed at 448 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -48,6 +51,7 @@ use work.munch_pkg.all;
 use work.all;
 
 architecture munch of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(448, 10));   -- K6 camera pass: fixed knob
     constant C_LAT     : integer := 24;      -- = processing_delay_clks
     constant C_NOGLIDE : boolean := false;   -- sim only: knobs jump
 
@@ -193,6 +197,12 @@ architecture munch of program_top is
     signal c_tr, c_tg, c_tb : unsigned(7 downto 0) := (others => '0');
     signal c_g32  : unsigned(4 downto 0) := (others => '0');
     signal c_cg32 : unsigned(5 downto 0) := to_unsigned(32, 6);
+    signal s_gc   : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 Camera, glided (Q3)
+    signal c_gb5  : unsigned(5 downto 0) := to_unsigned(32, 6);   -- camera picture level, 32 = full (K6 >= 25 %)
+    signal c_nw   : unsigned(5 downto 0) := to_unsigned(24, 6);   -- window bite per held-luma step (v0.1.0: 12, Osc 16)
+    signal z_cgq  : unsigned(5 downto 0) := to_unsigned(32, 6);
+    signal z_cgp  : unsigned(11 downto 0) := (others => '0');
+    signal z_nwq  : unsigned(12 downto 0) := (others => '0');
     signal l_ph1  : unsigned(15 downto 0) := x"3000";
     signal l_ph2  : unsigned(15 downto 0) := x"B000";
 
@@ -251,7 +261,7 @@ architecture munch of program_top is
     signal p5_lq, p6_lq : unsigned(2 downto 0) := (others => '0');
     signal p6_p, p7_pr : unsigned(10 downto 0) := (others => '0');
     signal p6_xor, p6_and, p6_or, p6_sum, p6_lat, p6_car, p7_w0 : unsigned(7 downto 0) := (others => '0');
-    signal p6_lw : unsigned(6 downto 0) := (others => '0');
+    signal p6_lw : unsigned(8 downto 0) := (others => '0');
     signal p7_wl, p7_wl2, p8_wl, p8_wl2 : unsigned(7 downto 0) := (others => '0');
     signal p8_dr, p8_dg, p8_db : unsigned(7 downto 0) := (others => '0');
     signal p8_lv, p9_lv : std_logic_vector(5 downto 0) := (others => '0');
@@ -432,13 +442,13 @@ begin
                     if v_i(2 downto 1) = "11" then s_mul <= '1'; else s_mul <= '0'; end if;
                     if v_i = "111" then s_rings <= '1'; else s_rings <= '0'; end if;
                 end if;
-                v_k := unsigned(registers_in(4));
+                v_k := unsigned(C_KFIX_5);
                 if v_k < 12 then v_lo := (others => '0'); else v_lo := resize(v_k, 11) - 12; end if;
                 v_hi := resize(v_k, 11) + 12; if v_hi > 1023 then v_hi := to_unsigned(1023, 11); end if;
                 v_i := v_k(9 downto 7);
                 if v_k < 8 then v_i := v_k(2 downto 0); end if;
                 if v_k < 8 or v_lo(9 downto 7) = v_hi(9 downto 7) then s_rot <= v_i - 3; end if;
-                v_k := unsigned(registers_in(5));
+                v_k := unsigned(registers_in(4));
                 if v_k < 4 then v_lo := (others => '0'); else v_lo := resize(v_k, 11) - 4; end if;
                 v_hi := resize(v_k, 11) + 4; if v_hi > 1023 then v_hi := to_unsigned(1023, 11); end if;
                 if v_lo(9 downto 5) = v_hi(9 downto 5) then s_pal <= v_k(9 downto 5); end if;
@@ -455,7 +465,8 @@ begin
                         case to_integer(z_gc) is
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
+                            when 2      => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
+                            when others => s_gm <= s_gc; s_gr <= unsigned(registers_in(5));
                         end case;
                         z_gp <= "11";
                     when "11" =>
@@ -464,7 +475,7 @@ begin
                     when "01" =>
                         if C_NOGLIDE then
                             null;
-                        elsif s_gd > 16 or s_gd < -16 then
+                        elsif (z_gc /= 3 and (s_gd > 16 or s_gd < -16)) or s_gd > 32 or s_gd < -32 then   -- Camera: +-4
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -474,10 +485,11 @@ begin
                         case to_integer(z_gc) is
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 2      => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when others => s_gc <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 2 then z_grun <= '0'; end if;
+                        if z_gc = 3 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -645,9 +657,26 @@ begin
                         if f_acc(19 downto 10) > 18 then c_g32 <= to_unsigned(18, 5); else c_g32 <= f_acc(14 downto 10); end if;
                     when 420 =>
                         c_tr <= c_t(23 downto 16);
-                        c_cg32 <= to_unsigned(32, 6) - resize(c_g32, 6);
+                        z_cgq <= to_unsigned(32, 6) - resize(c_g32, 6);
+                        -- K6 camera: picture level min(k, 256) / 256 (Q5); window bite per held step 12 g
+                        -- (camera) or 16 g (Osc), g = k / 256 up to k = 512 (x 2), then 2 + (k - 512) / 512 (x 3 at
+                        -- the top): camera (min(3k, 1536) + 3k) / 128, Osc (min(k, 512) + k) / 32
+                        if s_gc(12 downto 11) /= "00" then c_gb5 <= to_unsigned(32, 6);
+                        else c_gb5 <= resize(s_gc(10 downto 6), 6); end if;
+                        z_cgp <= resize(s_gc(12 downto 3), 12) + resize(s_gc(12 downto 3) & '0', 12);
                     when 421 =>
                         c_tg <= c_tr + c_o1; c_tb <= c_tr + c_o2;
+                        if s_src = '1' then
+                            if s_gc(12 downto 3) > 512 then z_nwq <= resize(s_gc(12 downto 3), 13) + 512;
+                            else z_nwq <= resize(s_gc(12 downto 3) & '0', 13); end if;
+                        else
+                            if z_cgp > 1536 then z_nwq <= resize(z_cgp, 13) + 1536;
+                            else z_nwq <= resize(z_cgp & '0', 13); end if;
+                        end if;
+                        z_cgp <= z_cgq * c_gb5;
+                    when 422 =>
+                        c_cg32 <= z_cgp(10 downto 5);
+                        if s_src = '1' then c_nw <= z_nwq(10 downto 5); else c_nw <= z_nwq(12 downto 7); end if;
                     when others => null;
                 end case;
             end if;
@@ -898,8 +927,7 @@ begin
             v_s9 := p5_sum xor ('0' & p5_a) xor ('0' & l_yg);
             p6_car <= v_s9(8 downto 1);
             p6_lq <= p5_lq;
-            if s_src = '1' then p6_lw <= p5_lq & "0000";
-            else p6_lw <= resize(p5_lq & "000", 7) + resize(p5_lq & "00", 7); end if;
+            p6_lw <= p5_lq * c_nw;   -- K6: the luma's bite, held step x c_nw (12 g; Osc 16 g)
             -- 7: + B^2 (Rings); the other functions; window widths for this cell
             p7_pr <= p6_p + l_b2;
             case to_integer(s_fn) is
@@ -910,8 +938,8 @@ begin
                 when 4      => p7_w0 <= p6_lat;
                 when others => p7_w0 <= p6_car;
             end case;
-            if resize(p6_lw, 8) + 8 < c_we then p7_wl <= c_we - resize(p6_lw, 8); else p7_wl <= to_unsigned(8, 8); end if;
-            if resize(p6_lw, 8) < c_we2 then p7_wl2 <= c_we2 - resize(p6_lw, 8); else p7_wl2 <= (others => '0'); end if;
+            if resize(p6_lw, 10) + 8 < resize(c_we, 10) then p7_wl <= c_we - p6_lw(7 downto 0); else p7_wl <= to_unsigned(8, 8); end if;
+            if resize(p6_lw, 10) < resize(c_we2, 10) then p7_wl2 <= c_we2 - p6_lw(7 downto 0); else p7_wl2 <= (others => '0'); end if;
             -- 8: the word; its distance past each threshold; the six DAC bits
             if s_mul = '1' then v_w := p7_pr(10 downto 3); else v_w := p7_w0; end if;
             p8_dr <= v_w - c_tr; p8_dg <= v_w - c_tg; p8_db <= v_w - c_tb;

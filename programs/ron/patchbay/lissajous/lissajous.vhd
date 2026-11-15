@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Lissajous v0.1.0 -- Patchbay: an X-Y scope figure rescanned as a raster.
+-- Lissajous v0.1.1 -- Patchbay: an X-Y scope figure rescanned as a raster.
 --
 -- The patch:
 --   H ramp -> arcsine shaper -> function generator A   Cx  = cos(a * acos(x) + luma)
@@ -19,8 +19,9 @@
 --   K2  B        function generator B's multiple, 1 .. 8
 --   K3  Glow     the colouriser: a tight halo .. many bands reaching far
 --   K4  Speed    phi drift, bipolar: the figure turns one way or the other
---   K5  Line     the figure's line weight
---   K6  Colour   colouriser rotate
+--   K5  Colour   colouriser rotate
+--   K6  Camera   the camera / Osc level into generator A's phase, x round(K6 / 128) / 2 (8 steps: 25 % = v0.1.0,
+--                50 % = twice, 100 % = four times); Line (the old K5) is fixed at 520
 --   S7  Shaper   Arcsine (the true figure in a square) / Linear (a bare lattice of diamonds, whole screen)
 --   S8  Twin     the figure's mirror twin (phi + half a turn), cyan with a dark edge; the bands hug both
 --   S9  Frame    Square / Wide (stretched to the screen)
@@ -37,6 +38,7 @@
 -- interval, luma 13/16) before the blanking gate.  Latency 36 clocks in every mode.  Colours in the hardware
 -- convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Line fixed at 520 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -49,6 +51,7 @@ use work.lissajous_pkg.all;
 use work.all;
 
 architecture lissajous of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(520, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 36;   -- = processing_delay_clks
 
     function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
@@ -172,6 +175,11 @@ architecture lissajous of program_top is
     signal s_osum : unsigned(7 downto 0) := (others => '0');
     signal s_wcol : unsigned(10 downto 0) := (others => '0');
     signal s_yin  : unsigned(11 downto 0) := (others => '0');
+    signal s_yin0 : unsigned(11 downto 0) := (others => '0');   -- K6: input level before the camera gain
+    signal s_ya   : unsigned(13 downto 0) := (others => '0');   --     gain terms: 0 / y / 2y / 4y
+    signal s_yb   : unsigned(11 downto 0) := (others => '0');   --                 + 0 / y/2 / y
+    signal c_cga  : unsigned(1 downto 0) := "10";                --     their selects (per field; default x 2)
+    signal c_cgb  : unsigned(1 downto 0) := "00";
     signal s_h1, s_h2 : unsigned(15 downto 0) := (others => '0');
     signal s_wd1, s_wd2, s_wd3 : unsigned(10 downto 0) := (others => '0');
     signal s_av1, s_av2, s_av3 : std_logic := '0';
@@ -196,7 +204,7 @@ architecture lissajous of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(292 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(146 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(420 * 8, 13);
-    signal s_g5 : unsigned(12 downto 0) := to_unsigned(520 * 8, 13);
+    signal s_gc : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 Camera (the freed Line channel)
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(260 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
@@ -491,8 +499,8 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 3      => s_gm <= s_gc; s_gr <= unsigned(registers_in(5));
+                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(4));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -502,7 +510,7 @@ begin
                     when "01" =>
                         if z_first = '1' then
                             null;
-                        elsif s_gd > 16 or s_gd < -16 then
+                        elsif (z_gc /= 3 and (s_gd > 16 or s_gd < -16)) or s_gd > 32 or s_gd < -32 then   -- Camera: +-4
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -513,7 +521,7 @@ begin
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 3      => s_gc <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
@@ -547,7 +555,7 @@ begin
                     when 2  => z_fa <= resize(c_dd, 13);               z_fb <= resize(z_t2m, 12);             -- depth x LFO 2
                     when 3  => z_fa <= resize(s_vm, 13);               z_fb <= resize(s_vm, 12);              -- speed^2
                     when 4  => z_fa <= resize(s_g3(12 downto 3), 13); z_fb <= resize(s_g3(12 downto 3), 12);  -- glow^2
-                    when 5  => z_fa <= resize(s_g5(12 downto 3), 13); z_fb <= resize(s_g5(12 downto 3), 12);  -- line^2
+                    when 5  => z_fa <= (others => '0');               z_fb <= (others => '0');               -- (was line^2; Line is fixed)
                     when others => z_fa <= c_xstep;                    z_fb <= resize(s_w(11 downto 1), 12);  -- x origin
                 end case;
             end if;
@@ -623,22 +631,20 @@ begin
                         else c_ge <= "00"; c_gm <= z_gqv(4 downto 0); end if;
                         v_k7 := shift_left(resize(s_g3(12 downto 3), 13), 3) - resize(s_g3(12 downto 3), 13);
                         c_fi <= v_k7(12 downto 10);
-                    -- Line: half-width in virtual px (Q4), then in real px and real lines
-                    when 170 => z_kk <= m_acc(19 downto 12);
-                    when 171 => z_wv <= to_unsigned(26, 8) + z_kk - shift_right(z_kk, 3);
-                    when 172 =>
-                        case to_integer(s_xs) is
-                            when 4      => z_wp <= shift_right(z_wv, 1);
-                            when 3      => z_wp <= shift_right(z_wv, 1) + shift_right(z_wv, 3) + shift_right(z_wv, 5) + shift_right(z_wv, 7);
-                            when others => z_wp <= z_wv;
-                        end case;
+                    -- Line (fixed at 520 since v0.1.1): half-width 84 virtual px (Q4), in real px per raster
+                    -- (the values v0.1.0 computed for 520), as mantissa x 2^exponent
                     when 173 =>
-                        if z_wp < 20 then c_wpx <= to_unsigned(20, 8); else c_wpx <= z_wp; end if;
+                        case to_integer(s_xs) is
+                            when 4      => c_wpx <= to_unsigned(42, 8);
+                            when 3      => c_wpx <= to_unsigned(54, 8);
+                            when others => c_wpx <= to_unsigned(84, 8);
+                        end case;
                     when 174 =>
-                        if c_wpx(7) = '1' then c_we <= "11"; c_wm <= c_wpx(7 downto 4);
-                        elsif c_wpx(6) = '1' then c_we <= "10"; c_wm <= c_wpx(6 downto 3);
-                        elsif c_wpx(5) = '1' then c_we <= "01"; c_wm <= c_wpx(5 downto 2);
-                        else c_we <= "00"; c_wm <= c_wpx(4 downto 1); end if;
+                        case to_integer(s_xs) is
+                            when 4      => c_we <= "01"; c_wm <= to_unsigned(10, 4);
+                            when 3      => c_we <= "01"; c_wm <= to_unsigned(13, 4);
+                            when others => c_we <= "10"; c_wm <= to_unsigned(10, 4);
+                        end case;
                         case s_rho is
                             when "10"   => c_wln <= shift_right(c_wpx, 1);
                             when "01"   => c_wln <= c_wpx - shift_right(c_wpx, 3);
@@ -718,6 +724,8 @@ begin
     ---------------------------------------------------------------------------
     p_src : process(clk)
         variable v_s : unsigned(7 downto 0);
+        variable v_ys : unsigned(14 downto 0);
+        variable v_gi : unsigned(3 downto 0);
         variable v_e : signed(17 downto 0);
         variable v_n : signed(17 downto 0);
         variable v_g : unsigned(17 downto 0);
@@ -730,21 +738,49 @@ begin
                 s_oy <= s_oy + s_oys;
             end if;
             if s_zone = '1' then s_oy <= shift_left(resize(s_ot, 16), 6) + shift_left(resize(s_ot, 16), 5); end if;  -- ot * 96
-            if s_zgo = '1' then s_ot <= s_ot + 1; end if;
+            if s_zgo = '1' then
+                s_ot <= s_ot + 1;
+                -- K6 camera gain = round(K6 / 128) / 2 (x 1 at 25 %, x 2 at 50 %), 4 at the top
+                v_gi := resize(s_gc(12 downto 10), 4) + resize(s_gc(9 downto 9), 4);
+                case to_integer(v_gi) is
+                    when 0      => c_cga <= "00"; c_cgb <= "00";
+                    when 1      => c_cga <= "00"; c_cgb <= "01";
+                    when 2      => c_cga <= "01"; c_cgb <= "00";
+                    when 3      => c_cga <= "01"; c_cgb <= "01";
+                    when 4      => c_cga <= "10"; c_cgb <= "00";
+                    when 5      => c_cga <= "10"; c_cgb <= "01";
+                    when 6      => c_cga <= "10"; c_cgb <= "10";
+                    when others => c_cga <= "11"; c_cgb <= "00";
+                end case;
+            end if;
             v_s := resize(f_tri7(s_ox(15 downto 8)), 8) + resize(f_tri7(s_oy(15 downto 8)), 8);
             s_osum <= v_s - shift_right(v_s, 3);
             if data_in.avid = '1' then s_wcol <= s_wcol + 1; else s_wcol <= (others => '0'); end if;
 
-            -- input level: luma above black, or the oscillator x 12
+            -- input level: luma above black, or the oscillator x 12; then x the K6 camera gain (8 steps of
+            -- a shift-select, its own stage; one add) and clipped at 4095 (half a cycle of phase)
             if data_in.avid = '0' then
-                s_yin <= (others => '0');
+                s_yin0 <= (others => '0');
             elsif s_src = '1' then
-                s_yin <= shift_left(resize(s_osum, 12), 3) + shift_left(resize(s_osum, 12), 2);
+                s_yin0 <= shift_left(resize(s_osum, 12), 3) + shift_left(resize(s_osum, 12), 2);
             elsif unsigned(data_in.y) > 64 then
-                s_yin <= resize(unsigned(data_in.y) - 64, 12);
+                s_yin0 <= resize(unsigned(data_in.y) - 64, 12);
             else
-                s_yin <= (others => '0');
+                s_yin0 <= (others => '0');
             end if;
+            case c_cga is
+                when "00"   => s_ya <= (others => '0');
+                when "01"   => s_ya <= resize(s_yin0, 14);
+                when "10"   => s_ya <= resize(s_yin0 & '0', 14);
+                when others => s_ya <= s_yin0 & "00";
+            end case;
+            case c_cgb is
+                when "00"   => s_yb <= (others => '0');
+                when "01"   => s_yb <= shift_right(s_yin0, 1);
+                when others => s_yb <= s_yin0;
+            end case;
+            v_ys := resize(s_ya, 15) + resize(s_yb, 15);
+            if v_ys(14 downto 12) /= "000" then s_yin <= (others => '1'); else s_yin <= v_ys(11 downto 0); end if;
             -- two horizontal slews (Q4; 16 px)
             v_e := signed(resize(s_yin & "0000", 18)) - signed(resize(s_h1, 18));
             v_n := signed(resize(s_h1, 18)) + shift_right(v_e, 4);

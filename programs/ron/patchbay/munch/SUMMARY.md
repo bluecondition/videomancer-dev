@@ -1,6 +1,6 @@
 # Munch — munching squares: ramps, ADCs, logic, window comparators, a 3-channel DAC
 
-**v0.1.0 built 2026-11-14, NOT flashed.** Patchbay (a patch that was never built on the rack). A digital-logic
+**v0.1.1 built 2026-11-15 (K6 camera pass), NOT flashed.** Patchbay (a patch that was never built on the rack). A digital-logic
 patch: the H and V ramps go through two 8-bit ADCs on a divided clock, a logic module combines the two words, three
 window comparators watch the result against a sweeping threshold ("munching squares"), and the word's bit planes
 drive a 3-channel DAC colouriser. Working files: `.patchbay_work/rb_munch/` (`notes.txt`, `proto.py`, `imodel.py`,
@@ -18,7 +18,7 @@ V ramp ──┴─ Mirror (fold) ─ + drift ─► 8-bit ADC x 2 ─► Code (
         (Speed)        MUNCH spreads T_R, T_G, T_B apart (two slow LFOs wobble the spread) and, above 60 %,
                        opens a second window per comparator half a range away
                                                               │
-   w ─► Bits (rotate) ─► top six planes ─► three 2-bit DACs (R: 7,4 · G: 6,3 · B: 5,2), each gated by its
+   w ─► top six planes (Bits fixed at 7-2) ─► three 2-bit DACs (R: 7,4 · G: 6,3 · B: 5,2), each gated by its
                        comparator; the G and B DACs settle late ─► colouriser (Colour: 32 hue mappings)
                                                               │
    KEYER: no window open ─► camera luma (Source), or the dimmed quilt at low MUNCH ─► output
@@ -61,8 +61,8 @@ channels breathes on two more LFOs (32 s and 45 s), so it does not loop.
 | K2 Logic | logic module | XOR · AND · OR · ADD · Lattice · Carry · Mul · Rings (stepped, with hysteresis) |
 | K3 Window | window comparators | window width 20 .. 249 codes of 256: a sparse confetti of lit cells .. nearly everything lit. Default 136 |
 | K4 Speed | frame counter | bipolar, ±8 deadband, square law: the threshold's rate (0 .. ±4 codes per field; 720 = 0.63) and direction, and the drift of both ramps with it |
-| K5 Bits | DAC input | which six bit planes reach the DACs: the word rotated by 0..7 (labels name the planes on the R channel's MSB .. B's LSB). Default "7-2", the top six |
-| K6 Colour | colouriser | the three DAC channel colours turned through 270° of hue in 32 steps (0 = red / green / blue) |
+| K5 Colour | colouriser | the three DAC channel colours turned through 270° of hue in 32 steps (0 = red / green / blue). Was K6 before v0.1.1 |
+| K6 Camera | keyer + comparators | camera (or Osc) strength: 0 % = none (the black-input picture), the keyed-through picture fades in to full level by 25 %; the per-cell luma's bite out of the windows is K6 / 256 x the v0.1.0 amount (25 % = v0.1.0, 50 % default = twice, 100 % = four times). See "K6 camera pass" |
 | S7 Mirror | ramps | On: both ramps folded about the centre (4-way symmetry) / Off: plain ramps from the top left |
 | S8 Code | ADCs | Binary / Gray-coded ADC words |
 | S9 Skew | logic input | Off / On: the V word is added to the H word before the logic (diagonals, eyes) |
@@ -71,6 +71,8 @@ channels breathes on two more LFOs (32 s and 45 s), so it does not loop.
 | P12 Munch | comparators + keyer | 0 % the whole quilt, with one full-colour window passing over the dimmed rest · 35 % the key goes black: munching squares · 100 % the cascade: three thresholds at thirds, each doubled, narrow windows |
 
 ## Video
+
+(Amounts below are the v0.1.0 ones, K6 Camera at 25 %; v0.1.1 defaults to twice the bite, see "K6 camera pass".)
 
 - **Video (default).** The camera's luma is the keyer's background: wherever no comparator window is open the
   picture shows through, monochrome and at full resolution, so the logic chews holes of colour into it. The same
@@ -129,9 +131,39 @@ channels breathes on two more LFOs (32 s and 45 s), so it does not loop.
   - Not simulated: PAL / 480p / 576p timing IDs (their constants are reasoned), the other presets in RTL.
 - **Watch on hardware.** No pin-skew seed screening. The picture is hard cell edges in motion, the case the
   output conditioning exists for; if HD HDMI still bars, widen the luma filter first (drop the peaking term).
-  The top line of the camera's per-cell hold uses the previous field's samples. K2 / K5 are labelled knobs:
+  The top line of the camera's per-cell hold uses the previous field's samples. K2 is a labelled knob (K5 was too, before v0.1.1):
   values below 8 are read as the label index (the load-time default), so a pot resting at the very bottom of
   its travel could flicker between the first labels.
+
+## K6 camera pass (2026-11-15) — v0.1.1
+
+- **K6 Camera** (0 .. 100 %, default 50 %): camera (or Osc) strength, on both places the camera enters.
+  - **Keyed-through picture** (where no window is open): its weight is the old one x min(K6, 256) / 256. It is
+    folded per field into the background's camera weight `c_cg32` (one 6 x 6 product in the zone), so 0 % is
+    black, 25 % and up the full v0.1.0 level. It is not boosted further, because the mono luma already reaches
+    white (x 1.25 before the shell's 13/16), and twice would clip into a washout.
+  - **Window narrowing** (the held per-cell luma's bite out of the comparator windows): held step x 12 g codes
+    (camera) or 16 g (Osc). g = K6 / 256 up to 50 % (x 2), then 2 + (K6 - 512) / 512, reaching x 3 at 100 %.
+    That is (min(3k, 1536) + 3k) / 128 for the camera and (min(k, 512) + k) / 32 for the Osc, worked out per
+    field. The bite is a 3 x 6 product in the pixel stage that already formed it.
+    25 % = v0.1.0 (up to 84 codes), 50 % = twice (168), 100 % = three times (245). Bright parts of the picture
+    close their windows down to the 8-code floor, so the picture takes the bright cells and the quilt munches on
+    in the dark ones.
+    A straight x 4 at 100 % (tried) left only scattered confetti over a bright picture, which no longer reads as
+    munching squares.
+  - K6 has its own glide channel (1/8 per field, ±4 deadband).
+  - Looks (selfie, 720p): 0 % = the quilt on black (the black-input picture). 25 % = v0.1.0. 50 % = the bright
+    figures and background break through as mono picture, and the quilt holds the darker half. 100 % = the
+    picture fills the frame, with the quilt munching only in the dark areas and confetti in the bright ones.
+    Osc at 50 %: grey lattice diamonds with the cells thinned to confetti in their bright centres.
+- **K5 Colour** is the old K6, unchanged. **Bits (old K5) is fixed at "7-2"** (the top six planes, its default,
+  value 448); the rotation mux constant-folds away. Presets: the old K6 values moved to K5; "Gray Plaid" lost its
+  Bits "4-7" (it now shows the default planes).
+- Sheet: `.patchbay_work/rb_munch/k6sheet.png` (720p60 decimation 2, `selfie.jpg`, glides bypassed in a sim-only
+  copy; K6 = 0 / 256 / 512 / 768 / 1023, Osc at 512). `k6_top_cmp.png`: 100 % with the rejected x 4 law vs x 3.
+- **Build v0.1.1 (2026-11-15): router1, all six configs on seed 1.** Post-route Fmax HD Analog 99.18, HD HDMI
+  104.68, HD Dual 90.24, SD Analog 101.92, SD HDMI 99.86, SD Dual 96.69 MHz (worst HD 90.24). 6,646 .. 6,655 /
+  7,680 LC (87 %; v0.1.0 had 6,503), 18 / 32 EBR. `out/rev_b/ron/patchbay/munch.vmprog`. Not flashed.
 
 ## Cut / deviations
 
@@ -146,7 +178,7 @@ channels breathes on two more LFOs (32 s and 45 s), so it does not loop.
   at the fold to a single line every few seconds; a hop per cell suits the frame-counter patch anyway.
 - Mul and Rings were added to the spec's logic list; there is no (x+y) xor (x−y) switch because it is K2's
   "Lattice".
-- Stepped controls (K2, K5, K6) jump; K6's 32 hue steps are 8.7° apart.
+- Stepped controls (K2, K5 Colour) jump; Colour's 32 hue steps are 8.7° apart.
 - SD: cells under about 15 px are one or two field lines tall, so K1's lowest quarter looks uneven at SD and
   Outline's horizontal lines there are single field lines. The DAC lag and Outline line width are per mode
   (8 / 5 / 4 px), so fringes look alike at every resolution; the output filter is in pixels, so SD is softer.

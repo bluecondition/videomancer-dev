@@ -7,7 +7,7 @@
 processing_delay_clks = 36
 program_id = "com.czartroniks.lissajous"
 program_name = "Lissajous"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -59,16 +59,6 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Line"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 520
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Colour"
 control_mode = "linear"
 display_min_value = -100
@@ -76,6 +66,16 @@ display_max_value = 100
 initial_value = 512
 display_float_digits = 0
 suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -125,8 +125,7 @@ name = "Scope"
 rotary_potentiometer_1 = 146
 rotary_potentiometer_2 = 292
 rotary_potentiometer_4 = 720
-rotary_potentiometer_5 = 380
-rotary_potentiometer_6 = 700
+rotary_potentiometer_5 = 700
 toggle_switch_10 = 1
 linear_potentiometer_12 = 0
 
@@ -154,7 +153,7 @@ name = "Diamond Lattice"
 rotary_potentiometer_1 = 584
 rotary_potentiometer_2 = 438
 rotary_potentiometer_3 = 700
-rotary_potentiometer_6 = 250
+rotary_potentiometer_5 = 250
 toggle_switch_7 = 1
 linear_potentiometer_12 = 400
 
@@ -163,8 +162,7 @@ name = "Neon Weave"
 rotary_potentiometer_1 = 730
 rotary_potentiometer_2 = 876
 rotary_potentiometer_3 = 80
-rotary_potentiometer_5 = 700
-rotary_potentiometer_6 = 860
+rotary_potentiometer_5 = 860
 toggle_switch_8 = 1
 toggle_switch_11 = 1
 linear_potentiometer_12 = 150

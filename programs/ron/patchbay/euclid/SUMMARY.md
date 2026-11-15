@@ -1,6 +1,6 @@
 # Euclid — a Euclidean step sequencer drawn as a piano roll, through a colouriser
 
-**v0.1.0 built 2026-11-14, not flashed.** Patchbay. Up to 12 rhythm tracks are rows, steps are columns and hits
+**v0.1.1 built 2026-11-15 (K6 camera pass), not flashed.** Patchbay. Up to 12 rhythm tracks are rows, steps are columns and hits
 are pads. A playhead sweeps the grid; every pad it strikes flashes and decays by an envelope that depends only on
 how many steps ago it was struck. Presets are hand-written placeholders.
 
@@ -39,7 +39,7 @@ camera ──> 8-px box ──> sample-and-hold per pad (clocked by the step gri
   decay over several steps. The breath LFO opens and closes the dark eyes of the resting pads, track after
   track, on a 5 s cycle. A hum bar drifts through on a 7 s cycle and shifts the band edges by a line or two.
 - **Rhythm.** Each track has its own hit count, so the rows read as different Euclidean patterns (4, 5, 7, 9,
-  10, 11, 13 of 16 at the defaults), staggered by Rotate.
+  10, 11, 13 of 16 at the defaults), staggered by a fixed rotation of one step per track (Rotate was a knob before v0.1.1).
 
 ## Controls
 
@@ -49,16 +49,18 @@ camera ──> 8-px box ──> sample-and-hold per pad (clocked by the step gri
 | K2 Gate | pad window | pad width within its step, 30 % .. 100 %: narrow, dimmer pads (a short gate does not reach full level) .. pads that touch |
 | K3 Tracks | V ramp | 2 .. 12 rows (8 at the default) |
 | K4 Tempo | clock | bipolar, square law, ±8 deadband: the playhead runs left or right, up to about 11 steps a second. Centre = stopped clock; the breath LFO and hum bar keep moving |
-| K5 Rotate | pattern generators | pattern offset per track, 0 .. 4 steps per track: the rows slide against each other and the hits line up into diagonals |
-| K6 Colour | colouriser | hue step from one track to the next, 0 .. 2.75 of 16 hues: all tracks hot pink (0) .. pink to orange (default) .. twice round the wheel (max) |
+| K5 Colour | colouriser | hue step from one track to the next, 0 .. 2.75 of 16 hues: all tracks hot pink (0) .. pink to orange (default) .. twice round the wheel (max). Was K6 before v0.1.1 |
+| K6 Camera | camera / Osc level | how far the camera (or the Osc) pushes a struck pad up the colouriser: 0 % = none (the black-input picture), 25 % = the v0.1.0 level, 50 % (default) = twice, 100 % = four times. See "K6 camera pass" |
 | S7 Layout | H ramp | Sweep: the playhead crosses a fixed grid / Roll: the grid, at twice the size, scrolls under a playhead fixed at the centre |
 | S8 Tails | envelope generator, slew limiter | Long: a slow decay (6 steps) and long streaks / Short: a harder strike that reaches the white and second-hue bands, gone in about 3 steps, with stub streaks |
 | S9 Accent | accent bus | Off / On: every strike lights its whole row, which then decays on the long envelope |
 | S10 Metre | step counters | Same: every track n steps / Poly: n, n-1, n-2, n-3, n, ... Each row is one loop, so the columns no longer line up and the playheads drift apart |
 | S11 Source | camera input | Video / Osc |
-| P12 FILL | pattern generators | hit count per track: 0 % = four-on-the-floor on every track (diagonals under Rotate); the tracks then fill in one after another; 100 % = every step a hit, the playhead dragging a cascade of flashes |
+| P12 FILL | pattern generators | hit count per track: 0 % = four-on-the-floor on every track (diagonals, from the fixed one-step rotation per track); the tracks then fill in one after another; 100 % = every step a hit, the playhead dragging a cascade of flashes |
 
 ## Video
+
+(Levels below are the v0.1.0 ones, K6 Camera at 25 %; v0.1.1 defaults to twice that, see "K6 camera pass".)
 
 - **Video (the default).** Camera luma goes through an 8-px box and a sample-and-hold per pad. It is sampled
   on the first line of each row, in the second quarter of each step, and held down the row. The held value is
@@ -129,6 +131,30 @@ camera ──> 8-px box ──> sample-and-hold per pad (clocked by the step gri
 - `thincheck.py`: no single-row band line of 24 px or more at the defaults, 720p or 1080p (11 cases; two
   25 .. 60 px runs in two corner cases at 1080p).
 - Rebuild: `./build_set.sh patchbay euclid`.
+
+## K6 camera pass (2026-11-15) — v0.1.1
+
+- **K6 Camera** (0 .. 100 %, default 50 %) scales the source level that drives the pads: the camera's boxed luma,
+  or the Osc lattice (which keeps its twice-the-camera level). It is applied once, on the source side before the
+  line buffer: level x K6 / 256, clipped at 255. That is one 7 x 10 multiply in its own stage, then the clip, so
+  the line-buffer write runs 2 clocks later; each address is still read 2 clocks after its write. The line
+  buffer, hold RAM and pad path are now 8 bits wide. K6 rides the freed Rotate glide channel (1/8 per field,
+  ±4 deadband).
+  - 0 % = no camera: exactly the black-input picture.
+  - 25 % (256) = x 1, bit-exact with v0.1.0.
+  - 50 % (512, default) = x 2: struck pads climb past the bright bands into the hot tint and the upper register.
+  - 100 % = x 4: struck pads over bright parts of the picture show every band nested round a white or
+    second-hue core. Unlit pads stay dark (the camera is still gated by the envelope), so nothing washes out.
+  - The per-pad sample-and-hold keeps every contour clean at any level.
+  - Osc at 50 %: the lit pads fill with bold, moving diagonal bands in the upper-register colours.
+- **K5 Colour** is the old K6, unchanged. **Rotate (old K5) is fixed at 256** = one step per track (its old
+  default; it was the subtlest knob in a still). Presets: the old K6 values moved to K5, the Rotate values were dropped
+  ("Four Floor" had the default; "Cascade" lost its 0.5 step per track).
+- Sheet: `.patchbay_work/rb_euclid/k6sheet.png` (720p60 decimation 2, `selfie.jpg`, glide bypassed in a sim-only
+  copy; K6 = 0 / 256 / 512 / 1023, Osc at 512).
+- **Build v0.1.1 (2026-11-15): router1, all six configs on seed 1.** Post-route Fmax HD Analog 87.83, HD HDMI
+  91.84, HD Dual 88.93, SD Analog 90.51, SD HDMI 96.50, SD Dual 89.87 MHz (worst HD 87.83). 5,755 .. 5,776 /
+  7,680 LC (75 %), 18 / 32 EBR. `out/rev_b/ron/patchbay/euclid.vmprog`. Not flashed.
 
 ## Cut / deviations
 

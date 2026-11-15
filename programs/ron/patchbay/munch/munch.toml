@@ -6,7 +6,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.munch"
 program_name = "Munch"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -54,17 +54,21 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Bits"
-value_labels = ["4-7", "3-6", "2-5", "7-2", "6-1", "5-0", "4-7 Lo", "3-6 Lo"]
-initial_value_label = "7-2"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Colour"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
 initial_value = 330
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -128,7 +132,7 @@ name = "Sierpinski"
 rotary_potentiometer_1 = 256
 rotary_potentiometer_2 = 192
 rotary_potentiometer_3 = 200
-rotary_potentiometer_6 = 120
+rotary_potentiometer_5 = 120
 toggle_switch_7 = 1
 linear_potentiometer_12 = 250
 
@@ -144,14 +148,13 @@ name = "Rings"
 rotary_potentiometer_1 = 256
 rotary_potentiometer_2 = 960
 rotary_potentiometer_3 = 450
-rotary_potentiometer_6 = 700
+rotary_potentiometer_5 = 700
 linear_potentiometer_12 = 700
 
 [[preset]]
 name = "Gray Plaid"
 rotary_potentiometer_2 = 576
-rotary_potentiometer_5 = 64
-rotary_potentiometer_6 = 900
+rotary_potentiometer_5 = 900
 toggle_switch_8 = 1
 toggle_switch_9 = 1
 

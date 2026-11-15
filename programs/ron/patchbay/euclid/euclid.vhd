@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Euclid v0.1.0 -- Patchbay: a Euclidean step sequencer drawn as a piano roll, through a colouriser.
+-- Euclid v0.1.1 -- Patchbay: a Euclidean step sequencer drawn as a piano roll, through a colouriser.
 --
 -- The patch:
 --   clock (Tempo) -> one step counter per track (length n, or n, n-1, n-2, n-3 in Poly)
@@ -21,8 +21,9 @@
 --   K2  Gate     pad width within its step (30 % .. 100 %)
 --   K3  Tracks   2 .. 12 rows
 --   K4  Tempo    bipolar clock rate (square law, +-8 deadband): centre = stopped, envelopes still breathe
---   K5  Rotate   pattern offset per track, 0 .. 4 steps per track
---   K6  Colour   hue step from track to track (0 = one hue .. 2.75 hue steps per track)
+--   K5  Colour   hue step from track to track (0 = one hue .. 2.75 hue steps per track)
+--   K6  Camera   source level x K6 / 256 (0 = none, 25 % = v0.1.0, 50 % = twice, 100 % = four times)
+--       (Rotate, the old K5, is fixed at 1 step per track: C_KFIX_5)
 --   S7  Layout   Sweep (the playhead crosses a fixed grid) / Roll (the grid, at twice the size, scrolls
 --                under a playhead fixed at the centre)
 --   S8  Tails    Long / Short (envelope decay and the streak behind each pad; Short strikes harder)
@@ -39,6 +40,7 @@
 -- [1 2 2 2 2 2 2 2 1]/16 boxes with a per-line resync, luma 13/16) before the blanking gate.  Colours in
 -- the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Rotate fixed at 256 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -51,6 +53,7 @@ use work.euclid_pkg.all;
 use work.all;
 
 architecture euclid of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(256, 10));   -- K6 camera pass: fixed knob
     constant C_LAT  : integer := 20;   -- = processing_delay_clks
     constant C_NOGLIDE : boolean := false;   -- true only in a sim-only copy (knobs take effect at once)
 
@@ -116,12 +119,19 @@ architecture euclid of program_top is
         end case;
     end function;
 
-    -- line buffer: the 7-bit source level (camera: boxed luma; Osc: the lattice)
+    -- line buffer: the 8-bit source level x K6 gain (camera: boxed luma; Osc: the lattice).  Written 3 clocks
+    -- after the source pixel, read 5..6 clocks after it (the generated avid), so no address collides.
     type t_lb is array (0 to 2047) of std_logic_vector(7 downto 0);
     signal lb : t_lb := (others => x"00");
     signal s_lb_wa, s_lb_ra : unsigned(10 downto 0) := (others => '0');
     signal s_lb_wd : std_logic_vector(7 downto 0) := x"00";
     signal s_lb_we : std_logic := '0';
+    -- K6 camera gain on the source level, two stages before the write (multiply, clip)
+    signal s_sl  : unsigned(6 downto 0) := (others => '0');
+    signal s_slp : unsigned(16 downto 0) := (others => '0');
+    signal s_lb_we1, s_lb_we2 : std_logic := '0';
+    signal s_lb_wa1, s_lb_wa2 : unsigned(10 downto 0) := (others => '0');
+    signal c_cg  : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_lb_q  : std_logic_vector(7 downto 0) := x"00";
     signal s_wcol  : unsigned(10 downto 0) := (others => '0');
 
@@ -180,7 +190,7 @@ architecture euclid of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(441 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(500 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(605 * 8, 13);
-    signal s_g5 : unsigned(12 downto 0) := to_unsigned(256 * 8, 13);
+    signal s_gc : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 Camera (the freed Rotate channel)
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(200 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(370 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
@@ -303,7 +313,7 @@ architecture euclid of program_top is
     signal p3_e   : unsigned(4 downto 0) := (others => '0');
     signal p3_d2  : signed(9 downto 0) := (others => '0');
     signal p3_ge  : std_logic := '0';
-    signal p3_lm, p4_lm, p5_lm, p6_lm, p6_lh, p7_lum : unsigned(6 downto 0) := (others => '0');
+    signal p3_lm, p4_lm, p5_lm, p6_lm, p6_lh, p7_lum : unsigned(7 downto 0) := (others => '0');
     signal p2_f8, p3_f8 : std_logic := '0';
     signal p4_age : unsigned(4 downto 0) := (others => '0');
     signal p4_past, p5_pastq : std_logic := '1';
@@ -313,7 +323,7 @@ architecture euclid of program_top is
     signal p5_phc : unsigned(4 downto 0) := (others => '0');
     signal p7_env : unsigned(6 downto 0) := (others => '0');
     signal p7_cw  : unsigned(4 downto 0) := (others => '0');
-    signal p8_cam : unsigned(11 downto 0) := (others => '0');
+    signal p8_cam : unsigned(12 downto 0) := (others => '0');
     signal p8_base : unsigned(7 downto 0) := (others => '0');
     signal p9_v   : unsigned(6 downto 0) := (others => '0');
     signal p10_f  : unsigned(5 downto 0) := (others => '0');
@@ -453,6 +463,7 @@ begin
                 end case;
             end if;
             g_wm1 <= s_w - 1;
+            c_cg  <= s_gc(12 downto 3);   -- K6 camera gain, x / 256 (changes in the zone only)
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
             c_hinc <= resize(shift_right(s_ys, 3), 8) + resize(shift_right(s_ys, 4), 8);
             -- slew fall per pixel in 1/8 levels: Long = x step, Short = 4 x step
@@ -469,8 +480,8 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 3      => s_gm <= s_gc; s_gr <= unsigned(registers_in(5));
+                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(4));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -480,7 +491,7 @@ begin
                     when "01" =>
                         if C_NOGLIDE then
                             null;
-                        elsif s_gd > 16 or s_gd < -16 then
+                        elsif (z_gc /= 3 and (s_gd > 16 or s_gd < -16)) or s_gd > 32 or s_gd < -32 then   -- Camera: +-4
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -491,7 +502,7 @@ begin
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 3      => s_gc <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
@@ -692,7 +703,7 @@ begin
                                tk_wd <= x"00" & std_logic_vector(q_hacc(11 downto 8)) & std_logic_vector(q_ac);
                                q_st <= q_st + 1;
                     when 24 =>                        -- next track
-                        q_racc <= q_racc + resize(s_g5(12 downto 3), 14);
+                        q_racc <= q_racc + resize(unsigned(C_KFIX_5), 14);
                         q_hacc <= q_hacc + resize(c_spr, 14);
                         q_bph  <= q_bph + 40;
                         q_t <= q_t + 1;
@@ -792,10 +803,15 @@ begin
                 s_bsum <= s_bsum + resize(v_i, 11) - resize(s_bx(7), 11);
             end if;
 
-            s_lb_we <= data_in.avid;
-            s_lb_wa <= s_wcol;
-            if s_src = '1' then s_lb_wd <= '0' & std_logic_vector(s_osum(7 downto 1));
-            else s_lb_wd <= "00" & std_logic_vector(s_bsum(10 downto 5)); end if;
+            -- source level (camera 0 .. 59, Osc 0 .. 111), x K6 / 256 in its own stage, clipped at 255
+            s_lb_we1 <= data_in.avid;
+            s_lb_wa1 <= s_wcol;
+            if s_src = '1' then s_sl <= s_osum(7 downto 1);
+            else s_sl <= resize(s_bsum(10 downto 5), 7); end if;
+            s_lb_we2 <= s_lb_we1; s_lb_wa2 <= s_lb_wa1;
+            s_slp <= s_sl * c_cg;
+            s_lb_we <= s_lb_we2; s_lb_wa <= s_lb_wa2;
+            if s_slp(16) = '1' then s_lb_wd <= x"FF"; else s_lb_wd <= std_logic_vector(s_slp(15 downto 8)); end if;
             if data_in.avid = '1' then s_wcol <= s_wcol + 1; else s_wcol <= (others => '0'); end if;
         end if;
     end process p_src;
@@ -922,7 +938,7 @@ begin
             p3_d2  <= signed(resize(c_g9, 10)) - signed(resize(p2_fr8, 10));
             if p2_fr8 >= l_sf8 then p3_ge <= '1'; else p3_ge <= '0'; end if;
             p3_fr8 <= p2_fr8; p3_hit <= p2_hit; p3_c <= p2_c;
-            p3_lm  <= unsigned(s_lb_q(6 downto 0));
+            p3_lm  <= unsigned(s_lb_q);
             p3_f8  <= p2_f8;
             -- 4: age of the step (steps since the clock entered it); past the playhead; horizontal triangle
             if p3_e = 0 then p4_age <= (others => '0'); else p4_age <= resize(l_nt - resize(p3_e, 6), 5); end if;
@@ -935,7 +951,7 @@ begin
             -- sample-and-hold: on the first line of a row write the source level per step (the second
             -- quarter of each step, and the line's first pixels for a step cut by the left edge)
             if l_cap = '1' and s_gav_sr(1) = '1' and (p3_fr8(7 downto 6) = "01" or p3_f8 = '1') then h_we <= '1'; else h_we <= '0'; end if;
-            h_wa <= p3_c; h_wd <= '0' & std_logic_vector(p3_lm);
+            h_wa <= p3_c; h_wd <= std_logic_vector(p3_lm);
             h_ra <= p3_c;
             -- 5: envelope ROM address; pad shape = H triangle + V triangle, clipped; playhead one-shot
             if q_busy = '1' then r_ev_a <= q_eva;
@@ -958,7 +974,7 @@ begin
             p5_hit <= p4_hit; p5_lm <= p4_lm;
             -- 6: envelope ROM data (EBR); held source level, fabric copy
             p6_roof <= p5_roof; p6_hit <= p5_hit; p6_ph <= p5_ph; p6_lm <= p5_lm;
-            p6_lh <= unsigned(h_q(6 downto 0));
+            p6_lh <= unsigned(h_q);
             -- 7: fabric copy of the envelope; the source level: Osc tracks, Video holds per pad
             p7_env <= unsigned(r_ev_q(6 downto 0));
             p7_cw  <= unsigned(r_ev_q(11 downto 7));
@@ -971,7 +987,7 @@ begin
             p8_base <= resize(l_resth, 8) + resize(p7_env, 8);
             p8_roof <= p7_roof; p8_hit <= p7_hit; p8_ph <= p7_ph;
             -- 9: level in half levels (an empty step is a faint ghost)
-            v_v := resize(p8_base, 9) + resize(p8_cam(11 downto 5), 9);
+            v_v := resize(p8_base, 9) + resize(p8_cam(12 downto 5), 9);
             if p8_hit = '0' then p9_v <= to_unsigned(3, 7);
             elsif v_v > 127 then p9_v <= to_unsigned(127, 7);
             else p9_v <= v_v(6 downto 0); end if;

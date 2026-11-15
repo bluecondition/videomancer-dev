@@ -1,6 +1,6 @@
 # Lissajous — an X-Y scope figure rescanned as a raster
 
-**v0.1.0 built 2026-11-14, not flashed.** Patchbay. The patch nobody builds on a raster rack because it needs two
+**v0.1.1 built 2026-11-15 (K6 camera pass), not flashed.** Patchbay. The patch nobody builds on a raster rack because it needs two
 arcsine shapers: the H and V ramps are bent so that two function generators running at a ratio a : b draw the
 Lissajous figure x = cos(b t + phi), y = cos(a t) as a contour of the raster. A colouriser on the same signal
 gives the glow bands around it, and a drifting phi turns the figure as if in 3-D. Presets are hand-written
@@ -18,7 +18,7 @@ placeholders.
            and into the non-additive mixer
     phi <- a free-running ramp (Speed)        a, b <- K1, K2 + two detune LFOs (Detune)
     camera luma (or the Osc) -> two horizontal slews, one vertical slew -> generator A's phase input
-    the comparators' window = Line x the local slope of the signal (so the line keeps an even weight)
+    the comparators' window = the line weight (fixed) x the local slope of the signal (so the line keeps an even weight)
 
 - The two difference amplifiers are the front and the back strands of the figure. With phi on generator B they
   slide opposite ways as phi drifts, which is what reads as a turn in depth. Their zero sets together are exactly
@@ -49,8 +49,8 @@ placeholders.
 | K2 B | function generator B | its multiple, 1 .. 8, the same way: the lobes down. 146 = 2 |
 | K3 Glow | colouriser | a tight orange halo on black (0) .. the default 3 to 4 bands .. a dozen thin rainbow bands filling every cell (1023). Gain 0.6 .. 4.5 cycles (square law); the falloff has 7 settings |
 | K4 Speed | phi ramp | bipolar, +-8 deadband, square law: the figure turns one way or the other, up to 1.3 turns/s. 640 = one turn in 14.6 s |
-| K5 Line | window comparators | the figure's line weight, half-width 1.6 .. 15.6 virtual px (square law). 520 = 5 px |
-| K6 Colour | colouriser | rotate, +-2/3 of a cycle: which band sits on the figure (orange at 512, violet / blue left, green / yellow right) |
+| K5 Colour | colouriser | rotate, +-2/3 of a cycle: which band sits on the figure (orange at 512, violet / blue left, green / yellow right). Was K6 before v0.1.1 |
+| K6 Camera | generator A phase input | how far the camera (or the Osc) bends the figure: 0 % = none (the black-input picture), 25 % = the v0.1.0 level, 50 % (default) = twice, 100 % = four times; 8 steps. See "K6 camera pass" |
 | S7 Shaper | arcsine shapers | Arcsine (the true figure in a square) / Linear (the shapers pulled out: a lattice of diamonds over the whole screen) |
 | S8 Twin | summing amplifiers | Off / On: the figure half a turn away (its mirror), in cyan with a dark edge; the bands hug both figures, so the cells become facets |
 | S9 Frame | ramps | Square / Wide (both ramps stretched to the screen) |
@@ -59,6 +59,9 @@ placeholders.
 | P12 Detune | detune LFOs | 0 % = the ratio locked, the figure only turns .. 260 = a slow breathing (+-0.19) .. 100 % = a swept +-3 and b +-2.25 at three times the LFO rate: the figure tumbles through the whole family. The ratios fold at 1, so the picture never degenerates |
 
 ## Video
+
+(Levels below are the v0.1.0 ones, K6 Camera at 25 %; v0.1.1 defaults to twice that, see "K6 camera pass".
+The line weight is fixed at the old K5 default, 5 virtual px.)
 
 - **Video (default).** Camera luma goes through two horizontal slews (16 px each) and a vertical slew (1/8 per
   line, a line store at pair resolution) and is added to generator A's phase: 0.11 cycle at full white. The strands
@@ -112,6 +115,39 @@ placeholders.
   Wide, Linear, Twin, Look Line, Glow 0, Line 0 and max, A 8. Glow max and B 8 still have a few one-row fringes
   where the bands run flat.
 
+## K6 camera pass (2026-11-15) — v0.1.1
+
+- **K6 Camera** (0 .. 100 %, default 50 %) scales the level added to generator A's phase: camera luma above
+  black, or the Osc lattice (which keeps its three-times-the-camera level). It is applied on the source side,
+  before the slews, as an 8-step shift-select. The gain is round(K6 / 128) / 2: 0, 1/2, 1, 3/2, 2, 5/2, 3, then 4
+  from K6 = 832 up. One add of {0, y, 2y, 4y} + {0, y/2, y} in its own stage, then a clip at 4095 (half a cycle
+  of phase). The selects are latched at the zone start. K6 rides the freed Line glide channel (±4 deadband; the
+  first field after load takes the knob directly). A 12 x 6 multiply cost +205 LC in standalone yosys, so the
+  shift-select replaced it to stay under ~94 %.
+  - 0 % = no camera: the black-input figure.
+  - 25 % = x 1 (0.11 cycle at full white), the v0.1.0 level.
+  - 50 % (default) = x 2: the strands bend twice as far through the picture.
+  - 100 % = x 4 (0.43 cycle at white): the figure is pulled hard through the picture, a bold tangle that still
+    reads as the figure.
+  - Osc: x 2 at the default, clipped at half a cycle, so the brightest lattice tops flatten. It billows more,
+    still smooth.
+- **Jaggies:** the vertical slew is 1/8 per line, so the line-to-line steps depend on the raster. In the 720p
+  decimation-1 sim, x 2 adds some per-line raggedness where two strands cross near-tangent (`d1_cmp.png`). At
+  1080p the lines are 1.5x finer, so x 2 was kept as the default (HD-first). 720p, and SD (240-line fields)
+  even more so, show more of it: about 40 % (x 1.5) is the cleaner setting there. The decimation-2 sim (360
+  lines) shows tears from x 2 up.
+- **K5 Colour** is the old K6, unchanged. **Line (old K5) is fixed at its default 520** (half-width 5 virtual px).
+  Its per-field weight arithmetic became per-raster constants (84 / 54 / 42 Q4 px at 1080 / 720 / SD, exactly the
+  values v0.1.0 computed for 520). Presets: the old K6 values moved to K5; the Line values were dropped ("Scope"
+  had 380, a thinner line; "Neon Weave" had 700).
+- Sheet: `.patchbay_work/rb_lissajous/k6sheet.png` (720p60 decimation 2, `selfie.jpg`, K6 = 0 / 256 / 512 /
+  1023, Osc at 512, then 720p decimation 1 at 256 | 512). The panels were rendered with the 12 x 6 multiply,
+  which gives the same gains at those points (3.94 instead of 4 at 1023).
+- **Build v0.1.1 (2026-11-15): router1, all six configs on seed 1.** Post-route Fmax HD Analog 77.89, HD HDMI
+  87.70, HD Dual 82.77, SD Analog 87.11, SD HDMI 73.87, SD Dual 84.88 MHz (worst HD 77.89; v0.1.0 on router2 had
+  84.22 there). 7,026 .. 7,065 / 7,680 LC (92 %, as v0.1.0), 19 / 32 EBR. `out/rev_b/ron/patchbay/lissajous.vmprog`.
+  Not flashed.
+
 ## Cut / deviations
 
 - **Two difference amplifiers, not the spec's one.** The spec's single F = cos(a acos x + phi) - cos(b acos y) is
@@ -131,7 +167,7 @@ placeholders.
   the square carry no line.
 - **SD.** Same picture, coarser: the line weight has a floor of 1.25 real px, and with interlaced fields the
   thinnest fringes are one field line. Wide at SD spans the SD screen, so the figure is 4:3 there.
-- Camera gain is fixed (no knob left for it). The model treats the luma path's horizontal alignment
+- (v0.1.0: camera gain fixed; v0.1.1 puts it on K6.) The model treats the luma path's horizontal alignment
   approximately, so video frames match the RTL in structure, not bit for bit.
 - **Unsure on hardware:** hue (sim-verified only as structure), the look of the dim bars beside the square, and
   whether the Osc level wants trimming. No pin-skew seed screening was run.
