@@ -6,7 +6,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.tapers"
 program_name = "Tapers"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -68,7 +68,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Mosaic"
+name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -96,9 +96,9 @@ initial_value_label = "Neon"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Rows"
-value_labels = ["Mosaic", "Smooth"]
-initial_value_label = "Mosaic"
+name_label = "Mosaic"
+value_labels = ["Clip", "Coarse"]
+initial_value_label = "Clip"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -135,12 +135,11 @@ linear_potentiometer_12 = 600
 [[preset]]
 name = "Neon Wall"
 rotary_potentiometer_5 = 700
-toggle_switch_10 = 1
 linear_potentiometer_12 = 900
 
 [[preset]]
 name = "Amber Ghosts"
-rotary_potentiometer_6 = 760
+toggle_switch_10 = 1
 toggle_switch_8 = 1
 toggle_switch_9 = 1
 linear_potentiometer_12 = 560

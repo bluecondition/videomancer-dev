@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Triplicate v0.5.0 -- Heirloom #53 (2026-10-21), rebuilt from selfie.jpg (a paper collage).
+-- Triplicate v0.5.2 -- Heirloom #53 (2026-10-21), rebuilt from selfie.jpg (a paper collage).
 --
 -- The collage: a bear with a skull for a face and a TI home computer on its lap, photocopied in
 -- red, green and blue ink at three enlargements and cascaded diagonally down to the right over a
@@ -20,8 +20,10 @@
 --   K2  Size     figure size
 --   K3  Ink      photocopy contrast (faint prints .. the collage .. solid silhouettes)
 --   K4  Tiles    print size on the wall
---   K5  Wall     wall exposure
---   K6  Speed    bipolar: the cascade breathes and the wall scrolls (centre = still)
+--   K5  Speed    bipolar: the cascade breathes and the wall scrolls (centre = still)
+--   K6  Camera   how strongly the picture shows: the store's luma contrast about level 9 and its
+--                chroma, 0 = a flat mid grey (flat silhouettes, blank prints), 50 % = v0.5,
+--                100 % = 1.94x contrast and saturation
 --   S7  Order    RGB / BGR (which ink is at the back)
 --   S8  Inks     RGB / CMY
 --   S9  Front    Colour / Ink (a fourth, black plate)
@@ -36,6 +38,10 @@
 -- Generated avid; output conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma to
 -- ~777) before the blanking gate.  Latency 21, all modes.  Colours: hardware convention (u = Cr).
 
+-- K6 camera pass 2026-11-15 (v0.5.2): K6 = Camera (camera strength, new); K5 = Speed (was K6); K5 Wall
+-- (the weakest control) fixed at 512 (C_KFIX_5).  The gain acts on the store writes (one Q4 gain on
+-- the 4-bit store level about 9 and on the 4-bit chroma, two small product stages), so the display latency
+-- is unchanged.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -48,6 +54,7 @@ use work.triplicate_pkg.all;
 use work.all;
 
 architecture triplicate of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(512, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 21;
 
     ---------------------------------------------------------------------------
@@ -343,6 +350,9 @@ architecture triplicate of program_top is
     signal s_xc, s_xca : unsigned(10 downto 0) := to_unsigned(622, 11);
     signal s_spr, s_sp : signed(9 downto 0) := (others => '0');
     signal s_order, s_cmy, s_fink, s_flip, s_osc : std_logic := '0';
+    -- K6 camera (glided Q3); gain Q4 = k / 32 (16 = 1x): store level q -> 9 + (q - 9) cn, chroma c4 cn
+    signal s_gk  : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_cn  : unsigned(4 downto 0) := to_unsigned(16, 5);
 
     ---------------------------------------------------------------------------
     -- register machine
@@ -507,6 +517,13 @@ architecture triplicate of program_top is
     signal w_sc7, w_sc8 : unsigned(6 downto 0) := (others => '0');
     signal w_st8 : std_logic := '0';
     signal w_avg8 : unsigned(8 downto 0) := (others => '0');
+    signal w_q9  : unsigned(3 downto 0) := (others => '0');                 -- K6: the v0.5 store level
+    signal w_lp10 : signed(11 downto 0) := (others => '0');                 -- K6: (q - 9) x cn
+    signal w_sc9, w_sc10 : unsigned(6 downto 0) := (others => '0');
+    signal w_st9, w_st10 : std_logic := '0';
+    signal w_c4u3, w_c4v3 : signed(3 downto 0) := (others => '0');          -- K6: chroma before the scale
+    signal w_cwe3 : std_logic := '0';
+    signal w_cwa3 : unsigned(9 downto 0) := (others => '0');
     -- Osc generator
     signal o_row : std_logic_vector(21 downto 0) := (others => '0');
     signal o_t1 : unsigned(19 downto 0) := (others => '0');
@@ -600,6 +617,7 @@ begin
     ---------------------------------------------------------------------------
     p_ctrl : process(clk)
         variable v_s : signed(10 downto 0);
+        variable v_gd, v_gn : signed(14 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -631,8 +649,17 @@ begin
                 s_hcnt <= (others => '0');
             end if;
 
-            v_s := signed(resize(unsigned(registers_in(5)), 11)) - 512;      -- K6 Speed, deadband
+            v_s := signed(resize(unsigned(registers_in(4)), 11)) - 512;      -- K6 Speed, deadband
             if v_s > -16 and v_s < 16 then s_spr <= (others => '0'); else s_spr <= v_s(9 downto 0); end if;
+            -- K6 camera: glide per field (1/8 of the gap, +-4 deadband); gain Q4 = k / 32 (0 below k = 32)
+            if s_zgo = '1' then
+                v_gd := signed(resize(unsigned(registers_in(5)) & "000", 15)) - signed(resize(s_gk, 15));
+                if v_gd > 32 or v_gd < -32 then
+                    v_gn := signed(resize(s_gk, 15)) + shift_right(v_gd, 3);
+                    s_gk <= unsigned(v_gn(12 downto 0));
+                end if;
+            end if;
+            s_cn <= s_gk(12 downto 8);
             if s_zgo = '1' then
                 s_sp <= s_spr;
                 s_order <= registers_in(6)(0);
@@ -701,7 +728,7 @@ begin
                             when L_T2  => v_l := signed(resize(unsigned(registers_in(1)) & "00", 16));
                             when L_T4  => v_l := signed(resize(unsigned(registers_in(3)) & "00", 16));
                             when L_K3  => v_l := signed(resize(unsigned(registers_in(2)), 16));
-                            when L_K5  => v_l := signed(resize(unsigned(registers_in(4)), 16));
+                            when L_K5  => v_l := signed(resize(unsigned(C_KFIX_5), 16));
                             when L_W   => v_l := signed(resize(s_w, 16));
                             when L_TRI => v_l := r_tri;
                             when others => v_l := r_sc;
@@ -1247,6 +1274,8 @@ begin
         variable v_c4u, v_c4v : signed(3 downto 0);
         variable v_ad : unsigned(4 downto 0);
         variable v_ua : unsigned(6 downto 0);
+        variable v_cs : signed(9 downto 0);
+        variable v_lq : signed(11 downto 0);
     begin
         if rising_edge(clk) then
             -- stage 1: pixel index, the store-column DDA, new column / sample rank;
@@ -1377,7 +1406,7 @@ begin
                 w_hs <= w_hs + resize(v_y, 13);
             end if;
             -- chroma: one sample (the first of each 4 x 4 block), in units of 32 codes
-            c_we <= '0';
+            w_cwe3 <= '0';
             if w_nw = '1' and w_wu(13 downto 12) = "00" and w_lchr = '1' and w_rok = '1' then
                 for k in 0 to 1 loop
                     if k = 0 then v_ca := v_cu; else v_ca := v_cv; end if;
@@ -1385,9 +1414,18 @@ begin
                     if v_ca < -8 then v_ca := to_signed(-8, 9); elsif v_ca > 7 then v_ca := to_signed(7, 9); end if;
                     if k = 0 then v_c4u := v_ca(3 downto 0); else v_c4v := v_ca(3 downto 0); end if;
                 end loop;
-                c_we <= '1'; c_wa <= w_row(6 downto 2) & w_wu(18 downto 14);
-                c_wd <= std_logic_vector(v_c4u) & std_logic_vector(v_c4v);
+                w_cwe3 <= '1'; w_cwa3 <= w_row(6 downto 2) & w_wu(18 downto 14);
+                w_c4u3 <= v_c4u; w_c4v3 <= v_c4v;
             end if;
+            -- stage 3 (K6 camera pass): chroma x cn / 16 (rounded, clamped to the 4-bit range), written
+            c_we <= w_cwe3; c_wa <= w_cwa3;
+            for k in 0 to 1 loop
+                if k = 0 then v_cs := w_c4u3 * signed('0' & s_cn); else v_cs := w_c4v3 * signed('0' & s_cn); end if;
+                v_cs := shift_right(v_cs + 8, 4);
+                if v_cs < -8 then v_cs := to_signed(-8, 10); elsif v_cs > 7 then v_cs := to_signed(7, 10); end if;
+                if k = 0 then v_c4u := v_cs(3 downto 0); else v_c4v := v_cs(3 downto 0); end if;
+            end loop;
+            c_wd <= std_logic_vector(v_c4u) & std_logic_vector(v_c4v);
             w_aq <= unsigned(a_q);
             -- stage 3: add the earlier lines' partial sum
             w_sv7 <= '0';
@@ -1405,15 +1443,24 @@ begin
                     a_we <= '1'; a_wa <= w_sc7; a_wd <= std_logic_vector(w_sum);
                 end if;
             end if;
-            -- stage 5: quantize to 4 bits and write the store
-            if w_st8 = '1' then
-                v_q := signed(resize(w_avg8, 18)) - 16;
-                v_q := shift_right(v_q + shift_right(v_q, 3), 4);                             -- x 9/128
-                if v_q < 0 then b_wd <= "0000";
-                elsif v_q > 15 then b_wd <= "1111";
-                else b_wd <= std_logic_vector(v_q(3 downto 0)); end if;
-                b_wa <= w_row(6 downto 1) & w_sc8(6 downto 1);
-                case std_logic_vector'(w_row(0) & w_sc8(0)) is
+            -- stage 5: quantize to 4 bits (as v0.5)
+            v_q := signed(resize(w_avg8, 18)) - 16;
+            v_q := shift_right(v_q + shift_right(v_q, 3), 4);                                 -- x 9/128
+            if v_q < 0 then w_q9 <= "0000";
+            elsif v_q > 15 then w_q9 <= "1111";
+            else w_q9 <= unsigned(v_q(3 downto 0)); end if;
+            w_st9 <= w_st8; w_sc9 <= w_sc8;
+            -- stage 6 (K6 camera pass): (q - 9) x cn (Q4)
+            w_lp10 <= (signed(resize(w_q9, 6)) - 9) * signed('0' & s_cn);
+            w_st10 <= w_st9; w_sc10 <= w_sc9;
+            -- stage 7: 9 + rounded, clamped to 0 .. 15, and write the store
+            if w_st10 = '1' then
+                v_lq := shift_right(w_lp10 + 8, 4) + 9;
+                if v_lq < 0 then b_wd <= "0000";
+                elsif v_lq > 15 then b_wd <= "1111";
+                else b_wd <= std_logic_vector(v_lq(3 downto 0)); end if;
+                b_wa <= w_row(6 downto 1) & w_sc10(6 downto 1);
+                case std_logic_vector'(w_row(0) & w_sc10(0)) is
                     when "00" => b_we <= "0001";
                     when "01" => b_we <= "0010";
                     when "10" => b_we <= "0100";

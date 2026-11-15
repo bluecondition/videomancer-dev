@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Ticker v0.5.0 -- Heirloom #20 (2026-10-21 rebuild), from WIN_20230319_01_27_56.
+-- Ticker v0.5.2 -- Heirloom #20 (2026-10-21 rebuild), from WIN_20230319_01_27_56.
 --
 -- The photo: camera video run through a sample-and-hold mosaic.  A horizontal
 -- S&H locked to H (45.9 px cells, every cell split into a 24 px "A" half and a
@@ -25,9 +25,14 @@
 --   K3  Cyan    key window position: low = cyan floods the greys, high = only whites turn cyan
 --   K4  Speed   bipolar (still in the centre): rows roll, highlights hop, the bars drift
 --   K5  Gaps    B half-cell gain, black .. 0.87 (0.44 = the photo)
---   K6  Shadow  Osc: the dark wedge, none .. twice the photo's; Video: crushes the darks to it
+--   K6  Camera  how strongly the source shows: its contrast about a mid grey (C_PIV) before the
+--               cell hold, 0 = flat grey cells, 50 % = the v0.5 look, 100 % = 2x (Osc wedge exempt)
 --   S7  Picks   Cyan / Magenta key colour
---   S8  Rows    Roll / Lock (the vertical clocks stop rolling)
+--   S8  Shadow  Photo / Deep (the old K6 at 512 / C_KSH_DEEP): Osc wedge size, Video dark-crush
+--
+-- K6 camera pass 2026-11-15 (v0.5.2): K6 = Camera (new); the old K6 Shadow moved to S8 as two
+-- positions; S8's old Rows switch (Roll / Lock, the weakest control) is fixed at Roll.  The two
+-- K6 stages took the two output pad stages, so the latency stays 36.
 --   S9  Edges   Soft (the photo) / Hard (crisp blocks)
 --   S10 Clocks  Two (the photo's slivers) / One (regular rows)
 --   S11 Source  Video / Osc
@@ -54,6 +59,20 @@ architecture ticker of program_top is
 
     constant C_AB   : unsigned(15 downto 0) := to_unsigned(34996, 16);   -- A/B split of a cell
     constant C_BLK  : unsigned(9 downto 0) := to_unsigned(77, 10);       -- black, L units (1024 = 1.0)
+    -- K6 camera pass: contrast pivot (L units) and the S8 Deep shadow setting (old K6 scale, 512 = 1x)
+    constant C_PIV  : integer := 320;
+    constant C_KSH_PHOTO : unsigned(9 downto 0) := to_unsigned(512, 10);
+    constant C_KSH_DEEP  : unsigned(9 downto 0) := to_unsigned(800, 10);
+    constant KP : integer := 512;   -- the same two settings as integers: the wedge / crush registers take
+    constant KD : integer := 800;   -- per-state constants (no adders on copies of one switch bit)
+    function f_ss(f : std_logic; d, q : integer; w : natural) return signed is
+    begin
+        if f = '1' then return to_signed(d, w); else return to_signed(q, w); end if;
+    end function;
+    function f_su(f : std_logic; d, q : integer; w : natural) return unsigned is
+    begin
+        if f = '1' then return to_unsigned(d, w); else return to_unsigned(q, w); end if;
+    end function;
     constant C_PHC  : unsigned(15 downto 0) := to_unsigned(39190, 16);   -- cell phase at the centre
     constant C_P1   : unsigned(19 downto 0) := to_unsigned(305660, 20);  -- clock phases at the top
     constant C_P2   : unsigned(19 downto 0) := to_unsigned(385876, 20);
@@ -197,9 +216,7 @@ architecture ticker of program_top is
     signal s_k1a, s_k1b : unsigned(13 downto 0) := (others => '0');
     signal s_tha1, s_tha2, s_thb1, s_thb2 : unsigned(12 downto 0) := (others => '0');
     signal s_kca, s_kcb : unsigned(10 downto 0) := (others => '0');
-    signal s_k18 : signed(15 downto 0) := (others => '0');
     signal s_dxra : unsigned(6 downto 0) := (others => '0');
-    signal s_dx1a : signed(12 downto 0) := (others => '0');
     signal s_m10  : unsigned(9 downto 0) := (others => '0');
     signal s_dth  : unsigned(15 downto 0) := (others => '0');
     signal s_tha, s_thb : unsigned(12 downto 0) := (others => '0');
@@ -278,8 +295,8 @@ architecture ticker of program_top is
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
     type t_sl is array (natural range <>) of std_logic;
     type t_s14 is array (natural range <>) of signed(13 downto 0);
-    signal p_a, p_st : t_sl(1 to 16) := (others => '0');                   -- A half / segment start
-    signal p_e : t_u8(1 to 16) := (others => (others => '0'));            -- half-cell entry (A even, B odd)
+    signal p_a, p_st : t_sl(1 to 18) := (others => '0');                   -- A half / segment start
+    signal p_e : t_u8(1 to 18) := (others => (others => '0'));            -- half-cell entry (A even, B odd)
     signal p_gt : t_sl(1 to 7) := (others => '0');                         -- osc highlight gate
     signal p_x1 : signed(13 downto 0) := (others => '0');                  -- virtual px from the centre
     signal p_dl2, p_dr2, p_ua2, p_ub2 : signed(13 downto 0) := (others => '0');
@@ -290,6 +307,15 @@ architecture ticker of program_top is
     signal p_br, p_in, p_lite : t_sl(8 to 10) := (others => '0');
     signal p_lat8, p_lat9, p_lat10 : unsigned(9 downto 0) := (others => '0');
     signal p_vo11 : unsigned(9 downto 0) := to_unsigned(77, 10);
+    -- K6 camera stages: 12 = source x gain (Q8), 13 = + pivot term, clamped (the Osc wedge passes)
+    signal p_wk11, p_wk12 : std_logic := '0';
+    signal p_vo12 : unsigned(9 downto 0) := to_unsigned(77, 10);
+    signal p_gm12 : unsigned(18 downto 0) := (others => '0');
+    signal p_vb13 : unsigned(9 downto 0) := to_unsigned(77, 10);
+    signal s_cg   : unsigned(8 downto 0) := to_unsigned(256, 9);        -- camera gain, Q8 (256 = v0.5)
+    signal s_cpa  : signed(19 downto 0) := (others => '0');             -- C_PIV * cg (Q8)
+    signal s_cpv  : signed(19 downto 0) := to_signed(0, 20);            -- C_PIV * (256 - cg), Q8
+    signal s_sdeep : std_logic := '0';                -- shadow (S8)
     signal s_hold : unsigned(9 downto 0) := to_unsigned(77, 10);
     signal p_val12 : unsigned(9 downto 0) := to_unsigned(77, 10);
     signal p_dv13 : unsigned(9 downto 0) := (others => '0');
@@ -324,8 +350,8 @@ architecture ticker of program_top is
     signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y28, s_y29, s_y30, s_y31, s_y32, s_y33x, s_yf33 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u33, s_v33 : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal s_y34, s_y35, s_y36 : unsigned(9 downto 0) := to_unsigned(64, 10);
-    signal s_u34, s_v34, s_u35, s_v35, s_u36, s_v36 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_y34 : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal s_u34, s_v34 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     type t_bit_shift is array (0 to C_LAT - 1) of std_logic;
     signal s_hsync_sr : t_bit_shift := (others => '1');
@@ -414,7 +440,8 @@ begin
                 v_s := signed(resize(unsigned(registers_in(3)), 11)) - 512;          -- K4 Speed
                 if v_s > -8 and v_s < 8 then s_sp <= (others => '0'); else s_sp <= v_s(9 downto 0); end if;
                 s_magenta <= registers_in(6)(0);
-                s_lock    <= registers_in(6)(1);
+                s_lock    <= '0';                    -- K6 camera pass: Rows fixed at Roll
+                s_sdeep <= registers_in(6)(1);    -- S8 Shadow: Photo (old K6 512) / Deep (old K6 800)
                 s_hard    <= registers_in(6)(2);
                 s_one     <= registers_in(6)(3);
                 s_src     <= registers_in(6)(4);
@@ -474,21 +501,23 @@ begin
             s_kw <= s_kc + 174;
             v_t := resize(k5v & "00", 15) + resize(k5v & '0', 15) + resize(k5v, 15);   -- 7 k5
             s_gb8 <= v_t(12 downto 5);
-            s_crush <= to_unsigned(77, 10) + resize(k6v(9 downto 3), 10) + resize(k6v(9 downto 5), 10);
+            s_crush <= f_su(s_sdeep, 77 + KD / 8 + KD / 32, 77 + KP / 8 + KP / 32, 10);
             -- wedge (virtual px from the screen centre; edges Q4)
-            s_k18 <= signed(resize(k6v & "0000", 16)) + signed(resize(k6v & '0', 16));     -- 18 k6
-            s_xl0 <= to_signed(80, 16) - s_k18;
-            s_xr0 <= to_signed(80, 16) + s_k18 + signed(resize(k6v(9 downto 1), 16));
-            s_xrmin <= to_signed(80, 16) - signed(resize(k6v & "000", 16)) + signed(resize(k6v, 16));
+            s_xl0 <= f_ss(s_sdeep, 80 - 18 * KD, 80 - 18 * KP, 16);
+            s_xr0 <= f_ss(s_sdeep, 80 + 18 * KD + KD / 2, 80 + 18 * KP + KP / 2, 16);
+            s_xrmin <= f_ss(s_sdeep, 80 - 8 * KD + KD, 80 - 8 * KP + KP, 16);
             s_dxl <= resize(s_ys(11 downto 6), 7);
             s_dxra <= resize(s_ys(11 downto 4), 7) + resize(s_ys(11 downto 5), 7);
             s_dxr <= s_dxra + resize(s_ys(11 downto 7), 7) + resize(s_ys(11 downto 9), 7);
-            s_yb <= resize(k6v, 11) + resize(k6v(9 downto 4), 11) + resize(k6v(9 downto 6), 11);
-            s_ylim <= resize(k6v, 11) - resize(k6v(9 downto 2), 11) + resize(k6v(9 downto 4), 11);
-            s_dx1a <= to_signed(5, 13) - signed(resize(k6v(9 downto 1), 13));
-            s_dx1 <= s_dx1a + signed(resize(k6v(9 downto 4), 13)) + signed(resize(k6v(9 downto 6), 13));
-            s_dx2 <= to_signed(5, 13) + signed(resize(k6v(9 downto 2), 13)) + signed(resize(k6v(9 downto 4), 13));
-            if k6v = 0 then s_won <= '0'; else s_won <= '1'; end if;
+            s_yb <= f_su(s_sdeep, KD + KD / 16 + KD / 64, KP + KP / 16 + KP / 64, 11);
+            s_ylim <= f_su(s_sdeep, KD - KD / 4 + KD / 16, KP - KP / 4 + KP / 16, 11);
+            s_dx1 <= f_ss(s_sdeep, 5 - KD / 2 + KD / 16 + KD / 64, 5 - KP / 2 + KP / 16 + KP / 64, 13);
+            s_dx2 <= f_ss(s_sdeep, 5 + KD / 4 + KD / 16, 5 + KP / 4 + KP / 16, 13);
+            s_won <= '1';                        -- the wedge is never off (both Shadow settings draw it)
+            -- K6 camera: gain Q8 = k / 2 (0 .. 2x, 512 = 1x = v0.5), pivot term C_PIV (256 - cg)
+            s_cg  <= k6v(9 downto 1);
+            s_cpa <= signed(resize(shift_left(resize(s_cg, 20), 8) + shift_left(resize(s_cg, 20), 6), 20));   -- 320 cg
+            s_cpv <= to_signed(C_PIV * 256, 20) - s_cpa;
             g_wm1 <= s_w - 1;
             s_wc <= s_w(11 downto 1) - 17;        -- grid anchor: the centre, less the boxes' 17-px pipeline lag
             case to_integer(s_xs) is
@@ -709,6 +738,7 @@ begin
         variable v_sc : unsigned(14 downto 0);
         variable v_dl : unsigned(9 downto 0);
         variable v_fr : signed(10 downto 0);
+        variable v_cs : signed(20 downto 0);
     begin
         if rising_edge(clk) then
             -- 1: half cell (A/B), segment start and entry; virtual x; highlight gate
@@ -771,7 +801,8 @@ begin
             s_grey_r <= s_grey_q;
             p_lat9 <= p_lat8; p_lat10 <= p_lat9;
 
-            -- 11: the source value of this pixel
+            -- 11: the source value of this pixel (p_wk11: an Osc wedge value, exempt from K6)
+            p_wk11 <= s_src and p_in(10);
             if s_src = '0' then
                 p_vo11 <= v_vid;
             elsif p_in(10) = '1' then
@@ -785,20 +816,29 @@ begin
                 p_vo11 <= s_grey_r;
             end if;
 
-            -- cell RAM: held value read (address 9, EBR 10, fabric 11); on tick
+            -- 12..13 (K6 camera pass): source x gain, then + C_PIV (1 - gain), clamped to black .. 1023
+            p_gm12 <= p_vo11 * s_cg;
+            p_vo12 <= p_vo11; p_wk12 <= p_wk11;
+            v_cs := signed(resize(p_gm12, 21)) + resize(s_cpv, 21);
+            if p_wk12 = '1' then p_vb13 <= p_vo12;
+            elsif v_cs(20 downto 8) < signed(resize(C_BLK, 13)) then p_vb13 <= C_BLK;
+            elsif v_cs(20 downto 18) /= "000" then p_vb13 <= (others => '1');
+            else p_vb13 <= unsigned(v_cs(17 downto 8)); end if;
+
+            -- cell RAM: held value read (address 11, EBR 12, fabric 13); on tick
             -- lines the first pixel of every half cell writes its new sample
-            s_cra <= p_e(8);
+            s_cra <= p_e(10);
             s_crq2 <= unsigned(s_crq(9 downto 0));
             s_cwe <= '0';
-            if l_tick = '1' and p_st(11) = '1' then
+            if l_tick = '1' and p_st(13) = '1' then
                 s_cwe <= '1';
-                s_cwa <= p_e(11);
-                s_cwd <= "000000" & std_logic_vector(p_vo11);
+                s_cwa <= p_e(13);
+                s_cwd <= "000000" & std_logic_vector(p_vb13);
             end if;
 
-            -- 12: the displayed value
+            -- 14 (v0.5: 12): the displayed value; every stage below is two later than its v0.5 number
             if l_tick = '1' then
-                if p_st(11) = '1' then v_val := p_vo11; else v_val := s_hold; end if;
+                if p_st(13) = '1' then v_val := p_vb13; else v_val := s_hold; end if;
                 s_hold <= v_val;
             else
                 v_val := s_crq2;
@@ -817,7 +857,7 @@ begin
             p_v15 <= p_v14; p_cy15 <= p_cy14; p_wh15 <= p_wh14;
 
             -- 16: luma (L units) and the key-colour flag
-            if p_a(15) = '1' then
+            if p_a(17) = '1' then
                 if p_cy15 = '1' then
                     if s_magenta = '1' then v_lo := to_unsigned(486, 10); else v_lo := to_unsigned(731, 10); end if;
                 elsif p_wh15 = '1' then v_lo := to_unsigned(851, 10);
@@ -839,12 +879,12 @@ begin
 
             -- 19..20: soft edges: 16-px box on luma, 8-px box on the key flag (centres aligned)
             -- (luma 64 / key 0 off the generated avid, so both sums resync every blanking interval)
-            if s_gav_sr(17) = '1' then
+            if s_gav_sr(19) = '1' then
                 s_ysr(0) <= p_y18; s_csr(0) <= p_c18;
             else
                 s_ysr(0) <= to_unsigned(64, 10); s_csr(0) <= '0';
             end if;
-            s_y19h <= s_y19h(14 downto 0) & s_gav_sr(17);
+            s_y19h <= s_y19h(14 downto 0) & s_gav_sr(19);
             for i in 1 to 16 loop s_ysr(i) <= s_ysr(i - 1); end loop;
             for i in 1 to 12 loop s_csr(i) <= s_csr(i - 1); end loop;
             if s_y19h = "0000000000000000" then
@@ -889,13 +929,13 @@ begin
             p_u26 <= p_u25; p_v26 <= p_v25; p_y26 <= p_y25;
             v_u0 := p_u26 + resize(shift_right(p_pu26, 3), 12);
             v_v0 := p_v26 + resize(shift_right(p_pv26, 3), 12);
-            if s_gav_sr(25) = '0' then s_u27 <= to_unsigned(512, 10);
+            if s_gav_sr(27) = '0' then s_u27 <= to_unsigned(512, 10);
             elsif v_u0 < 16 then s_u27 <= to_unsigned(16, 10); elsif v_u0 > 1008 then s_u27 <= to_unsigned(1008, 10);
             else s_u27 <= unsigned(v_u0(9 downto 0)); end if;
-            if s_gav_sr(25) = '0' then s_v27 <= to_unsigned(512, 10);
+            if s_gav_sr(27) = '0' then s_v27 <= to_unsigned(512, 10);
             elsif v_v0 < 16 then s_v27 <= to_unsigned(16, 10); elsif v_v0 > 1008 then s_v27 <= to_unsigned(1008, 10);
             else s_v27 <= unsigned(v_v0(9 downto 0)); end if;
-            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(25);
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(27);
             s_y27 <= p_y26;
 
             -- 28..33: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two
@@ -916,19 +956,17 @@ begin
             s_y32 <= s_y31; s_y33x <= s_y32;
             v_sy := resize(s_y31, 12) + shift_left(resize(s_y32, 12), 1) + resize(s_y33x, 12);
             s_yf33 <= v_sy(11 downto 2);
-            -- 34: luma toward black (white 940 -> 777); blanking gate.  35..36: pad.
+            -- 34 (now 36, the output): luma toward black (white 940 -> 777); blanking gate (v0.5's two pads went to K6).
             if s_yf33 > 64 then v_dl := s_yf33 - 64; else v_dl := (others => '0'); end if;
-            if s_gav_sr(32) = '1' then
+            if s_gav_sr(34) = '1' then
                 s_y34 <= s_yf33 - shift_right(v_dl, 3) - shift_right(v_dl, 4);
                 s_u34 <= s_u33; s_v34 <= s_v33;
             else
                 s_y34 <= to_unsigned(64, 10); s_u34 <= to_unsigned(512, 10); s_v34 <= to_unsigned(512, 10);
             end if;
-            s_y35 <= s_y34; s_u35 <= s_u34; s_v35 <= s_v34;
-            s_y36 <= s_y35; s_u36 <= s_u35; s_v36 <= s_v35;
 
             -- delays
-            for i in 2 to 16 loop p_a(i) <= p_a(i - 1); p_st(i) <= p_st(i - 1); p_e(i) <= p_e(i - 1); end loop;
+            for i in 2 to 18 loop p_a(i) <= p_a(i - 1); p_st(i) <= p_st(i - 1); p_e(i) <= p_e(i - 1); end loop;
             for i in 2 to 7 loop p_gt(i) <= p_gt(i - 1); end loop;
             for i in 4 to 10 loop p_dash(i) <= p_dash(i - 1); end loop;
             for i in 4 to 7 loop p_m(i) <= p_m(i - 1); end loop;
@@ -936,9 +974,9 @@ begin
         end if;
     end process p_pix;
 
-    data_out.y       <= std_logic_vector(s_y36);
-    data_out.u       <= std_logic_vector(s_u36);
-    data_out.v       <= std_logic_vector(s_v36);
+    data_out.y       <= std_logic_vector(s_y34);
+    data_out.u       <= std_logic_vector(s_u34);
+    data_out.v       <= std_logic_vector(s_v34);
     data_out.hsync_n <= s_hsync_sr(C_LAT - 1);
     data_out.vsync_n <= s_vsync_sr(C_LAT - 1);
     data_out.field_n <= s_field_sr(C_LAT - 1);

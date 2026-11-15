@@ -1,5 +1,6 @@
 # Tapers — candle-flame columns of neon mosaic rows rising through blue and maroon dashes
 
+**v0.1.1 (2026-11-15): K6 camera pass, built, NOT flashed** (see [K6 camera pass](#k6-camera-pass-2026-11-15-v011)).
 **v0.1.0 built 2026-11-04, NOT flashed.** Heirloom (video phase), from the clip `WIN_20230203_00_19_56` at
 6.0 s (`photos/vid/WIN_20230203_00_19_56_t6p0.png`). A row of seven candle-flame columns ("tapers") rises from
 the bottom of the frame, filled with horizontal mosaic rows of hot pink, lavender, sky, teal and green; above
@@ -7,6 +8,31 @@ their tips the columns are flat rectangles, and every 154 lines each column wide
 background is a dark field of blue, maroon, black and navy mosaic dashes shaped by the camera scene (a solid
 blue bar and a maroon bar at the left, a plant silhouette, a pink/yellow strip, a "lamp" of white and yellow
 blocks at the top). Presets are hand-written placeholders.
+
+## K6 camera pass (2026-11-15, v0.1.1)
+- **K6 = Camera** (Ron's rule for the Heirloom / Kinetic / Patchbay sets: K6 is the camera strength, default 50 %).
+  The camera luma (or the Osc generator, S11) is multiplied by a gain before the 8-level posteriser, in one
+  7 × 8-bit product stage in the camera sample path (the camera blocks sit 2 px later; the latency is unchanged).
+  K6 is glided per field in the vblank sequencer's shared glide (1/8 of the gap, ±4 deadband).
+- **Gain law** (Q6, two knees): k / 256 up to 25 %, then +0.5 per quarter turn to 50 %, then +0.5 over the top half.
+  - 0 % = 0: every block is level 0, exactly the black-input picture (black field, the hue rows in the tapers).
+  - 25 % = 1× = the v0.1.0 gain.
+  - 50 % (default) = 1.5×. **Not 2×:** at 2× the selfie went to 50 % pink / yellow blocks, which also show
+    through the tapers and buried them; 1.5× is the strongest that keeps the tapers reading (selfie: ~26 % of
+    the frame at the two show-through levels, up from ~4 %).
+  - 100 % = 2×: a dense, bright mosaic with the tapers breaking through; 4× was a yellow washout.
+  - Osc (S11) goes through the same gain, so its bars brighten with K6 too.
+- **K6's old function (Mosaic)** moved to **S10**, the weakest control: Rows (Mosaic / Smooth) barely changed
+  a still on the control sheet. S10 is now Mosaic: Clip (the old K6 at 512, 44 × 22) / Coarse (the old K6 at
+  840, ≈119 × 60), through the existing glide. Rows is fixed at Mosaic (the clip). Presets: Neon Wall lost its
+  Smooth rows, Amber Ghosts' K6 760 became S10 Coarse.
+- Working files: `.heirloom_work/rb_tapers/k6/` (`k6sheet.png` = K6 0 / 256 / 512 / 1023 and Osc at 512,
+  720p dec 2 with the selfie, from a sim-only copy with the K6 glide bypassed; `v1/k6sheet_law1.png` = the
+  rejected 4× law).
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh heirloom tapers`): **router1**, all six configs on seed 1:
+  HD Analog 103.82, SD Analog 93.19, HD HDMI 100.00, SD HDMI 97.78, HD Dual 97.94, SD Dual 98.59 MHz (worst HD
+  97.94). 6,480–6,504 / 7,680 LC (85 %), 9 / 32 EBR. `out/rev_b/ron/heirloom/tapers.vmprog` (426,096 bytes); the
+  packed config carries the new labels. Not flashed.
 
 ## Reading of the photo (measured)
 Working files are in `.heirloom_work/rb_tapers/` (`notes.md`, `widths.py`, `fitT.py`, `periods.py`, `motion2.py`).
@@ -57,9 +83,9 @@ Working files are in `.heirloom_work/rb_tapers/` (`notes.md`, `widths.py`, `fitT
    x = 1000 (K2); per line T = 0.75·sin(ψ) + Steps·(½ − saw) + Height, with ψ and the saw phase accumulators
    (ψ drifting per field by Rise). The key is m = H − T, blended over ±1/16 (about 6 px) in five steps.
 2. **Inside.** A 32-entry LUT (pink → lavender → sky → teal → green → … → pink) indexed by the hue phase
-   accumulator (K5), sampled on the first line of each mosaic row (S10 Rows) and held; the camera's level 2 adds
+   accumulator (K5), sampled on the first line of each mosaic row (the old S10 Rows; fixed at Mosaic since v0.1.1) and held; the camera's level 2 adds
    a quarter cycle and level 5 a half; levels 6 and 7 show the camera colour instead.
-3. **Outside.** The camera luma (or the Osc) in 8 levels, sampled at every block start (44 virtual px, K6) on
+3. **Outside.** The camera luma (or the Osc) in 8 levels, sampled at every block start (44 virtual px, S10) on
    the first line of each block row and held in a 256-entry row memory for the other lines: black, navy, the
    dashed cycle (one bit = the half-row parity), the block cycle (two square waves from the background phase
    accumulator), maroon, blue, pink, yellow.
@@ -74,11 +100,11 @@ Working files are in `.heirloom_work/rb_tapers/` (`notes.md`, `widths.py`, `fitT
 | K3 Steps | the 7-per-frame sawtooth level: 0 = smooth bells, 358 = the clip's flat rectangles and step-backs, 1023 = deep stair steps, every band restarting from a tip |
 | K4 Rise | bipolar (±8 deadband, square law): the tips rise (right) or sink (left) and the colour rows and the background cycle scroll with them at the clip's ratios; 776 = the clip (440 lines/s), full = 1500 lines/s |
 | K5 Hue cycle | the interior colour cycle's period: 582 lines (0, long sweeps) .. 206 (512, the clip) .. 73 lines (1023, fine stripes); the background cycle follows at its 174/206 ratio |
-| K6 Mosaic | the block size: 9×5 (0) .. 44×22 (512, the clip) .. 211×106 virtual px (1023); it sets the camera blocks and the colour rows together |
+| K6 Camera | camera strength (K6 camera pass, v0.1.1): the camera luma (or Osc) gain before the 8-level posteriser. 0 % = no camera (the black-input picture: black field, hue rows in the tapers), 25 % = the v0.1.0 gain, 50 % (default) = 1.5×, 100 % = 2× |
 | S7 Flip | Rise (the clip) / Hang: the tapers hang from the top and the whole motion mirrors |
 | S8 Invert | swap the palettes: dark tapers on the striped field |
 | S9 Palette | Neon (pink / green, the clip) / Amber (amber / cyan with a navy-blue / brick background) |
-| S10 Rows | Mosaic (colour rows sampled per block row, the clip) / Smooth (continuous gradients) |
+| S10 Mosaic | the block size (the old K6 Mosaic, v0.1.1): Clip (44×22 virtual px, the clip) / Coarse (≈119×60, the old K6 at 840); it glides between the two over ~half a second. The old Rows switch is fixed at Mosaic |
 | S11 Source | Video / Osc |
 | P12 Height | the threshold offset: 0 % = a row of small flames at the apex sweeping up the screen, 500 = the clip, 100 % = a solid striped wall with dark notches hanging between the merged tapers |
 
@@ -92,12 +118,12 @@ Working files are in `.heirloom_work/rb_tapers/` (`notes.md`, `widths.py`, `fitT
   the background is black with the hue rows in the tapers.
 - **Osc mode.** A generator with the camera's statistics replaces the luma: two horizontal triangles (610 and
   1330 virtual px) and a weak vertical one (900 lines), quantised to the same 8 levels — vertical bars of every
-  level, mostly dark, drifting slowly. Every video-path control (K6, the palettes, Invert) stays live.
+  level, mostly dark, drifting slowly. Every video-path control (K6 Camera, S10 Mosaic, the palettes, Invert) stays live.
 
 ## Engine
 - **Per-field sequencer (vblank zone).** One serial shift-add multiplier, 12 slots (carrier step, phase at x0,
   bowl slope and start, rise², drift, hue step per virtual line and per line, background step, sine step, band
-  step, block width), a 256-entry exp2 ROM for K1 / K5 / K6, a shared glide (K1, K2, K3, K5, K6, P12). The
+  step, block width), a 256-entry exp2 ROM for K1 / K5 / the mosaic size, a shared glide (K1, K2, K3, K5, the mosaic size, P12; v0.1.1 adds K6 Camera). The
   field-start phases of the threshold sine, the hue wave and the background cycle start at the clip's and
   accumulate the drift (±, ×1 / ×2 / ×3) every field.
 - **Per-line engine.** At each line start the current line takes the next-line registers, then the four phase

@@ -1,11 +1,45 @@
 # Triplicate — the picture photocopied in red, green and blue, cascading over a wall of prints (Heirloom #53)
 
+**v0.5.2 (2026-11-15): K6 camera pass, built, NOT flashed** (see [K6 camera pass](#k6-camera-pass-2026-11-15-v052)).
 **v0.5.0 (2026-10-21): rebuilt from the photo, built, NOT flashed.** Source: `photos/selfie.jpg`.
 v0.1.0 tinted and cascaded copies of the video without the collage's structure. This version rebuilds the
 collage: the measured bear cut-out, sizes, positions, inks and print wall. The camera picture is printed
 through every cut-out. Osc mode substitutes a generated skull-faced bear with a computer.
 Working files: `.heirloom_work/rb_triplicate/` (`notes.md`, `proto.py`, `imodel.py`, `sheet_video.png`,
 `cmp_final.png`).
+
+## K6 camera pass (2026-11-15, v0.5.2)
+- **K6 = Camera** (Ron's rule for the Heirloom / Kinetic / Patchbay sets: K6 is the camera strength, default
+  50 %). Triplicate is a photocopy OF the camera, so K6 sets how strongly the picture shows in every copy and
+  print.
+- **Law:** one gain g = k / 512 (Q4: k / 32, 16 = 1×, 0 below k = 32, 31 = 1.94× at the top) acts on the
+  store writes, so every consumer (the three photocopies, the colour original, the wall) follows it:
+  - luma: the 4-bit store level q (computed as in v0.5) becomes 9 + (q − 9) · g, rounded and clamped to 0..15
+    (two stages: a 6 × 6-bit product, then add / clamp / write);
+  - chroma: the 4-bit U and V samples become c · g, rounded and clamped (one 4 × 6-bit product stage);
+  - the display path is untouched (latency 21). K6 glides per field (1/8 of the gap, ±4 deadband).
+  - 0 % = a flat store: the copies are flat tinted silhouettes, the colour original a flat grey, the wall's
+    prints blank grey (their exposure steps and seams stay).
+  - 25 % = half contrast (a faint print). 50 % (default) = exactly the v0.5 store (g = 1 is bit-exact).
+  - 100 % = 1.94×: the copies go to solid ink with bright features, the wall to black-and-white prints; no
+    washout. Osc (S11) goes through the same gain.
+  - A first version (an 8 × 8 product on the box average before quantizing, 4 × 5 chroma) built at 7491 LC
+    (97.5 %) on the diag copy; the 4-bit-domain version gives the same picture (the store is 4-bit either way)
+    for about 200 fewer LUTs.
+- **K6's old function (Speed)** is the program's only motion control, so it moved, unchanged, to **K5**, the
+  weakest other knob (Wall exposure: the smallest change on the control sheet; every other knob restructures
+  the collage). Wall is fixed at its default (512). The Silhouettes preset lost its dark wall (K5 300).
+- Working files: `.heirloom_work/rb_triplicate/k6/` (`k6sheet.png` = K6 0 / 256 / 512 / 1023 and Osc at 512 /
+  0, 720p dec 2 with the selfie, from a sim-only copy with the K6 glide bypassed). The thin black dashes on the
+  wall are identical at every K6 setting, so they are not from this change; most likely unwritten store rows
+  of the decimated 360-line sim raster (the program expects 720 lines in that timing).
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh heirloom triplicate`): **router1**, all six configs on
+  seed 1: HD Analog 90.13, SD Analog 85.54, HD HDMI 79.33, SD HDMI 89.03, HD Dual 87.21, SD Dual 86.17 MHz (worst
+  HD 79.33). 7,355–7,377 / 7,680 LC (96 %, up from 92 %: the glide and the gain stages cost ~200 LUTs in standalone
+  yosys), 24 / 32 EBR. `out/rev_b/ron/heirloom/triplicate.vmprog` (479,074 bytes); the packed config carries the
+  new labels. Not flashed. Stay on router1 for later rebuilds (router2 had very thin HD margins on v0.5).
+- The pending diag copy (`.heirloom_work/rb_triplicate/diag/triplicate_diag/`, v0.6.1) got the same design (Speed
+  to K5, Wall fixed, the same gain stages); router1, all seed 1, worst HD 82.56 MHz, 7,378 LC, 26 EBR.
 
 ## Reading of the photo (measured)
 The photo is a portrait paper collage, 3527 × 4988 (0.707:1). Measurements below are in page heights
@@ -69,7 +103,7 @@ The photo is a portrait paper collage, 3527 × 4988 (0.707:1). Measurements belo
    - The window is chosen by a hash and biased towards the top of the picture (the head).
    - Some prints are mirrored. Exposure varies per print in four steps.
    - About a quarter of the left and top edges get a light seam. Each row of prints is offset sideways.
-   - The wall is 7/8 of the luma ramp, plus the K5 Wall offset.
+   - The wall is 7/8 of the luma ramp, plus the Wall offset (K5 until v0.5.1; fixed at its default since v0.5.2).
 5. **Output.** Shell output conditioning, then the blanking gate.
 
 ## Controls
@@ -79,8 +113,8 @@ The photo is a portrait paper collage, 3527 × 4988 (0.707:1). Measurements belo
 | K2 Size | the copies' scale | 60–130 % of the photo's sizes (100 % at 50 %) |
 | K3 Ink | the photocopy density | faint prints → the photo's ~40 % solid ink → solid silhouettes |
 | K4 Tiles | the wall's print size | 43–323 lines (default 101 = the measured 0.094 H) |
-| K5 Wall | the wall's exposure | dark ossuary → bleached prints |
-| K6 Speed | (motion) wall and cascade | bipolar, still in the centre (±16): the wall scrolls up or down (7.5 lines/s at the default, about 26 at full) and the cascade breathes ±10 % horizontally (period 17 s at the default, 4.3 s at full) |
+| K5 Speed | (motion) wall and cascade | the old K6 Speed, moved here in v0.5.2 (same law): bipolar, still in the centre (±16): the wall scrolls up or down (7.5 lines/s at the default, about 26 at full) and the cascade breathes ±10 % horizontally (period 17 s at the default, 4.3 s at full). The old K5 Wall is fixed at its default (512) |
+| K6 Camera | the picture being copied | camera strength (K6 camera pass, v0.5.2): the store's luma contrast about level 9 and its chroma. 0 % = flat: tinted silhouettes, a flat grey colour original, blank grey prints; 50 % (default) = the v0.5 look; 100 % = 1.94× contrast and saturation (solid ink with bright features, a black-and-white wall) |
 | S7 Order | which ink is at the back | RGB (the photo) / BGR |
 | S8 Inks | the ink set | RGB / CMY |
 | S9 Front | the full-colour original | Colour / Ink (a fourth, black plate) |

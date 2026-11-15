@@ -7,7 +7,7 @@
 processing_delay_clks = 36
 program_id = "com.czartroniks.ticker"
 program_name = "Ticker"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -69,10 +69,10 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Shadow"
+name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 200
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
@@ -85,9 +85,9 @@ initial_value_label = "Cyan"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Rows"
-value_labels = ["Roll", "Lock"]
-initial_value_label = "Roll"
+name_label = "Shadow"
+value_labels = ["Photo", "Deep"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"

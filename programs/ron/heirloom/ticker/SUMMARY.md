@@ -1,9 +1,40 @@
 # Ticker — camera video through a sample-and-hold mosaic (Heirloom #20)
 
+**v0.5.2 (2026-11-15): K6 camera pass, built, NOT flashed** (see [K6 camera pass](#k6-camera-pass-2026-11-15-v052)).
 **v0.5.0 (2026-10-21): rebuilt from the photo, built, NOT flashed.** Source: `photos/WIN_20230319_01_27_56_Pro.jpg`.
 v0.1.0 (hashed bar columns scrambled sideways) was judged too abstract. This version runs the camera
 through the photo's processing, and Osc mode substitutes a generator with the photo's statistics.
 Working files: `.heirloom_work/rb_ticker/` (`notes.md`, `proto2.py`, `imodel.py`, `sheet.png`, `cmp_final.png`).
+
+## K6 camera pass (2026-11-15, v0.5.2)
+- **K6 = Camera** (Ron's rule for the Heirloom / Kinetic / Patchbay sets: K6 is the camera strength, default
+  50 %). Ticker is a picture OF the camera (a sample-and-hold mosaic), so K6 sets how strongly the camera shows.
+- **Law:** the source value (camera L, or the Osc greys and highlights) becomes
+  320 + (v − 320) · k / 512 before it is written to the cell RAM (320 L = a mid grey), clamped to black .. 1.0.
+  One 10 × 9-bit product stage and one add / clamp stage; they took v0.5's two output pad stages, so the latency
+  stays 36. The Osc wedge (its stripes and dashes) is exempt, so the wedge stays when the camera fades.
+  - 0 % = every cell flat grey (B halves darker, so the cell grid still shows): the camera faded out to a
+    neutral ground. Osc keeps its dark wedge on the grey.
+  - 25 % = half the v0.5 contrast. 50 % (default) = exactly the v0.5 look (gain 1, nothing clamps).
+  - 100 % = 2× contrast: darks crush to black, many more cells reach the cyan window and white; the selfie
+    still reads (no washout).
+  - S11 Osc goes through the same law (wedge exempt).
+- **K6's old function (Shadow)** moved to **S8**, the weakest control (Roll / Lock left a still unchanged on the
+  control sheet; phase 2's notes say the same): S8 Shadow = Photo (the old K6 at 512) / Deep (the old K6 at
+  800: wedge 1.56×, Video crush below 0.20 L). Rows is fixed at Roll. No preset used K6 or S8.
+- Working files: `.heirloom_work/rb_ticker/k6/` (`k6sheet.png` = K6 0 / 256 / 512 / 1023, Osc at 512, Osc + S8
+  Deep, Osc at 0; 720p dec 2 with the selfie).
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh heirloom ticker`): **router1**; HD Analog s1 95.38, SD
+  Analog s1 88.21, HD HDMI s1 81.56, SD HDMI s1 85.98, **HD Dual seed 2** 94.07 (router1 stalled on seed 1 and
+  timed out), SD Dual s1 88.92 MHz. Worst HD 81.56. 6,831–6,872 / 7,680 LC (89 %), 2 / 32 EBR.
+  `out/rev_b/ron/heirloom/ticker.vmprog` (400,918 bytes); the packed config carries the new labels. Not flashed.
+  - The S8 Shadow constants are per-state constants, not shift-adds on the two-valued setting: as adds, its bits
+    were copies of the one switch flag and gave 3 SB_CARRY cells with I0 == I1 (the router1 self-add hang, which
+    stalled HD Dual seed 1 on the first build). Fixed (0 now, dupin.py), and 75 LUTs smaller. HD Dual seed 1
+    still stalled once afterwards; the netlist keeps 4 pre-existing LUTs with a duplicated input (sign bits of
+    s_incv / s_sp / s_tba / s_trib), so stay on router1 with seed retries, or router2.
+- The pending diag copy (`.heirloom_work/rb_ticker/diag/ticker_diag/`, v0.6.1) got the same design with S9 Edges
+  as its weak control (see its SUMMARY); router1, all seed 1, worst HD 81.96 MHz, 7,174 LC, 7 EBR.
 
 ## Reading of the photo (measured)
 The frame is camera video through a sample-and-hold, not a generated pattern:
@@ -63,9 +94,9 @@ The frame is camera video through a sample-and-hold, not a generated pattern:
 | K3 Cyan | the cyan picks | key window position: low = cyan floods the greys, 50 % = the photo, high = only the brightest cells turn cyan and white disappears |
 | K4 Speed | the drift of the patch | bipolar, still in the centre ±8: rows roll, the held bands drift, Osc highlights hop sideways and values boil |
 | K5 Gaps | the dark B half of every cell | B gain 0 (black seams) .. 0.87 (seamless); 0.44 = the photo |
-| K6 Shadow | the dark triangle | Osc: wedge size 0 .. 2× (1× = the photo); Video: crush threshold for the camera's darks |
+| K6 Camera | the camera itself | camera strength (K6 camera pass, v0.5.2): the source's contrast about a mid grey before the cell hold. 0 % = flat grey cells (the camera faded out; the Osc wedge stays), 50 % (default) = the v0.5 look, 100 % = 2× contrast (more black, cyan and white cells) |
 | S7 Picks | the key colour | Cyan / Magenta |
-| S8 Rows | the rolling rows | Roll / Lock (the clocks stop rolling; Osc still drifts) |
+| S8 Shadow | the dark triangle | the old K6 Shadow (v0.5.2): Photo (the old K6 at 512: the photo's wedge in Osc, crush below 0.15 in Video) / Deep (the old K6 at 800: a 1.56× wedge, crush below 0.20). The old Rows switch is fixed at Roll |
 | S9 Edges | the soft analog edges | Soft / Hard blocks |
 | S10 Clocks | the row slivers | Two clocks (the photo) / One (regular rows) |
 | S11 Source | the camera | Video (default) / Osc |
@@ -82,7 +113,7 @@ The camera goes through exactly the processing in the photo:
 - the soft edges, fringe and warm tint.
 
 Its chroma is dropped, because the photo is luma plus the key colour. Osc substitutes the generator
-described above. Every control acts in both modes; K6 is the wedge in Osc and the dark-crush in Video.
+described above. Every control acts in both modes; S8 Shadow (K6 until v0.5.1) is the wedge in Osc and the dark-crush in Video.
 
 ## Engine
 - **Zone sequencer** (vblank = "no avid for 1024 clocks").

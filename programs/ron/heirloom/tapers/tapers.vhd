@@ -23,11 +23,15 @@
 --   K3  Steps     the 7-per-frame sawtooth: 0 = smooth bells .. 358 = the clip .. 1023 = deep stair steps
 --   K4  Rise      bipolar (deadband): the tips rise (right) or sink (left); the colour rows follow
 --   K5  Hue cycle the interior colour cycle: long sweeps (0) .. 206 lines (512) .. fine stripes (1023)
---   K6  Mosaic    block size 9 x 5 .. 44 x 22 (512) .. 211 x 106 virtual px (camera and colour rows)
+--   K6  Camera    camera strength: the luma (or Osc) gain before the 8-level posteriser, 0 = none
+--                 (the black-input picture), 25 % = the v0.1.0 gain, 50 % = 1.5x (default), 100 % = 2x
 --   S7  Flip      tapers hang from the top and the motion mirrors
 --   S8  Invert    swap the palettes: dark tapers on the striped field
 --   S9  Palette   Neon (pink / green, the clip) / Amber (amber / cyan)
---   S10 Rows      colour rows sampled per mosaic row (the clip) / continuous gradients
+--   S10 Mosaic    block size: Clip (44 x 22 virtual px) / Coarse (C_MOS_BIG, ~119 x 60), glided
+--
+-- K6 camera pass 2026-11-15 (v0.1.1): K6 = Camera (new); the old K6 Mosaic knob moved to S10 as a
+-- two-position block size; S10's old Rows switch (Mosaic / Smooth, the weakest control) is fixed at Mosaic.
 --   S11 Source    Video / Osc
 --   P12 HEIGHT    the threshold: 0 % = a row of small flames at the apex, 500 = the clip, 100 % = a
 --                 solid striped wall with dark notches
@@ -53,6 +57,9 @@ use work.all;
 
 architecture tapers of program_top is
     constant C_LAT : integer := 20;   -- = processing_delay_clks
+    -- K6 camera pass: S10 picks the glided mosaic setting (the old K6 scale: 512 = 44 x 22, the clip)
+    constant C_MOS_CLIP : unsigned(9 downto 0) := to_unsigned(512, 10);
+    constant C_MOS_BIG  : unsigned(9 downto 0) := to_unsigned(840, 10);
 
     -- fitted constants (phases: 2^24 per cycle)
     constant C_PH_ANCH : integer := 2516582;   -- carrier phase at virtual x = 960: 0.15 cycles (peaks at 48 + 289.5 k)
@@ -141,6 +148,9 @@ architecture tapers of program_top is
     signal s_vm : unsigned(8 downto 0) := (others => '0');
     signal s_vneg : std_logic := '0';
     signal s_flip, s_inv, s_pal, s_cont, s_src : std_logic := '0';
+    signal s_mbig : std_logic := '0';                                   -- S10: coarse mosaic
+    signal s_gk   : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);  -- K6 camera, glided (Q3)
+    signal c_cg   : unsigned(7 downto 0) := to_unsigned(96, 8);         -- camera gain, Q6 (64 = v0.1.0)
 
     -- per-field constants
     signal z_e    : signed(10 downto 0) := (others => '0');
@@ -222,8 +232,9 @@ architecture tapers of program_top is
     signal b_hold : unsigned(2 downto 0) := (others => '0');
     signal b_ox, b_ox2 : unsigned(15 downto 0) := (others => '0');
     signal o_s    : unsigned(8 downto 0) := (others => '0');
-    signal o_lv   : unsigned(2 downto 0) := (others => '0');
     signal s_lvin : unsigned(2 downto 0) := (others => '0');
+    signal s_csrc : unsigned(6 downto 0) := (others => '0');   -- camera / Osc level, 7 bits (level = top 3)
+    signal s_cprd : unsigned(14 downto 0) := (others => '0');  -- times the camera gain (Q6)
 
     -- pixel path
     signal p2_d, p3_d : signed(23 downto 0) := (others => '0');
@@ -338,7 +349,8 @@ begin
                 s_flip <= registers_in(6)(0);
                 s_inv  <= registers_in(6)(1);
                 s_pal  <= registers_in(6)(2);
-                s_cont <= registers_in(6)(3);
+                s_cont <= '0';                     -- K6 camera pass: Rows fixed at Mosaic
+                s_mbig <= registers_in(6)(3);      -- S10 Mosaic: Clip / Coarse
                 s_src  <= registers_in(6)(4);
                 s_xs   <= s_xsr;
                 s_xs16 <= s_xsr & "0000";
@@ -363,15 +375,19 @@ begin
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
-                            when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
+                            when 4      =>
+                                s_gm <= s_g6;
+                                if s_mbig = '1' then s_gr <= C_MOS_BIG; else s_gr <= C_MOS_CLIP; end if;
+                            when 5      => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
+                            when others => s_gm <= s_gk; s_gr <= unsigned(registers_in(5));
                         end case;
                         z_gp <= "11";
                     when "11" =>
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                        -- deadband +-2 counts (+-4 for the camera)
+                        if s_gd > 32 or s_gd < -32 or (z_gc /= 6 and (s_gd > 16 or s_gd < -16)) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -384,10 +400,11 @@ begin
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 5      => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when others => s_gk <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 5 then z_grun <= '0'; end if;
+                        if z_gc = 6 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -524,6 +541,17 @@ begin
                             c_pg0  <= c_pg0 + (v_d(22 downto 0) & '0') + v_d;
                         end if;
                         c_ox0 <= c_ox0 + 100; c_ox20 <= c_ox20 - 60; c_oy0 <= c_oy0 + 40;
+                    -- K6 camera gain, Q6, two knees: k / 4 up to 256 (1x = v0.1.0), then 1/8 per count
+                    -- (512 = 1.5x), then 1/16 per count (1023 = 2x).  2x at 512 already buried the tapers
+                    -- in the yellow / pink show-through levels on a bright camera, 4x was a yellow washout.
+                    when 334 =>
+                        if s_gk(12 downto 11) = "00" then
+                            c_cg <= "00" & s_gk(10 downto 5);
+                        elsif s_gk(12) = '0' then
+                            c_cg <= to_unsigned(64, 8) + resize(s_gk(10 downto 6), 8);
+                        else
+                            c_cg <= to_unsigned(96, 8) + resize(s_gk(11 downto 7), 8);
+                        end if;
                     when others => null;
                 end case;
             end if;
@@ -686,12 +714,20 @@ begin
             if v_y11(10) = '1' then v_y11 := to_unsigned(1023, 11); end if;
             v_s := resize(f_tri7(b_ox(15 downto 8)), 9) + resize(f_tri7(b_ox2(15 downto 8)) srl 1, 9) + resize(f_tri7(e_oy(15 downto 8)) srl 3, 9);
             o_s <= v_s;
-            if o_s < 64 then o_lv <= (others => '0');
+            -- K6 camera pass: camera or Osc on one 7-bit scale (level = the top 3 bits, as v0.1.0) ...
+            if s_src = '1' then
+                if o_s < 64 then s_csrc <= (others => '0');
+                else
+                    v_l := o_s - 64;
+                    if v_l(8 downto 7) /= "00" then s_csrc <= (others => '1'); else s_csrc <= v_l(6 downto 0); end if;
+                end if;
             else
-                v_l := o_s - 64;
-                if v_l(8 downto 7) /= "00" then o_lv <= "111"; else o_lv <= v_l(6 downto 4); end if;
+                s_csrc <= v_y11(9 downto 3);
             end if;
-            if s_src = '1' then s_lvin <= o_lv; else s_lvin <= v_y11(9 downto 7); end if;
+            -- ... times the K6 gain (Q6, its own stage) ...
+            s_cprd <= s_csrc * c_cg;
+            -- ... back to 8 levels, saturating at the top one
+            if s_cprd(14 downto 13) /= "00" then s_lvin <= "111"; else s_lvin <= s_cprd(12 downto 10); end if;
 
             if g_start = '1' then
                 b_x   <= resize(s_x0, 12);
