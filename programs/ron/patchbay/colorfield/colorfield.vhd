@@ -35,6 +35,7 @@
 -- resync, luma 13/16), blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Colour (was K6); K3 Breath fixed at 512 (C_KFIX_3).
+-- 2026-11-15: K6 camera top +25 % (Ron): gain s_cg = 1.25 k / 8 in Q4 (was k / 8 in Q5); slices one bit lower, v_vdg 13 bits.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -162,10 +163,10 @@ architecture colorfield of program_top is
     signal s_kcr : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_kcd : signed(14 downto 0) := (others => '0');
     signal s_kcp : std_logic_vector(3 downto 0) := (others => '0');
-    signal s_cg  : unsigned(6 downto 0) := to_unsigned(64, 7);
+    signal s_cg  : unsigned(6 downto 0) := to_unsigned(40, 7);   -- K6 top +25 %: Q4 (16 = x1), 1.25 k / 8 / 2, max 79
     signal v_vdp : signed(19 downto 0) := (others => '0');
     signal v_stp : unsigned(14 downto 0) := (others => '0');
-    signal v_vdg : signed(11 downto 0) := (others => '0');
+    signal v_vdg : signed(12 downto 0) := (others => '0');            -- K6 top +25 %: max |2360|
     signal v_stg : unsigned(7 downto 0) := (others => '0');
 
     -- timing / zone / width
@@ -839,6 +840,7 @@ begin
         variable v_d, v_e : signed(12 downto 0);
         variable v_ra : unsigned(10 downto 0);
         variable v_o  : signed(9 downto 0);
+        variable v_cgs : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             if data_in.avid = '1' then
@@ -893,10 +895,11 @@ begin
             -- K6 camera pass: the camera gain, one multiply per use in its own stage, then the slice
             v_vdp <= v_vd * signed('0' & s_cg);
             v_stp <= v_st * s_cg;
-            v_vdg <= v_vdp(16 downto 5);
-            if v_stp(14 downto 13) /= "00" then v_stg <= (others => '1'); else v_stg <= v_stp(12 downto 5); end if;
-            -- K6 glide, once per field from the zone start: 1/8 of the gap, +-4 deadband; gain = k / 8 (Q5):
-            -- 25 % = x1 (shipped), 50 % = x2, 100 % = x4; k < 8 = 0
+            -- K6 top +25 %: gain in Q4, so the slices drop a bit (displacement max 478 x 79 / 16 = 2360)
+            v_vdg <= v_vdp(16 downto 4);
+            if v_stp(14 downto 12) /= "000" then v_stg <= (others => '1'); else v_stg <= v_stp(11 downto 4); end if;
+            -- K6 glide, once per field from the zone start: 1/8 of the gap, +-4 deadband; gain = 1.25 k / 8
+            -- (Q4: (k / 8 + k / 32) / 2): 25 % = x1.25, 50 % = x2.5, 100 % = x4.94 (was x1 / x2 / x4); k < 8 = 0
             s_kcp <= s_kcp(2 downto 0) & s_zgo;
             if s_zgo = '1' then s_kcr <= unsigned(registers_in(5)); end if;
             if s_kcp(0) = '1' then s_kcd <= signed(resize(s_kcr & "000", 15)) - signed(resize(s_kc, 15)); end if;
@@ -904,7 +907,10 @@ begin
                 if s_kcd > 32 or s_kcd < -32 then s_kcd <= shift_right(s_kcd, 3); else s_kcd <= (others => '0'); end if;
             end if;
             if s_kcp(2) = '1' then s_kc <= unsigned(signed(s_kc) + s_kcd(12 downto 0)); end if;
-            if s_kcp(3) = '1' then s_cg <= s_kc(12 downto 6); end if;
+            if s_kcp(3) = '1' then
+                v_cgs := resize(s_kc(12 downto 6), 8) + resize(s_kc(12 downto 8), 8);
+                s_cg <= v_cgs(7 downto 1);
+            end if;
         end if;
     end process p_src;
 

@@ -7,7 +7,7 @@
 processing_delay_clks = 36
 program_id = "com.czartroniks.lissajous"
 program_name = "Lissajous"
-program_version = "0.1.1"
+program_version = "0.1.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -73,7 +73,7 @@ name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 1023
 display_float_digits = 0
 suffix_label = "%"
 

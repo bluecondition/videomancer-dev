@@ -39,6 +39,7 @@
 -- the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Height fixed at 880 (C_KFIX_2).
+-- 2026-11-15: K6 camera top +25 % (Ron): the video octave constant CV lowered by 330 (x1.25, every K6 >= 8; < 8 still off).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -591,7 +592,9 @@ begin
                         if v_kc(9) = '1' then z_koff <= to_unsigned(1024, 12) + resize(v_kc(8 downto 0) & '0', 12);
                         else z_koff <= resize(v_kc(7 downto 0) & "00", 12); end if;
                     when 48 =>
-                        if s_src = '1' then v_cb := to_signed(425, 18); else v_cb := to_signed(1449, 18); end if;
+                        -- K6 top +25 %: CV - 330 (1024 log2 1.25) on both bases = x1.25 at every k (k < 8: L[0] + 95 still
+                        -- saturates t_cv, relief 0); was 425 / 1449
+                        if s_src = '1' then v_cb := to_signed(95, 18); else v_cb := to_signed(1119, 18); end if;
                         if v_kc(9 downto 8) = "00" then c_cv <= signed(resize(f_lg, 18)) + v_cb;
                         else c_cv <= v_cb - signed(resize(z_koff, 18)); end if;
                     when 51 => q_t <= resize(z_tp, 16) + 724;                         -- octaves per trace (tilt)

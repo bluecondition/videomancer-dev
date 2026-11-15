@@ -41,6 +41,7 @@
 -- convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Bands fixed at 512 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron): gain s_cgq = 65 k >> 10 (1.25 x 13 k >> 7, one bit coarser), slices one bit lower.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -261,7 +262,7 @@ architecture agate of program_top is
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: glided K6 Camera
-    signal s_cgq : unsigned(6 downto 0) := to_unsigned(52, 7);         -- camera gain, 13 k / 128 (26 = shipped)
+    signal s_cgq : unsigned(6 downto 0) := to_unsigned(32, 7);         -- camera gain, 65 k / 1024 (K6 top +25 %; was 13 k / 128)
     signal l_v13 : unsigned(11 downto 0) := (others => '0');
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(0, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(800 * 8, 13);
@@ -685,9 +686,9 @@ begin
                 end case;
             end if;
 
-            -- K6 camera gain from the glided knob (changes only in the vblank glide): 13 k >> 7
-            s_cgq <= resize(shift_right(shift_left(resize(s_g5(12 downto 3), 14), 3) + shift_left(resize(s_g5(12 downto 3), 14), 2)
-                                        + resize(s_g5(12 downto 3), 14), 7), 7);
+            -- K6 camera gain from the glided knob (changes only in the vblank glide): 65 k >> 10 (0 .. 64) =
+            -- 1.25 x the v0.1.1 13 k >> 7 at half the scale (K6 top +25 %; the slices below drop a bit)
+            s_cgq <= resize(shift_right(shift_left(resize(s_g5(12 downto 3), 17), 6) + resize(s_g5(12 downto 3), 17), 10), 7);
             s_gav_sr(0) <= g_avid;
             for i in 1 to C_LAT - 1 loop
                 s_gav_sr(i) <= s_gav_sr(i - 1);
@@ -1050,11 +1051,11 @@ begin
             end if;
             l_wa <= l_ra2;
             l_we <= s_gav_sr(10) and l_p12;
-            -- K6 camera pass: luma x 13 k / 4096 in its own stage (one pixel later): 25 % = x13/16 (shipped),
-            -- 50 % = x2, 100 % = x4; four times that for the oscillator
+            -- K6 camera pass: luma x 65 k / 16384 in its own stage (one pixel later): 25 % = x1 (x13/16 before
+            -- the +25 %), 50 % = x2.5, 100 % = x5; four times that for the oscillator.  v_mp <= 4080 x 64 < 2^18
             l_v13 <= v_l;
             v_mp := l_v13 * s_cgq;
-            if s_src = '1' then s13_l <= v_mp(18 downto 3); else s13_l <= resize(v_mp(18 downto 5), 16); end if;
+            if s_src = '1' then s13_l <= v_mp(17 downto 2); else s13_l <= resize(v_mp(17 downto 4), 16); end if;
 
             -- 23..25: U = X * Bands (mod 4 colouriser cycles), 1024 per cycle
             v_x := unsigned(resize(signed(px22), 24));

@@ -22,8 +22,8 @@
 --   K4  Speed    bipolar: munch rate and direction, ramp drift
 --   K5  Colour   the DAC channel colours, turned through 270 degrees of hue
 --   K6  Camera   camera strength: the keyed-through picture fades in to full level at 25 %, and the per-cell
---                luma narrows the windows by g x the v0.1.0 amount, g = K6 / 256 to x 2 at 50 %, then up to x 3
---                at 100 % (the picture takes the bright cells).  Bits (the old K5) is fixed at "7-2".
+--                luma narrows the windows by 1.25 g x the v0.1.0 amount, g = K6 / 256 to x 2 at 50 %, then up to
+--                x 3 at 100 % (x 3.75 with the +25 %; the picture takes the bright cells).  Bits (the old K5) is fixed at "7-2".
 --   S7  Mirror   On (4-way fold) / Off
 --   S8  Code     Binary / Gray
 --   S9  Skew     Off / On (diagonals)
@@ -39,6 +39,7 @@
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Bits fixed at 448 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron): the window bite c_nw x 1.25 (state 422); the picture level is unchanged.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -362,6 +363,7 @@ begin
         variable v_t  : unsigned(4 downto 0);
         variable v_p  : unsigned(9 downto 0);
         variable v_i  : unsigned(2 downto 0);
+        variable v_nw : unsigned(13 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -676,7 +678,9 @@ begin
                         z_cgp <= z_cgq * c_gb5;
                     when 422 =>
                         c_cg32 <= z_cgp(10 downto 5);
-                        if s_src = '1' then c_nw <= z_nwq(10 downto 5); else c_nw <= z_nwq(12 downto 7); end if;
+                        -- K6 top +25 %: bite x 1.25 (top: camera 35 -> 44, Osc 47 -> 59; max 5756 / 1918, no wrap)
+                        v_nw := resize(z_nwq, 14) + resize(z_nwq(12 downto 2), 14);
+                        if s_src = '1' then c_nw <= v_nw(10 downto 5); else c_nw <= v_nw(12 downto 7); end if;
                     when others => null;
                 end case;
             end if;

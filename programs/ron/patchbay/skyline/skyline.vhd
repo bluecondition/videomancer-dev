@@ -20,7 +20,7 @@
 --   K4  Speed     bipolar: the S&H clock rate and the LFO drift (left / right)
 --   K5  Colour    rotates the colouriser: cool ladder .. green / yellow / red (512) .. hot ladder
 --   K6  Camera    source strength (camera or Osc) into the mixer: 0 = none (the pure noise analyser),
---                 25 % = v0.1.0's fixed x4, 50 % (default) = x8, 100 % = x16.  (Decay is fixed at
+--                 25 % = v0.1.0's fixed x5, 50 % = x10, 100 % = x20 (x1.25 since 2026-11-15).  (Decay is fixed at
 --                 v0.1.0's default 600: release 12 lines a field, caps hold 0.7 s.)
 --   S7  Shape     Spectrum (noise under two formant humps) / Wave (a travelling sine plus noise)
 --   S8  Mirror    Reflection (a dim rippled mirror below the horizon) / Centre (bars grow both ways)
@@ -39,6 +39,7 @@
 -- convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Decay fixed at 600 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron): the camera scale c_vsc x 1.25 (state 122, saturating).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -364,6 +365,7 @@ begin
     p_ctrl : process(clk)
         variable v_s  : signed(10 downto 0);
         variable v_m  : unsigned(9 downto 0);
+        variable v_vs : unsigned(14 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -516,7 +518,10 @@ begin
                         c_d1 <= resize(f_acc(17 downto 9), 12) + 16;
                         c_d2 <= resize(f_acc(17 downto 8), 12) + 24;
                         c_dw <= resize(f_acc(17 downto 8) & '0', 12) + 32;
-                    when 122 => c_vsc <= f_acc(21 downto 8);                         -- c_inc(19:8) x k6 / 256
+                    when 122 =>                                                       -- c_inc(19:8) x k6 / 256
+                        -- K6 top +25 %: x 1.25, saturating at 14 bits (never reached at 720+ px widths)
+                        v_vs := resize(f_acc(21 downto 8), 15) + resize(f_acc(21 downto 10), 15);
+                        if v_vs(14) = '1' then c_vsc <= (others => '1'); else c_vsc <= v_vs(13 downto 0); end if;
                     when 146 => z_t <= resize(f_acc(19 downto 10), 11) + f_acc(19 downto 11);
                     when 151 =>
                     when 152 =>

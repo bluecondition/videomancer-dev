@@ -23,7 +23,8 @@
 --                  colouriser's band flow; centre = locked (the drift phases snap to zero): the still classic figure
 --   K5  Bands      colouriser gain: 0.4 .. 3.4 palette cycles per unit of |F|
 --   K6  Camera     source strength (camera or Osc) into F: 0 = none (the black-input picture), 25 % =
---                  v0.1.0's fixed gain (0.30 of F's unit for full white), 50 % (default) = 2x, 100 % = 4x.
+--                  v0.1.0's fixed gain (0.30 of F's unit for full white), 50 % = 2x, 100 % = 4x (x1.25 since
+--                  2026-11-15: 2.5x / 5x).
 --                  (The sand window, K5 in v0.1.0, is fixed at its default 512.)
 --   S7  Plate      Square (bordered square plate) / Screen (the field fills the picture)
 --   S8  Look       Bands / Sand (pale sand on black, a dust ring per colouriser period)
@@ -39,6 +40,7 @@
 -- [1 1]/2 with the line above) before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Bands (was K6); K5 Sand fixed at 512 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron): the source gain c_gl x 1.25 (state 482).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -670,7 +672,9 @@ begin
                     when 434 => c_pym0 <= f_acc(25 downto 0);
                     when 458 =>
                         if s_src = '1' then z_gl <= f_acc(16 downto 4); else z_gl <= f_acc(15 downto 3); end if;
-                    when 482 => c_gl <= f_acc(22 downto 10);   -- v0.1.0's gain x camera / 1024 (x 4 in the pixel path)
+                    when 482 =>                                -- v0.1.0's gain x camera / 1024 (x 4 in the pixel path)
+                        -- K6 top +25 %: x 1.25 (max 4918 -> 6147 < 8192 (Osc, Bands at the top); |F| max ~106k < 2^17)
+                        c_gl <= f_acc(22 downto 10) + resize(f_acc(22 downto 12), 13);
                     when others => null;
                 end case;
             end if;

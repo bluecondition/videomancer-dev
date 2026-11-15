@@ -173,3 +173,20 @@ lattice when S11 = Osc), 0 .. 100 %, default 50 %.
   the same; Screen fits its modes to the 4:3 width; **Twin's plates are 680 px on SD against 900 px on HD**
   (two 900-px squares do not fit 4:3). SD is softer (the filters are per output pixel) and thin colour fringes
   at the densest settings fall under a field line.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. **Bend / element**: K6 scales the source term added to F, so the camera bends the nodal figure and its
+bands; nothing of the camera image itself is shown.
+
+- **Change:** the per-field source gain is x1.25 at every K6 position: sequencer state 482 now loads
+  `c_gl = g + (g >> 2)` with `g = gain_v010 x k / 1024` (was `g`). So 25 % = 1.25x v0.1.0, 50 % = 2.5x,
+  100 % = 5x (was 4x). Widths checked: c_gl max 4918 -> 6147 (Osc, Bands at its top) < 8192 (13 bits); the pixel
+  multiply's 21-bit sum stays under 2^21; |F| max about 106k < 2^17 (p9_f / p10_af do not wrap). No pixel-path change, latency unchanged.
+  K6's default is 100 % (set by the orchestrator).
+- **Look check** (NTSC full raster, bear.png, glide bypassed in scratch copies, K6 100 % old vs new;
+  `.patchbay_work/rb_chladni/k6b/k6b_cmp.png`): the same plate figure, with the bands bent further by the picture. No wrap
+  or new artifacts. (A 720p decimation-4 sim draws only the dark corner of the plate, so it isn't useful here.)
+- **Build (router1, all six configs on seed 1):** HD Analog 99.37, SD Analog 102.33, HD HDMI 93.92, SD HDMI
+  101.56, HD Dual 94.60, SD Dual 94.42 MHz (worst HD 93.92); 6,997 .. 7,014 / 7,680 LC, 24 / 32 EBR.
+  `out/rev_b/ron/patchbay/chladni.vmprog`. Not flashed.

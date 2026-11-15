@@ -159,3 +159,23 @@ the peaks morph while they travel.
 - **Build v0.1.1 (2026-11-15), router1, all six configs on seed 1**: HD Analog 87.47, SD Analog 88.82, HD HDMI
   83.01, SD HDMI 85.16, HD Dual 89.90, SD Dual 91.39 MHz post-route (worst HD 83.01). 7,020 .. 7,032 / 7,680 LC
   (91 %), 22 / 32 EBR. `out/rev_b/ron/patchbay/pulsar.vmprog`. Not flashed.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. **Bend / element**: K6 sets how tall the camera's luma lifts each trace (the relief). The camera
+re-shapes the traces; the picture itself is not shown.
+
+- **Change:** the gain lives in the log domain (octave constant CV, 1/1024 octave), so x1.25 is
+  `-1024 log2 1.25 = -330`. Both CV bases at state 48 drop by 330: camera 1449 -> 1119, Osc 425 -> 95. That makes
+  the relief x1.25 at every K6 >= 8: 25 % = 1.25x v0.1.0, 50 % = 2.5x, 100 % = 5x (was 4x). The Osc keeps its
+  2x over the camera. K6 < 8 is still off: L[0] + 95 still saturates `t_cv` to FFFF, so the relief stays
+  exactly 0. CV's lowest value is -1951 (18-bit signed), and the trace exponent still clamps at 0 below. This is
+  a constant change only: no logic, latency unchanged. K6's default is 100 % (set by the orchestrator).
+- **Look check** (NTSC decimation 1, bear.png, glide bypassed in scratch copies, K6 100 % old vs new;
+  `.patchbay_work/rb_pulsar/k6b/k6b_cmp.png`): the same hidden-line traces with more relief. The swell over the
+  bright right of the bear turns from red / orange to yellow / white-hot, and there are a few more flat tops at
+  the trace windows. No wrap or new artifacts. (A 720p decimation-4 sim shows only one trace:
+  `k6b_cmp_720p_dec4.png`.)
+- **Build (router1, all six configs on seed 1):** HD Analog 88.64, SD Analog 91.75, HD HDMI 91.32, SD HDMI
+  84.68, HD Dual 88.40, SD Dual 93.42 MHz (worst HD 88.40); 7,015 .. 7,035 / 7,680 LC, 22 / 32 EBR.
+  `out/rev_b/ron/patchbay/pulsar.vmprog`. Not flashed.

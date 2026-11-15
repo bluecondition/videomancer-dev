@@ -187,3 +187,23 @@ and STIR all at maximum together give mostly the mean colour (each alone keeps t
   88.24, SD HDMI 83.54, HD Dual 79.76, SD Dual 74.40 MHz post-route (worst HD 79.76; HD Analog's margin is now
   8 %, was 1.9 %). 6,928 .. 6,953 / 7,680 LC (91 %, down from 93 %), 24 / 32 EBR.
   `out/rev_b/ron/patchbay/agate.vmprog`. Not flashed.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. **Bend / element**: K6 scales the camera (or Osc) luma that is added to X between stage 1 and stage 2.
+The camera bends and carves the stone's bands; the picture itself is not shown.
+
+- **Change:** the gain register `s_cgq` stays 7 bits at half the scale: `65 k >> 10` (0 .. 64), where it was
+  `13 k >> 7` (0 .. 103). The existing 12 x 7 multiply is unchanged and its slices drop one bit: Osc
+  `v_mp(17 downto 2)`, video `v_mp(17 downto 4)`. So the gain is x1.25 at every position: 25 % = x1 (was x13/16),
+  50 % = x2.5, 100 % = x5 (was x4); four times that for the Osc. The largest product is 4080 x 64 < 2^18, so
+  `v_mp(18)` is never set, and the 16-bit term fits (Osc max 65,520). X is a phase that wraps seamlessly at a
+  whole number of colouriser cycles, as it always did. The gain is one bit coarser (64 steps), which is
+  invisible under the glide. Latency unchanged. K6's default is 100 % (set by the orchestrator).
+- **Look check** (bear.png, glide bypassed in scratch copies, K6 100 % old vs new): at 720p60 decimation 4,
+  `.patchbay_work/rb_agate/k6b/k6b_cmp.png`, and at decimation 2, `k6b_cmp_d2.png`, the same stone with the
+  picture's contours carving it further (the bear's eyes show as rings). The known 8-pixel beading on steep
+  contours, from the 1/8-rate luma store, is a little more visible. No wrap or new artifacts.
+- **Build (router1, all six configs on seed 1):** HD Analog 81.03, SD Analog 77.63, HD HDMI 86.74, SD HDMI
+  81.91, HD Dual 80.62, SD Dual 82.15 MHz (worst HD 80.62); 6,911 .. 6,922 / 7,680 LC, 24 / 32 EBR.
+  `out/rev_b/ron/patchbay/agate.vmprog`. Not flashed.

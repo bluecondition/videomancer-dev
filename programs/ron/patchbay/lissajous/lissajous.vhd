@@ -21,7 +21,8 @@
 --   K4  Speed    phi drift, bipolar: the figure turns one way or the other
 --   K5  Colour   colouriser rotate
 --   K6  Camera   the camera / Osc level into generator A's phase, x round(K6 / 128) / 2 (8 steps: 25 % = v0.1.0,
---                50 % = twice, 100 % = four times); Line (the old K5) is fixed at 520
+--                50 % = twice, 100 % = five times (x4.5 at 7/8; +25 % at the top since 2026-11-15)); Line (the old
+--                K5) is fixed at 520
 --   S7  Shaper   Arcsine (the true figure in a square) / Linear (a bare lattice of diamonds, whole screen)
 --   S8  Twin     the figure's mirror twin (phi + half a turn), cyan with a dark edge; the bands hug both
 --   S9  Frame    Square / Wide (stretched to the screen)
@@ -39,6 +40,7 @@
 -- convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Line fixed at 520 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron): the camera gain step code tops out at x5 (was x4), x4.5 on the step below.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -740,7 +742,8 @@ begin
             if s_zone = '1' then s_oy <= shift_left(resize(s_ot, 16), 6) + shift_left(resize(s_ot, 16), 5); end if;  -- ot * 96
             if s_zgo = '1' then
                 s_ot <= s_ot + 1;
-                -- K6 camera gain = round(K6 / 128) / 2 (x 1 at 25 %, x 2 at 50 %), 4 at the top
+                -- K6 camera gain = round(K6 / 128) / 2 (x 1 at 25 %, x 2 at 50 %), 5 at the top (+25 %, was 4;
+                -- 4.5 on step 7, was 4); s_yin still clips at 4095
                 v_gi := resize(s_gc(12 downto 10), 4) + resize(s_gc(9 downto 9), 4);
                 case to_integer(v_gi) is
                     when 0      => c_cga <= "00"; c_cgb <= "00";
@@ -750,7 +753,8 @@ begin
                     when 4      => c_cga <= "10"; c_cgb <= "00";
                     when 5      => c_cga <= "10"; c_cgb <= "01";
                     when 6      => c_cga <= "10"; c_cgb <= "10";
-                    when others => c_cga <= "11"; c_cgb <= "00";
+                    when 7      => c_cga <= "11"; c_cgb <= "01";
+                    when others => c_cga <= "11"; c_cgb <= "10";
                 end case;
             end if;
             v_s := resize(f_tri7(s_ox(15 downto 8)), 8) + resize(f_tri7(s_oy(15 downto 8)), 8);

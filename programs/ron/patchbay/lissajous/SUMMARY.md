@@ -171,3 +171,21 @@ The line weight is fixed at the old K5 default, 5 virtual px.)
   approximately, so video frames match the RTL in structure, not bit for bit.
 - **Unsure on hardware:** hue (sim-verified only as structure), the look of the dim bars beside the square, and
   whether the Osc level wants trimming. No pin-skew seed screening was run.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. **Bend / element**: K6 scales the camera (or Osc) term in generator A's phase, so the camera bends the
+Lissajous figure and its glow bands; the picture itself is not shown.
+
+- **Change:** the gain is an 8-step shift-select code (`round(K6 / 128)`), so I added steps at the top instead
+  of a multiply. Step 7 (k 832 .. 959) is now x4.5 (was x4), and step 8 (k >= 960) is x5 (was x4: `c_cga` "11"
+  + `c_cgb` "10" = 4 + 1). Steps 0 .. 6 are unchanged (0 .. x3), so 100 % = x1.25 the old top. The sum `v_ys`
+  (15 bits) has room for 5 x 4095, and `s_yin` still clips at 4095 (half a cycle of phase). Bright camera
+  pixels (Y above about 883) now reach that clip at the top, and the Osc already clipped there at x4. Latency
+  unchanged. K6's default is 100 % (set by the orchestrator).
+- **Look check** (720p60 decimation 4, bear.png, glide bypassed in scratch copies, K6 100 % old vs new;
+  `.patchbay_work/rb_lissajous/k6b/k6b_cmp.png`): the same banded figure, bent further by the picture (more
+  folds in the bands). No wrap or new artifacts.
+- **Build (router1, all six configs on seed 1):** HD Analog 76.93, SD Analog 87.64, HD HDMI 86.32, SD HDMI
+  85.29, HD Dual 76.43, SD Dual 84.03 MHz (worst HD 76.43); 7,042 .. 7,062 / 7,680 LC, 19 / 32 EBR.
+  `out/rev_b/ron/patchbay/lissajous.vmprog`. Not flashed.

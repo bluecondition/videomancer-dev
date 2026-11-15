@@ -209,3 +209,23 @@ Osc lattice when S11 = Osc), 0 .. 100 %, default 50 %.
 - **Unsure on hardware:** the video accumulator's read-modify-write runs at pixel rate with `no_rw_check`
   RAMs (reads and writes are at least 5 clocks apart by construction, but only GHDL has seen it); the
   heat-driven colour flicker at Drive 100 % may be harsher on a real display than in stills.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. **Bend / element**: K6 scales the column means of the camera (or Osc) that go into the mixer. The camera
+moves the bar heights and heat colours; the picture itself is not shown.
+
+- **Change:** sequencer state 122 now loads `c_vsc = g + (g >> 2)`, saturating at 14 bits, where
+  `g = c_inc(19:8) x k / 256` (was `g`). So K6 is x1.25 at every position: 25 % = x5, 50 % = x10, 100 % = x20
+  (was x4 / x8 / x16). At real widths (720 px and up) `c_vsc` stays below about 10,900, so the saturation never
+  engages there. The mean x camera product already saturates at 4095 (state 19). No pixel-path change, latency
+  unchanged. K6's default is 100 % (set by the orchestrator).
+- **Look check** (NTSC decimation 1, because a decimated raster shows only a quarter of the picture and starves
+  the AC coupling; bear.png, glide bypassed in scratch copies, 6 warm-up fields, K6 100 % old vs new;
+  `.patchbay_work/rb_skyline/k6b/k6b_cmp.png`): the same skyline. About 2.5 % of pixels differ: a few more lit
+  segments and hotter caps in the middle-height columns. With this source the bright edge columns are already
+  pinned and the dark middle ones already clipped at 0 at the old 100 %, so the +25 % only shows in between. No
+  wrap or new artifacts.
+- **Build (router1, all six configs on seed 1):** HD Analog 100.18, SD Analog 97.34, HD HDMI 93.07, SD HDMI
+  96.68, HD Dual 95.52, SD Dual 89.96 MHz (worst HD 93.07); 6,706 .. 6,725 / 7,680 LC, 12 / 32 EBR.
+  `out/rev_b/ron/patchbay/skyline.vmprog`. Not flashed.

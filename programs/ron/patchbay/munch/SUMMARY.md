@@ -182,3 +182,21 @@ channels breathes on two more LFOs (32 s and 45 s), so it does not loop.
 - SD: cells under about 15 px are one or two field lines tall, so K1's lowest quarter looks uneven at SD and
   Outline's horizontal lines there are single field lines. The DAC lag and Outline line width are per mode
   (8 / 5 / 4 px), so fringes look alike at every resolution; the output filter is in pixels, so SD is softer.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. **Mixed**: K6 drives two things. The keyed-through camera picture fades in to full level by 25 % (`c_gb5`);
+that part is picture-type and is unchanged. The held per-cell luma also narrows the comparator windows (the
+"bite", `c_nw`); that part is element-type and gets the +25 %.
+
+- **Change:** sequencer state 422 now loads `c_nw` from `z_nwq + (z_nwq >> 2)` (14-bit sum), not from `z_nwq`.
+  So the bite is x1.25 at every K6 position: at the top, camera 35 -> 44 and Osc 47 -> 59 per held-luma step
+  (6-bit register, max 63). The largest sums are 5756 (camera) and 1918 (Osc), so the slices don't wrap. The
+  product `p6_lw` (3 x 6 bits) is unchanged at max 441, and the window subtract still saturates as before. No
+  pixel-path change, latency unchanged. K6's default is 100 % (set by the orchestrator).
+- **Look check** (720p60 decimation 4, bear.png, Logic = XOR, glide bypassed in scratch copies, K6 100 % old vs
+  new; `.patchbay_work/rb_munch/k6b/k6b_cmp.png`): the same frame, with a few more quilt cells closed over the
+  bright parts of the bear (more picture, less quilt). About 6 % of pixels differ. No wrap or new artifacts.
+- **Build (router1, all six configs on seed 1):** HD Analog 100.07, SD Analog 96.95, HD HDMI 93.89, SD HDMI
+  97.63, HD Dual 97.21, SD Dual 97.95 MHz (worst HD 93.89); 6,683 .. 6,693 / 7,680 LC, 18 / 32 EBR.
+  `out/rev_b/ron/patchbay/munch.vmprog`. Not flashed.

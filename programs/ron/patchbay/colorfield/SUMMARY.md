@@ -169,3 +169,23 @@ no pin-skew seed screening.
   79.30, SD HDMI 77.54, HD Dual 80.38, SD Dual 80.48 MHz post-route (worst HD 79.30). 7,083 .. 7,127 / 7,680 LC
   (93 %; the two camera multiplies and the glide cost about 400 LC), 24 / 32 EBR.
   `out/rev_b/ron/patchbay/colorfield.vmprog`. Not flashed.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. **Bend / element**: K6 scales how far the camera displaces the field edges and how strongly it stains the
+paint. The camera image itself is never shown; it only re-shapes and recolours the Rothko stack.
+
+- **Change:** both uses are x1.25 at every K6 position. The gain register `s_cg` stays 7 bits but is now
+  Q4 instead of Q5: `s_cg = (k/8 + k/32) / 2` (0 .. 79; was `k/8` in Q5, 0 .. 127). The two existing
+  multiplies are unchanged and their slices drop one bit: displacement `v_vdp(16 downto 4)`, so `v_vdg` widens
+  to 13 bits (max |478 x 79 / 16| = 2360; the 16-bit table coordinates and the clamp at stage 8 take it). The
+  stain is `v_stp(11 downto 4)`, still clamped at 255. So 25 % = x1.25 v0.1.0, 50 % = x2.5, 100 % = x4.94 (was
+  x1 / x2 / x4); k < 8 still gives 0. No new multiplier, latency unchanged. K6's default is 100 % (set by the
+  orchestrator).
+- **Look check** (720p60 decimation 1, which the table fill needs; bear.png, glide bypassed in scratch copies,
+  K6 100 % old vs new; `.patchbay_work/rb_colorfield/k6b/k6b_cmp.png`): the same stacked fields. The bear's
+  silhouette carves the field edges further, and the stain is about as saturated as before. No wrap or new
+  artifacts.
+- **Build (router1, all six configs on seed 1):** HD Analog 82.24, SD Analog 82.72, HD HDMI 78.88, SD HDMI
+  85.70, HD Dual 82.20, SD Dual 83.64 MHz (worst HD 78.88); 7,118 .. 7,132 / 7,680 LC, 24 / 32 EBR.
+  `out/rev_b/ron/patchbay/colorfield.vmprog`. Not flashed.
