@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Platter v0.1.1 -- Heirloom from the video clips, built from the still WIN_20231204_21_01_30 t0.5.
+-- 2026-11-15: K6 camera top +25 % (Ron): the tube bend only (cam + cam / 4); the dots' brightening unchanged
 --
 -- v0.1.1: no single-row sweep line at the right tube's pipe-end step (the warp tables are low-passed on each side of
 -- the step and the right zone is ground on its steep rows while the warp is on); Camera default 128, the Osc fed
@@ -1025,6 +1026,7 @@ begin
         variable v_sa : signed(9 downto 0);
         variable v_wl : unsigned(9 downto 0);
         variable v_pp : signed(10 downto 0);
+        variable v_ct : signed(16 downto 0);
     begin
         if rising_edge(clk) then
             -- 2: |x - 1964| (the disc and Mirror), xa, |tube field|, colour oscillator address, texture differences
@@ -1081,7 +1083,8 @@ begin
             p5_bi <= p4_bi;
             p5_nd <= signed(resize(p4_nb, 9)) - signed(resize(p4_na, 9));
             p5_na <= p4_na;
-            p5_ct <= unsigned(p4_cam(15 downto 0));
+            v_ct := p4_cam + shift_right(p4_cam, 2);                     -- the tube bend x1.25 (mod 2^16 phase)
+            p5_ct <= unsigned(v_ct(15 downto 0));
             p5_cy <= resize(shift_right(p4_cam, 5), 11);
             p5_z <= p4_z; p5_in <= p4_in; p5_cb <= p4_cb; p5_g <= p4_g;
             -- 6: S = FK - W - camera + 400 px (Q16 per 1300-px period); ball priority (hole, B3, B2, B4, B1);

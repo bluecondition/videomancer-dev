@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Shield v0.5.0 -- Heirloom #38, rebuilt from the photo WIN_20230529_22_56_41.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The photo: two shields side by side (axes 941.7 px apart), each a nest of U-shaped bands with
 -- vertical walls at the top and a V tip at the bottom, cut by horizontal stripes (73.5-line half
@@ -515,7 +516,7 @@ begin
                         if s_g5(12 downto 3) >= 512 then z_fa <= resize(s_g5(12 downto 3) - 512, 40);
                         else z_fa <= resize(512 - s_g5(12 downto 3), 40); end if;
                         z_fb <= to_unsigned(410, 16);
-                    when 12 => z_fa <= resize(s_g6(12 downto 3), 40);        z_fb <= to_unsigned(86, 16);  -- etch
+                    when 12 => z_fa <= resize(s_g6(12 downto 3), 40);        z_fb <= to_unsigned(108, 16); -- etch (x1.25: 86 -> 108, c_eg 0 .. 107)
                     when others => z_fa <= resize(s_gp(12 downto 3), 40);    z_fb <= to_unsigned(2873, 16); -- depth
                 end case;
             end if;

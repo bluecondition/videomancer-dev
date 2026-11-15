@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Marionette v0.1.0 -- Heirloom (video phase), from the clip WIN_20231003_00_48_14 at 1.5 s.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The still: a curtain of hanging figures, 4.7 across.  Each figure is a tall magenta body (a tapered panel with a
 -- thin red line down its left edge and a cyan / white line down its right), set off from its neighbours by a
@@ -204,7 +205,7 @@ architecture marionette of program_top is
     signal c_spd  : unsigned(11 downto 0) := (others => '0');          -- roll, Q8 lines per field
     signal c_roll : unsigned(18 downto 0) := (others => '0');          -- figure line at screen line 0, Q8
     signal c_swp  : unsigned(15 downto 0) := (others => '0');          -- sway time phase
-    signal c_g    : unsigned(7 downto 0) := (others => '0');           -- source gain
+    signal c_g    : unsigned(8 downto 0) := (others => '0');           -- source gain (x1.25: 0 .. 319)
     signal c_l    : unsigned(9 downto 0) := to_unsigned(724, 10);      -- body length, lines
     signal c_invl : unsigned(15 downto 0) := to_unsigned(11586, 16);   -- 2^23 / L
     signal c_nu0  : signed(8 downto 0) := to_signed(64, 9);            -- glow onset (nu7)
@@ -351,7 +352,8 @@ architecture marionette of program_top is
     signal p4_rf, p5_rf, p6_rf, p7_rf : std_logic := '0';
     signal p4_ts : signed(11 downto 0) := (others => '0');
     signal p4_tll, p4_tlh : signed(12 downto 0) := (others => '0');
-    signal p4_srl, p4_srh : signed(12 downto 0) := (others => '0');
+    signal p4_srl : signed(12 downto 0) := (others => '0');
+    signal p4_srh : signed(13 downto 0) := (others => '0');
     signal p5_wt : signed(15 downto 0) := (others => '0');
     signal p5_tl, p5_sr : signed(13 downto 0) := (others => '0');
     signal p6_a, p6_b : signed(14 downto 0) := (others => '0');
@@ -638,7 +640,8 @@ begin
                     when 122 => z_a <= m_acc(17 downto 0);
                     when 146 => c_spd <= m_acc(21 downto 10);
                     when 170 =>
-                        if m_acc(19 downto 11) > 255 then c_g <= (others => '1'); else c_g <= m_acc(18 downto 11); end if;
+                        if m_acc(19 downto 11) > 255 then c_g <= to_unsigned(319, 9);
+                        else c_g <= resize(m_acc(18 downto 11), 9) + resize(m_acc(18 downto 13), 9); end if;   -- x1.25
                     when 194 => c_l <= 160 + m_acc(19 downto 10);
                     when 218 =>
                         if s_g5(12 downto 3) < 512 then c_nu0 <= 64 + signed(resize(m_acc(16 downto 9), 9));
@@ -1136,7 +1139,7 @@ begin
             p4_p <= p3_p; p4_tk <= p3_tk;
             if p3_w = "0001" then p4_w <= "0000"; p4_rf <= '1'; else p4_w <= p3_w; p4_rf <= '0'; end if;
             p4_tll <= signed('0' & l_m8(3 downto 0)) * p3_tc; p4_tlh <= signed('0' & l_m8(7 downto 4)) * p3_tc;
-            p4_srl <= signed('0' & c_g(3 downto 0)) * p3_sv; p4_srh <= signed('0' & c_g(7 downto 4)) * p3_sv;
+            p4_srl <= signed('0' & c_g(3 downto 0)) * p3_sv; p4_srh <= signed('0' & c_g(8 downto 4)) * p3_sv;
             -- 5: crown texture x weight; tilt sign by the tile (1 falling, 3 rising); source scale (Osc 2x)
             p5_wt <= resize(signed('0' & p4_w) * p4_ts, 16);
             v_tl := resize(p4_tll, 17) + shift_left(resize(p4_tlh, 17), 4);

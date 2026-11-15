@@ -233,3 +233,21 @@ Glides (1/8 of the gap per field, +-2 deadband) on all six knobs and P12.
   - 720p shows the same geometry as 1080p.
   - SD shows the centre 4:3 (1440 virtual px), so the outermost gaps and lobes at the sides are cut.
   - Every size is in virtual px and lines, so shapes keep their proportions.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Bend-type:** K6 Etch bends the horizon arc, the rib gaps, the sky's G fold and the mountains by the camera's
+  (or the lattice's) luma.
+- **Change:** the per-field etch gain is eg + eg/4, so c_eg is 0 .. 78 (was 0 .. 63). Two widths change with it.
+  - cL (p6_cl) widens 9 -> 10 bits, since it now reaches 621 lines (was 502) and the old register would have
+    wrapped.
+  - The gap-tip term p7_q1 (y − offset + 9/8 cL) widens 12 -> 13 bits. It could already wrap at P12 near 100 % on
+    low lines with a bright camera, and the larger cL widened that corner.
+  - The arc, sky and mountain terms had room.
+  - Full Etch now lifts the arc ~540 lines per full luma (was ~430).
+  - The K6 default of 100 % and the version (v0.1.1) were set by the orchestrator.
+- **Look check:** `.heirloom_work/rb_horizon/k6b/k6b_cmp.png` (720p60 dec 4, bear, K6 1023, glide bypassed in the
+  scratch copies). The picture is the same. The black mountains rise higher into the bright areas, and their
+  yellow-rimmed edge now frays along the bear's face contour. No wrap.
+- **Build:** router1, all six on seed 1. HD Analog 91.55, HD HDMI 98.32, HD Dual 88.54 MHz (worst HD 88.54);
+  7,054-7,065 LC, 18 EBR.

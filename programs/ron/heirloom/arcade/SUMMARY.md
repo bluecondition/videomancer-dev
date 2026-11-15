@@ -146,3 +146,15 @@ Measured on all 282 frames (9.46 s, 29.9 fps):
   warm-up plus the 4 px generated-avid offset).
 - **Resolutions:** 720p shows the same geometry as 1080p; SD shows the centre 4:3 (1,440 virtual px: one full globe
   and two partial), round globes.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Bend-type:** K6 Etch bends the texture bands (and a quarter as much the arch rings) by the camera's luma.
+- **Change:** the per-field etch gain constant 1796 -> 2245 (x1.25 at every knob position). The gain register c_ge6
+  widens 6 -> 7 bits (0 .. 70, was 0 .. 56), and the stage-8 luma x gain product and its stage-9 copy widen 14 -> 15
+  bits. The texture and arch phases are modular, so they need no clamp. Full Etch is now 7.5 texture cycles per
+  full luma (was 6). The K6 default of 100 % and the version (v0.1.1) were set by the orchestrator.
+- **Look check:** `.heirloom_work/rb_arcade/k6b/k6b_cmp.png` (720p60 dec 4, bear, K6 1023, glide bypassed in the
+  scratch copies). The picture is the same, with the textures etched further. No wrap.
+- **Build:** router1, SD Analog on seed 2 (seed 1 timed out), the rest on seed 1. HD Analog 104.01, HD HDMI 103.36,
+  HD Dual 107.57 MHz (worst HD 103.36); 6,880-6,912 LC, 19 EBR.

@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Tiger v0.1.1 -- Heirloom (video phase), rebuilt from the clip WIN_20231208_23_03_08 at 0.5 s.
+-- 2026-11-15: K6 camera top +25 % (Ron) (tiger.py EGK 5857 -> 7321: c_eg0 0 .. 116907, Osc c_egp 0 .. 21920)
 --
 -- v0.1.1: the camera bend is smooth: the luma passes a 16 px horizontal box and a vertical IIR (1/4 new,
 -- 3/4 the previous smoothed line, in the line buffer itself) before it enters the phase; the default Etch

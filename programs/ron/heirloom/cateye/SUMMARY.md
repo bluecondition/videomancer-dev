@@ -175,3 +175,16 @@ Working files are in `.heirloom_work/rb_cateye/` (notes.md has the whole chain).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Bend-type:** K6 Bend bends the walls, the ridge and the rings by the camera's luma.
+- **Change:** the camera branch of the per-field bend gain is b + b/4, so c_b8 is 0 .. 158 (was 0 .. 127; still
+  8 bits).
+  - The Osc branch is unchanged: 3x the old camera gain, capped at 255, and already at that cap from K6 ~84 %.
+  - The pixel path already carried the Osc's 255, so no width changes.
+  - The K6 default of 100 % and the version (v0.1.3) were set by the orchestrator.
+- **Look check:** `.heirloom_work/rb_cateye/k6b/k6b_cmp.png` (720p60 dec 4, bear, K6 1023, glide bypassed in the
+  scratch copies). The picture is the same, with the walls and rings bent further around the bear. No wrap.
+- **Build:** router1, all six on seed 1. HD Analog 87.45, HD HDMI 84.27, HD Dual 85.43 MHz (worst HD 84.27);
+  7,145-7,192 LC, 21 EBR.

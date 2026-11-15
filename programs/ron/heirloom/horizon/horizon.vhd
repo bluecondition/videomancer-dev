@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Horizon v0.1.0 -- Heirloom from the video clips, built from the still WIN_20230703_01_29_07 t10.0.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The still: a planet horizon at dusk from an RGB-colouriser patch.  A cyan sky with pale lavender lobes
 -- hanging from the top, a magenta sun (a diamond, apex at the horizon) between two soft black mountains,
@@ -248,11 +249,12 @@ architecture horizon of program_top is
     signal p6_cw : signed(11 downto 0) := (others => '0');
     signal p6_gcq : unsigned(4 downto 0) := (others => '0');
     signal p6_su  : unsigned(10 downto 0) := (others => '0');
-    signal p6_cl  : unsigned(8 downto 0) := (others => '0');
+    signal p6_cl  : unsigned(9 downto 0) := (others => '0');
     signal p6_u58 : signed(11 downto 0) := (others => '0');
     signal p6_u4  : unsigned(7 downto 0) := (others => '0');
     signal p7_aoff : unsigned(15 downto 0) := (others => '0');
-    signal p7_t1, p7_q1, p7_x : signed(11 downto 0) := (others => '0');
+    signal p7_t1, p7_x : signed(11 downto 0) := (others => '0');
+    signal p7_q1  : signed(12 downto 0) := (others => '0');
     signal p7_bl : signed(11 downto 0) := (others => '0');
     signal p7_yg4 : unsigned(9 downto 0) := (others => '0');
     signal p7_v   : signed(10 downto 0) := (others => '0');
@@ -509,7 +511,7 @@ begin
                         c_dstep <= v_w(15 downto 0);
                         z_a <= resize(s_g6(12 downto 3), 26); z_b <= s_g6(12 downto 3); z_acc <= (others => '0');
                     when 120 =>                                       -- K6: etch gain = k6^2 / 2^14
-                        c_eg <= "000" & z_acc(19 downto 14);
+                        c_eg <= resize(z_acc(19 downto 14), 9) + resize(z_acc(19 downto 16), 9);   -- x1.25: 0 .. 78
                         c_d8 <= "00" & s_g2(12 downto 7);             -- K2: bowl depth, 32 = the still
                     when 121 =>
                         c_ph0 <= to_unsigned(62172, 16) + c_drift;
@@ -828,13 +830,13 @@ begin
             p6_gcq <= unsigned(r_c_q(5 downto 1));
             p6_cw <= p5_cw;
             p6_su <= resize(unsigned(r_c_q(15 downto 6)), 11);
-            p6_cl <= resize(p5_cl(16 downto 5), 9);
+            p6_cl <= resize(p5_cl(16 downto 5), 10);
             p6_clq <= resize(p5_cl(16 downto 5), 10) + resize(p5_cl(16 downto 8), 10);
             p6_u58 <= p5_u58; p6_u4 <= p5_u4;
             -- 7: bowl x arc, the line terms + camera, G sum, the lobe key, the diamond / column clips, R ramp product
             p7_aoff <= resize(p6_arc0 * c_d8(5 downto 0), 16);
             p7_t1 <= l_t + signed(resize(p6_cl, 12));
-            p7_q1 <= l_q + signed(resize(p6_clq, 12));
+            p7_q1 <= resize(l_q, 13) + signed(resize(p6_clq, 13));
             p7_yg4 <= p6_yg0 & "00";
             p7_v <= resize(l_cg, 11) + signed(resize(p6_hg, 11));
             p7_cv <= resize(shift_right(shift_left(resize(p6_cl, 12), 2) + resize(p6_cl, 12), 3), 9);
@@ -843,7 +845,7 @@ begin
             p7_cw <= f_clip8(shift_left(resize(p6_cw, 16), 2));
             p7_gcap <= to_unsigned(44, 7) + resize(p6_gcq, 7);
             p7_rbu <= resize(shift_left(resize(l_rb * signed(resize(p6_u4(6 downto 0), 8)), 18), 1), 18);
-            p7_x <= signed(resize(p6_cl(8 downto 1), 12)) - signed(resize(p6_su, 12));
+            p7_x <= signed(resize(p6_cl(9 downto 1), 12)) - signed(resize(p6_su, 12));
             p7_bl <= l_y + p6_u58;
             -- 8: t, dy, G + camera, the sky key, R ramp sum, the mountain ramps
             p8_t  <= resize(p7_t1, 13) - signed(resize(p7_aoff(15 downto 4), 13));

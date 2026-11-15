@@ -51,7 +51,7 @@ K = dict(
     APK=5400,       # split A = p12^2 * APK >> 20 (Q12; 1123 = 0.2742 at the default 467)
     P12D=467, K4D=690, K5D=512, K6D=128,
     HDK=83700,      # H drift per field = v^2 * HDK >> 16 (Q24 cycles; 0.0022 at the default roll)
-    EGK=5857,       # etch gain = k6^2 * EGK >> 16 (Q24 per luma step; 0.021 cycles at full luma, K6 128); Osc 24x
+    EGK=7321,       # etch gain = k6^2 * EGK >> 16 (Q24 per luma step); Osc 24x.  2026-11-15: K6 camera top +25 % (Ron): 5857 -> 7321
     CC=13688531,    # H phase on the fold row: frac(-0.1841), Q24
     Y0L=881,        # the lean pivots about the fold row (virtual line 881)
     LEAN0=1771,     # lean on the clip: +0.114 cycles per 1080 lines -> Q24 per virtual line

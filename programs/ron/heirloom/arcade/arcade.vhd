@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Arcade v0.1.0 -- Heirloom (video phase), from the clip WIN_20230825_00_00_20 at 6.5 s.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The still: a row of textured "globes" (circles on one H fold, 948 px apart) with orange rings, blue
 -- ring stripes arching between them (a cyan / blue weave crossing the rings), orange chevrons rising
@@ -183,7 +184,7 @@ architecture arcade of program_top is
     signal c_ks   : unsigned(9 downto 0) := to_unsigned(231, 10);
     signal c_kks  : unsigned(11 downto 0) := to_unsigned(462, 12);
     signal c_sx0  : unsigned(15 downto 0) := (others => '0');     -- (x0 - 130) * ks mod 2^16
-    signal c_ge6  : unsigned(5 downto 0) := (others => '0');
+    signal c_ge6  : unsigned(6 downto 0) := (others => '0');
     signal c_rd   : unsigned(11 downto 0) := to_unsigned(736, 12);
     signal c_rre, c_rbl, c_pb : unsigned(12 downto 0) := to_unsigned(992, 13);
     signal c_vA, c_vB : unsigned(11 downto 0) := (others => '0');
@@ -266,13 +267,13 @@ architecture arcade of program_top is
     signal p7_hq  : unsigned(6 downto 0) := (others => '0');
     signal p8_ph  : unsigned(15 downto 0) := (others => '0');
     signal p8_bt  : unsigned(16 downto 0) := (others => '0');
-    signal p8_ep  : unsigned(13 downto 0) := (others => '0');
+    signal p8_ep  : unsigned(14 downto 0) := (others => '0');
     signal p8_zin : std_logic := '0';
     signal p8_zd, p8_zr, p8_zb, p8_zband, p9_zd, p9_zr, p9_zb, p9_zband : std_logic := '0';
     signal p8_hq, p9_hq, p8_ri, p9_ri : unsigned(6 downto 0) := (others => '0');
     signal p9_ph  : unsigned(15 downto 0) := (others => '0');
     signal p9_bt  : unsigned(16 downto 0) := (others => '0');
-    signal p9_ep  : unsigned(13 downto 0) := (others => '0');
+    signal p9_ep  : unsigned(14 downto 0) := (others => '0');
     signal p10_bt : unsigned(5 downto 0) := (others => '0');
     type t_pa is array (10 to 13) of unsigned(9 downto 0);   -- {tex, address}
     signal p_pa : t_pa := (others => (others => '0'));
@@ -485,7 +486,7 @@ begin
                     when 6  => z_fa <= resize(s_vm, 28);              z_fb <= resize(s_vm, 16);            -- speed^2
                     when 7  => z_fa <= resize(z_v2, 28);              z_fb <= to_unsigned(276, 16);        -- vA
                     when 8  => z_fa <= resize(s_g6(12 downto 3), 28); z_fb <= resize(s_g6(12 downto 3), 16); -- etch^2
-                    when others => z_fa <= resize(z_v2(19 downto 10), 28); z_fb <= to_unsigned(1796, 16); -- etch gain
+                    when others => z_fa <= resize(z_v2(19 downto 10), 28); z_fb <= to_unsigned(2245, 16); -- etch gain (x1.25: 1796 -> 2245)
                 end case;
             end if;
             if z_ld = '1' then
@@ -624,7 +625,7 @@ begin
                         v_x := shift_left(v_x, 3) + shift_left(v_x, 2) + v_x;    -- * 13
                         c_vB <= f_acc(26 downto 15) + v_x(15 downto 5);
                     when 250 => z_v2 <= f_acc(19 downto 0);
-                    when 274 => c_ge6 <= f_acc(20 downto 15);
+                    when 274 => c_ge6 <= f_acc(21 downto 15);   -- 0 .. 70
                     when others => null;
                 end case;
             end if;

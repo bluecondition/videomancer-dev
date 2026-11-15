@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Cateye v0.1.1 -- Heirloom (phase 3, video clips), from the clip WIN_20240102_00_30_49 at 1.0 s.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- v0.1.1: Osc feeds the lattice at 3x the camera's bend gain (per field, capped at 2x the camera's maximum), so the
 -- walls and the ridge zigzag and the rings warp at the default Bend; K3 Rings tops out at 2x the rings (was 3x) and
@@ -508,7 +509,7 @@ begin
                             v_t := resize(m_acc(20 downto 13), 20) + shift_left(resize(m_acc(20 downto 13), 20), 1);
                             if v_t > 255 then c_b8 <= (others => '1'); else c_b8 <= v_t(7 downto 0); end if;
                         else
-                            c_b8 <= m_acc(20 downto 13);
+                            c_b8 <= m_acc(20 downto 13) + resize(m_acc(20 downto 15), 8);   -- camera x1.25 (0 .. 158)
                         end if;
                     when 10 =>
                         z_s   <= m_acc(17 downto 0);

@@ -199,3 +199,18 @@ Working files are in `.heirloom_work/rb_tiger/` (`notes.md` has the measurements
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 128 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Bend-type:** K6 Etch bends the bands, adding the smoothed camera (or Osc) luma to the colourisers' H phase.
+- **Change:** the etch constant EGK in `tiger.py` goes 5857 -> 7321 (x1.25 at every knob position; `tiger_pkg.vhd`
+  regenerated). The VHDL has the header note only.
+  - c_eg0 ≤ 116,907 fits its 17 bits.
+  - The Osc's 24x gain c_eg ≤ 2,805,768 fits its 22 bits, and c_egp ≤ 21,920 fits its 15 bits.
+  - The etch is a phase taken mod one cycle, so nothing clamps.
+  - Full Etch is now ~1.54 cycles per full luma (was 1.23). The Osc scales by the same 1.25.
+  - The K6 default of 100 % and the version (v0.1.3) were set by the orchestrator.
+- **Look check:** `.heirloom_work/rb_tiger/k6b/k6b_cmp.png` (720p60 dec 4, bear, K6 1023, glide bypassed in the
+  scratch copies). The picture is the same, with more band cycles wrapping the camera's shapes. No artifacts.
+- **Build:** router1, all six on seed 1. HD Analog 86.01, HD HDMI 86.61, HD Dual 83.42 MHz (worst HD 83.42);
+  7,068-7,078 LC, 15 EBR.

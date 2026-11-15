@@ -162,3 +162,20 @@ Working files are in `.heirloom_work/rb_shield/` (`notes.md`, `gfit.json`).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.5.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Bend-type:** K6 Etch adds the camera's (or the lattice's) luma to the field, so the bands, outlines and pillars
+  bend.
+- **Change:** the per-field etch gain constant 86 -> 108, so c_eg is 0 .. 107 (was 0 .. 85; x1.26 at 1023). This
+  adds no logic.
+  - The pixel path already had room: the nibble products stay under 12 bits, the etch sum is ≤ 27,285 (16 bits)
+    and the etch term ≤ 1,705.
+  - The field + etch wraps at 1024 px by design.
+  - Full Etch is now ~400 px per full luma (was 320).
+  - The K6 default of 100 % and the version (v0.5.2) were set by the orchestrator.
+  - The diag copy got the same change (its own SUMMARY.md).
+- **Look check:** `.heirloom_work/rb_shield/k6b/k6b_cmp.png` (720p60 dec 4, bear, K6 1023, glide bypassed in the
+  scratch copies). The picture is the same, with the blue bands bent further into the stripes. No wrap.
+- **Build:** router1, all six on seed 1. HD Analog 87.37, HD HDMI 84.63, HD Dual 84.63 MHz (worst HD 84.63);
+  6,642-6,670 LC, 12 EBR.

@@ -236,3 +236,17 @@ These numbers come from the four m-frames (t − 0.5 s to + 1.5 s) and the strip
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 450 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Bend-type:** K6 Etch bends the idol and its contours by the camera's (or the lattice's) luma.
+- **Change:** the per-field etch gain is eg + eg/4. c_eg widens 10 -> 11 bits (0 .. 1277, was 0 .. 1022), and the
+  etch-table fill reads c_eg(10 downto 2), so the step is at most 319.
+  - Table entries now reach |2552| h (13-bit signed table, range ±4095).
+  - The idol key and the contour field (p6_f, p6_fl) stay within ±6,647 (14-bit), so nothing wraps.
+  - Full Etch is now ~750 px per full luma (was 600). The Osc rides the same table, so it scales too.
+  - The K6 default of 100 % and the version (v0.1.2) were set by the orchestrator.
+- **Look check:** `.heirloom_work/rb_effigy/k6b/k6b_cmp.png` (720p60 dec 4, bear, K6 1023, glide bypassed in the
+  scratch copies). The picture is the same, with more yellow idol swelling into bright areas. No wrap.
+- **Build:** router1, all six on seed 1. HD Analog 84.40, HD HDMI 86.18, HD Dual 85.08 MHz (worst HD 84.40);
+  7,105-7,125 LC, 23 EBR.

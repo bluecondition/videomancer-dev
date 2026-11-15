@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Effigy v0.1.0 -- Heirloom (video clips), rebuilt from the clip still WIN_20231229_00_46_59 at 6.0 s.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The still: a yellow idol standing in the middle of the frame (a column of hexagonal blobs and a heart,
 -- mirrored about x = 1002), cut into windows by horizontal black bands whose halos glow dark red .. bright
@@ -173,7 +174,7 @@ architecture effigy of program_top is
     signal c_ml, c_mr : unsigned(6 downto 0) := to_unsigned(66, 7);  -- the same as mantissa << shift
     signal c_sl, c_sr : unsigned(2 downto 0) := to_unsigned(3, 3);
     signal c_thick : signed(8 downto 0) := (others => '0');          -- band half-height offset, vpx
-    signal c_eg   : unsigned(9 downto 0) := (others => '0');         -- etch gain (h per source step x 64)
+    signal c_eg   : unsigned(10 downto 0) := (others => '0');        -- etch gain (h per source step x 64), x1.25: 0 .. 1277
     signal c_sa, c_shs, c_stt : unsigned(9 downto 0) := to_unsigned(256, 10);   -- Burn: lines, halo, teeth (Q8)
     signal c_sh5  : unsigned(4 downto 0) := to_unsigned(8, 5);       -- halo scale, Q3
     signal c_t4   : unsigned(3 downto 0) := to_unsigned(5, 4);       -- tooth scale
@@ -702,7 +703,7 @@ begin
                         else c_mr <= v_m(6 downto 0); c_sr <= v_u(2 downto 0); end if;
                     when 130 => c_ilr <= f_acc(20 downto 9);
                     when 154 => z_q <= f_acc(19 downto 10);
-                    when 178 => c_eg <= f_acc(19 downto 10);
+                    when 178 => c_eg <= resize(f_acc(19 downto 10), 11) + resize(f_acc(19 downto 12), 11);   -- x1.25
                     when 180 =>
                         v_g := s_g(5)(12 downto 3);
                         if v_g < 410 then z_q <= v_g; else z_q <= v_g - 410; end if;
@@ -784,11 +785,11 @@ begin
             if s_zone = '1' and s_zc >= 1160 and s_zc < 1416 then
                 v_u := resize(s_zc - 1160, 11);
                 if v_u(7 downto 0) = 0 then v_et := (others => '0');
-                elsif v_u(7 downto 0) = 128 then v_et := -signed(resize(shift_left(resize(c_eg(9 downto 2), 18), 7), 18));
+                elsif v_u(7 downto 0) = 128 then v_et := -signed(resize(shift_left(resize(c_eg(10 downto 2), 18), 7), 18));
                 else v_et := et_v; end if;
                 et_we <= '1'; et_wa <= v_u(7 downto 0);
                 et_wd <= std_logic_vector(resize(shift_right(v_et, 4), 16));
-                et_v <= v_et + signed(resize(c_eg(9 downto 2), 18));
+                et_v <= v_et + signed(resize(c_eg(10 downto 2), 18));
             end if;
 
             s_gav_sr(0) <= g_avid;

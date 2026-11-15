@@ -16,7 +16,7 @@ package tiger_pkg is
     constant C_K5D : integer := 512;
     constant C_K6D : integer := 128;
     constant C_HDK : integer := 83700;
-    constant C_EGK : integer := 5857;
+    constant C_EGK : integer := 7321;
     constant C_CC : integer := 13688531;
     constant C_Y0L : integer := 881;
     constant C_LEAN0 : integer := 1771;

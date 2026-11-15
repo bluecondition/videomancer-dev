@@ -149,3 +149,20 @@ Working files are in `.heirloom_work/rb_marionette/` (`notes.md`, `contours.py`,
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 220 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Bend-type:** K6 Etch pulls the level down by the camera's (or the lattice's) luma, so the figures bend.
+- **Change:** the per-field source gain is 1.25 x (etch² >> 11), capped at 319 (was capped at 255).
+  - c_g widens 8 -> 9 bits. The cap still starts at K6 ~72 %, so 100 % is x1.25 the old top, and every lower
+    position is x1.25 too.
+  - The stage-4 high-nibble product widens from 4 x 8 to 5 x 8 bits (p4_srh 13 -> 14 bits).
+  - The sum already had room (|v_sr| ≤ 40,832; p5_sr ≤ 5,104 in 14 bits), and the level is clamped to 0 .. 4095
+    as before.
+  - The Osc scales by the same 1.25.
+  - The K6 default of 100 % and the version (v0.1.2) were set by the orchestrator.
+- **Look check:** `.heirloom_work/rb_marionette/k6b/k6b_cmp.png` (720p60 dec 4, bear, K6 1023, glide bypassed in the
+  scratch copies). The picture is the same, with the bodies narrowed further and more green / black shredding. No
+  wrap.
+- **Build:** router1, all six on seed 1. HD Analog 81.54, HD HDMI 84.03, HD Dual 83.69 MHz (worst HD 81.54);
+  7,151-7,183 LC, 21 EBR.

@@ -208,3 +208,21 @@ motion); `proto.py`, `imodel.py`, `sheet.py`.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 128 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+- **Mixed:** K6 (the step code K6/32, 0 .. 31) does two things.
+  - It brightens the dots, lm x g / 8. This is the camera image shown on the disc, so it is the picture part.
+  - It bends the tubes, lm x g x 4 off the tube phase. This is the bend part.
+- **Change (bend part only):** stage 5 now forms the tube-phase term as cam + cam/4, one 17-bit shift-add with the
+  result taken mod 2^16 like the phase.
+  - The dots still use lm x g / 8, unchanged.
+  - No new multiplier; latency unchanged.
+  - The Osc (3x the camera's level) bends the tubes 1.25x harder too.
+  - The K6 default of 100 % and the version (v0.1.3) were set by the orchestrator.
+- **Look check:** `.heirloom_work/rb_platter/k6b/k6b_cmp.png` (720p60 **dec 1**, bear, K6 1023). The disc and its
+  camera-brightened dots are unchanged, and the tubes around it bend and shred further.
+  - A dec-4 render (kept in `k6b/dec4/`) is not valid for this program: the disc is missing at decimation 4 in
+    both the old and the new code.
+- **Build:** router1, all six on seed 1. HD Analog 84.78, HD HDMI 81.08, HD Dual 79.13 MHz (worst HD 79.13);
+  7,119-7,139 LC, 24 EBR.
