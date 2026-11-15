@@ -1,0 +1,167 @@
+# Horologe - Kinetic, 2026-11-14.
+# A wall of analog clocks whose hands are choreographed by a travelling wave ("A Million Times").
+# See horologe.vhd, horologe.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 57
+program_id = "com.czartroniks.horologe"
+program_name = "Horologe"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Illusion", "Shape"]
+program_type = "processing"
+description = "A wall of clocks whose hands turn in a travelling wave; Spread runs lines and figures across it."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 499
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Shape"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 450
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Depth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 457
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Hands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 16
+initial_value = 160
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Smooth", "Snap"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Linear", "Radial"]
+initial_value_label = "Linear"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Dial"
+value_labels = ["Faces", "Hands"]
+initial_value_label = "Faces"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Grid"
+value_labels = ["Square", "Brick"]
+initial_value_label = "Square"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Scissor Wave"
+
+[[preset]]
+name = "Line Field"
+rotary_potentiometer_2 = 200
+rotary_potentiometer_3 = 520
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 32
+linear_potentiometer_12 = 220
+
+[[preset]]
+name = "Ripple Wall"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_3 = 500
+rotary_potentiometer_5 = 256
+rotary_potentiometer_6 = 288
+toggle_switch_8 = 1
+linear_potentiometer_12 = 380
+
+[[preset]]
+name = "Semaphore"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 800
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 720
+rotary_potentiometer_6 = 608
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Standing Figs"
+rotary_potentiometer_1 = 480
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 700
+rotary_potentiometer_5 = 768
+rotary_potentiometer_6 = 224
+toggle_switch_10 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Portrait Hands"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 350
+rotary_potentiometer_3 = 200
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 96
+linear_potentiometer_12 = 120

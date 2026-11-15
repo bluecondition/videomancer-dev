@@ -22,7 +22,7 @@ Flash from `out/rev_b/ron/kinetic/<name>.vmprog`; rebuild one with `./build_set.
 | 4 | [cafewall](cafewall/) | Café-wall illusion: offset brick rows whose straight mortar lines appear to tilt | Offset wave | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 87.2-97.9 MHz; 5,833 LC, 76 %, 11 EBR); not flashed |
 | 5 | snakes | Kitaoka "rotating snakes": rings that seem to turn while still, then really crawl | Drift, illusory to real | in progress |
 | 6 | [louver](louver/) | Slats turning in a wave, two-sided, lit like blinds | Twist: rigid slats to helices | pilot v0.1.0 built 2026-11-14 (router2, all six seed 1; HD 77.8-86.5 MHz; 7,021 LC, 91 %, 24 EBR); awaiting Ron's flash |
-| 7 | horologe | A wall of clock hands sweeping in phase patterns | Spread: chaos to synchronized figures | in progress |
+| 7 | [horologe](horologe/) | A wall of clock hands sweeping in phase patterns | Spread: chaos to synchronized figures | v0.1.0 built 2026-11-14 (router2; HD Analog seed 2, HD HDMI seed 4, HD Dual seed 3, SD seed 1; HD 77.1-81.4 MHz, seed-marginal; 6,972 LC, 91 %, 18 EBR); not flashed |
 | 8 | [cogwork](cogwork/) | A lattice of meshed gears counter-rotating | Speed and tooth count | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 86.4-89.0 MHz; 6,937 LC, 90 %, 18 EBR); not flashed |
 | 9 | [pendula](pendula/) | Dots orbiting per cell; phase gradients make them read as rolling rings | Phase gradient | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 92.4-98.7 MHz; 6,564 LC, 86 %, 21 EBR); not flashed |
 | 10 | pinwheel | Fan cells whose blade count and twist morph | Twist | in progress |
