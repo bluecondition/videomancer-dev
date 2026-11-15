@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Carpet v0.1.0 -- Heirloom phase 3 (video clips), from WIN_20230722_01_18_41 at 5.5 s.
+-- 2026-11-15: K6 camera top +25 % (Ron): etch^2 term z_a6 x 1.25 (13 bits), etch gain c_e 9 bits (max 319), etch path widened.
 --
 -- The still: a red / white / orange kaleidoscopic carpet on black.  Tall black-cored diamonds ringed in white and
 -- red stand in two columns (x 538 / 1483, period 945 px) above and below a mirror row (y 516); flat black lenses
@@ -134,7 +135,8 @@ architecture carpet of program_top is
     signal z_e    : signed(11 downto 0) := (others => '0');
     signal z_m0, z_mt : unsigned(15 downto 0) := to_unsigned(32768, 16);
     signal z_s0, z_s1, z_s2, z_s3, z_s4 : signed(3 downto 0) := (others => '0');
-    signal z_a5, z_a6 : unsigned(11 downto 0) := (others => '0');
+    signal z_a5 : unsigned(11 downto 0) := (others => '0');
+    signal z_a6 : unsigned(12 downto 0) := (others => '0');          -- etch^2 x 1.25 (K6 top +25 %)
     signal z_sp : unsigned(17 downto 0) := (others => '0');
     signal z_ph : unsigned(11 downto 0) := (others => '0');
     signal c_gapq : unsigned(7 downto 0) := to_unsigned(128, 8);
@@ -150,7 +152,7 @@ architecture carpet of program_top is
     signal c_gka, c_gkb, c_gk2b, c_gqa, c_gqb : unsigned(15 downto 0) := (others => '0');
     signal c_gft  : unsigned(15 downto 0) := (others => '0');
     signal c_j1, c_j2, c_j3 : unsigned(13 downto 0) := (others => '0');
-    signal c_e    : unsigned(7 downto 0) := (others => '0');
+    signal c_e    : unsigned(8 downto 0) := (others => '0');
     signal c_dfl  : unsigned(17 downto 0) := (others => '0');
     signal c_off  : unsigned(19 downto 0) := (others => '0');          -- ring flow, Q20 cycles
     signal c_gapo : unsigned(11 downto 0) := to_unsigned(1024, 12);    -- gap / 2, Q12
@@ -215,10 +217,10 @@ architecture carpet of program_top is
     signal p3_x1, p3_x2 : signed(20 downto 0) := (others => '0');
     signal p3_lm : unsigned(7 downto 0) := (others => '0');
     signal p4_p1, p4_p2 : signed(20 downto 0) := (others => '0');
-    signal p4_ea, p4_eb : unsigned(11 downto 0) := (others => '0');
+    signal p4_ea, p4_eb : unsigned(12 downto 0) := (others => '0');
     signal p5_f  : signed(20 downto 0) := (others => '0');
     signal p5_dom : std_logic := '0';
-    signal p5_le : unsigned(15 downto 0) := (others => '0');
+    signal p5_le : unsigned(16 downto 0) := (others => '0');
     signal p6_t  : signed(21 downto 0) := (others => '0');
     signal p6_dom : std_logic := '0';
     signal p7_fr : unsigned(9 downto 0) := (others => '0');
@@ -513,7 +515,7 @@ begin
                         if z_n3 = '0' then z_l3 <= signed(resize(f_acc(17 downto 8), 12));
                         else z_l3 <= -signed(resize(f_acc(17 downto 8), 12)); end if;
                     when 186 => z_a5 <= f_acc(19 downto 8);
-                    when 218 => z_a6 <= f_acc(19 downto 8);
+                    when 218 => z_a6 <= resize(f_acc(19 downto 8), 13) + resize(f_acc(19 downto 10), 13);   -- x 1.25, max 5110
                     when 250 => z_sp <= f_acc(17 downto 0);
 
                     -- exp lookups (2-clock ROM), each just before its slot: lg and l1 + lg (slot 7), l2 + lg (8),
@@ -585,7 +587,7 @@ begin
                     when 762 => c_j1   <= f_acc(30 downto 17);                     -- jitter step (Q12 per unit j)
                     when 763 => c_j2 <= c_j1(12 downto 0) & '0';
                     when 764 => c_j3 <= c_j1 + c_j2;
-                    when 794 => c_e    <= f_acc(25 downto 18);                     -- etch gain per luma, >> 1 in the path
+                    when 794 => c_e    <= f_acc(26 downto 18);                     -- etch gain per luma, >> 1 in the path (max 319)
                     when 826 => c_dfl  <= f_acc(27 downto 10);                     -- flow step per field (Q20)
                     when 830 =>                       -- steps per pixel = G xs / 2 (Q20 = G Q8 << 12 ... in R units)
                         case to_integer(s_xs) is
@@ -832,16 +834,16 @@ begin
             -- 4: + the line's V terms (which carry - gap / 2); etch nibble products
             p4_p1 <= p3_x1 + resize(l_v1, 21);
             p4_p2 <= p3_x2 + resize(l_v2, 21);
-            p4_ea <= resize(p3_lm(3 downto 0) * c_e, 12);
-            p4_eb <= resize(p3_lm(7 downto 4) * c_e, 12);
+            p4_ea <= resize(p3_lm(3 downto 0) * c_e, 13);
+            p4_eb <= resize(p3_lm(7 downto 4) * c_e, 13);
             -- 5: Min (the photo): F = min(P1, P2), diamonds where P1 wins; Max: F = max
             if p4_p1 <= p4_p2 then v_lt := '1'; else v_lt := '0'; end if;
             v_lt := v_lt xor s_max;
             if v_lt = '1' then p5_f <= p4_p1; else p5_f <= p4_p2; end if;
             p5_dom <= v_lt;
-            p5_le <= resize(p4_ea, 16) + shift_left(resize(p4_eb, 16), 4);
+            p5_le <= resize(p4_ea, 17) + shift_left(resize(p4_eb, 17), 4);
             -- 6: t = F + etch (- gap / 2 is in the V terms)
-            p6_t <= resize(p5_f, 22) + signed(resize(p5_le(15 downto 1), 22));
+            p6_t <= resize(p5_f, 22) + signed(resize(p5_le(16 downto 1), 22));
             p6_dom <= p5_dom;
             -- 7: ring group n = t >> 12 (diamonds: black in the core and beyond ND); frac(t + flow)
             v_fr := unsigned(p6_t(11 downto 0)) + c_off(19 downto 8);

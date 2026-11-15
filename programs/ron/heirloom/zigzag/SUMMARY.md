@@ -197,3 +197,11 @@ v0.1.1. Ron's rule for the Heirloom, Kinetic and Patchbay sets: K6 is the camera
   - SD shows the centre 4:3: 1440 virtual px, one and a half periods at the default, with the period and pitch
     unchanged.
   - The 16-px / 40-px video box is in real pixels, so the Video texture is slightly coarser at SD.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs the camera effect at the top of the knob is 25 % stronger.
+- **Classification.** Bend: K6 Camera sets the texture's (camera band-pass, or the Osc sines) bite into the ribbons, kT = key x T x gain, which displaces the colour fields.
+- **Change.** The gain law is x 1.25 at every K6 position: slot 10's constant 2051 became 2564 and the knee 78 became 98, so c_gain runs 0 .. 97 (50 %) .. 636 (was 0 .. 78 .. 508). c_gain went from 9 to 10 bits, the texture product p5_tg to 21 bits and p6_tg to 13 bits; kT stays 20 bits (|kT| <= 127 x 2534 < 2^19).
+- Look: `.heirloom_work/rb_zigzag/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
+- **Build.** v0.1.2, router1, all six configs on seed 1. HD worst 89.90 MHz (HD Analog 89.90, HD HDMI 91.52, HD Dual 91.99); SD 91.63–93.19 MHz; 5958–5968 / 7680 LC (78 %), 21 EBR.

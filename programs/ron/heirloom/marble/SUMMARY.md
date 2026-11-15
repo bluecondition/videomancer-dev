@@ -213,3 +213,11 @@ Working files: `.heirloom_work/rb_marble/` (`notes.md`, `proto7.py`, `imodel.py`
   - 720p is the same picture as 1080p.
   - SD shows the centre 4:3 (1440 virtual px), checked in the model against the 720p centre crop: the same arcs,
     lattice and figures, so about 3 bands across instead of 4.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs the camera effect at the top of the knob is 25 % stronger.
+- **Classification.** Bend: K6 scales the camera (or Osc) term that bends the lattice rings and swells the figures. K6 also sets the figure size, which is not camera-driven; it is unchanged.
+- **Change.** The camera gain c_cg is now 1.25 k6 / 128, 0 .. 9 (was k6 / 128, 0 .. 7), so the top is 9/7 = x 1.29, the nearest step. The camera term p5_cs is 11 bits; the downstream sums were checked (melt total <= 826, figure term <= 117).
+- Look: `.heirloom_work/rb_marble/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
+- **Build.** v0.1.1, router1. **HD Dual passed on seed 2** (router1 stalled seed 1 at the 600 s timeout, as noted above for router1 on this program); the other five configs on seed 1. HD worst 93.37 MHz (HD Analog 95.05, HD HDMI 94.54, HD Dual 93.37); SD 85.24–90.70 MHz; 6917–6936 / 7680 LC (90 %), 15 EBR.

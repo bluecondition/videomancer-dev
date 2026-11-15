@@ -4,6 +4,7 @@
 -- Cusp v0.6.0 -- Heirloom #17, rebuilt from the photo WIN_20230315_00_30_57;
 -- phase 2: the two row types are separate modules (own cusp rate, height,
 -- drift and pointing), the fine stripes scroll and curl, the rainbow cycles.
+-- 2026-11-15: K6 camera top +25 % (Ron): bend factor f_m6 x 1.25 (slot 5 constants 45 / 208 / 13 -> 56 / 260 / 16.25, max 199); the stripe curl unchanged.
 --
 -- The photo: rows of fine horizontal stripes (green / navy / blue above and
 -- below black cores; cyan / blue / navy in the orange rows) cut by repeating
@@ -525,10 +526,10 @@ begin
                     when 4  => v_g := s_g(5)(12 downto 3);
                                if v_g < 481 then m_a <= resize(v_g, 24); m_b <= to_unsigned(545, 18);
                                else m_a <= resize(v_g - 481, 24); m_b <= to_unsigned(1252, 18); m_h <= to_unsigned(256 * 1024, 24); end if;
-                    -- K6 Bend factor: 0 .. 13 (30 %, the photo default) .. 159
+                    -- K6 Bend factor: 0 .. 16 (30 %) .. 199 (x 1.25 of 0 .. 13 .. 159: K6 top +25 %)
                     when 5  => v_g := s_g(4)(12 downto 3);
-                               if v_g < 300 then m_a <= resize(v_g, 24); m_b <= to_unsigned(45, 18);
-                               else m_a <= resize(v_g - 300, 24); m_b <= to_unsigned(208, 18); m_h <= to_unsigned(13 * 1024, 24); end if;
+                               if v_g < 300 then m_a <= resize(v_g, 24); m_b <= to_unsigned(56, 18);
+                               else m_a <= resize(v_g - 300, 24); m_b <= to_unsigned(260, 18); m_h <= to_unsigned(16640, 24); end if;
                     when 6  => m_a <= resize(s_a4, 24);  m_b <= resize(s_a4, 18);
                     when 7  => m_a <= resize(f_sq, 24);  m_b <= to_unsigned(349, 18);
                     when 8  => m_a <= resize(f_m1, 24);  m_b <= resize(t_kx, 18);

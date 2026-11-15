@@ -189,3 +189,11 @@ Working files: `.heirloom_work/rb_serpent/` (`notes.md`, `proto_final.py`, `imod
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs the camera effect at the top of the knob is 25 % stronger.
+- **Classification.** Bend: K6 Etch sets how far the camera (or Osc) luma bends the colour field.
+- **Change.** The etch gain constant 97 became 121, so c_et is x 1.25 at every K6 position (top 387 -> 483, still 9 bits; the etch sum fits its 17 bits). The comparison was rendered at 720p decimation 1, since decimation 4 shows only the black top-left corner.
+- Look: `.heirloom_work/rb_serpent/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
+- **Build.** v0.1.2, router1. **HD Analog passed only on seed 2** (seed 1 missed); the other five configs on seed 1. HD worst 74.38 MHz, thin (HD Analog 74.38, HD HDMI 78.60, HD Dual 81.46); SD 73.49–83.76 MHz; 7089–7100 / 7680 LC (92 %), 18 EBR. iceunpack OK x6. (v0.1.0 was already thin: HD Dual 74.46.)

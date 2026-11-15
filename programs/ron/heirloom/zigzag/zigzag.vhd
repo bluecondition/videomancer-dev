@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Zigzag v0.1.0 -- Heirloom (phase 3), built from the clip still WIN_20230205_00_16_05 at 0.5 s.
+-- 2026-11-15: K6 camera top +25 % (Ron): camera gain c_gain x 1.25 (slot 10 constant 2051 -> 2564, knee 78 -> 98; 10 bits, max 636), texture path widened.
 --
 -- The still: a bright green ground, two rounded-top red zigzag bands (period 940.5 px, apexes at x 520 and 1460)
 -- and pale blue / white ribbons down every branch, meeting in V's at x 990; a smoky texture (camera / feedback
@@ -217,7 +218,7 @@ architecture zigzag of program_top is
     signal c_off  : unsigned(12 downto 0) := (others => '0');
     signal c_sr   : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal c_hwb  : unsigned(11 downto 0) := to_unsigned(717, 12);
-    signal c_gain : unsigned(8 downto 0) := (others => '0');
+    signal c_gain : unsigned(9 downto 0) := (others => '0');
     -- K6 Camera law operands (free-running from the glided K6): k <= 512: k x 312 (linear, gain k x 0.1526:
     -- 39 = the shipped Smoke 285 at 256, 78 at 512); k > 512: d x 3.375 d, d = k - 512, plus 78 (509 at 1023)
     signal c_kh  : std_logic := '0';
@@ -279,9 +280,9 @@ architecture zigzag of program_top is
     signal p4_f0, p4_fb0, p5_f0, p5_fb0, p6_f0, p6_fb0, p7_f0, p7_fb0, p8_fb0, p9_fb0 : unsigned(12 downto 0) := (others => '0');
     signal p4_t   : signed(9 downto 0) := (others => '0');
     signal p5_d1, p5_d2 : signed(14 downto 0) := (others => '0');
-    signal p5_tg  : signed(19 downto 0) := (others => '0');
+    signal p5_tg  : signed(20 downto 0) := (others => '0');
     signal p6_key : unsigned(6 downto 0) := (others => '0');
-    signal p6_tg  : signed(11 downto 0) := (others => '0');
+    signal p6_tg  : signed(12 downto 0) := (others => '0');
     signal p7_kt  : signed(19 downto 0) := (others => '0');
     signal p8_f1, p10_fbs : unsigned(12 downto 0) := (others => '0');
     signal p11_db, p12_db : unsigned(12 downto 0) := (others => '0');
@@ -494,7 +495,7 @@ begin
                     when 7  => z_fa <= resize(z_a(17 downto 0), 36);    z_fb <= to_unsigned(2715, 16);    -- rate
                     when 8  => z_fa <= to_unsigned(717, 36);            z_fb <= z_mt;                     -- ribbon half-width
                     when 9  => z_fa <= resize(c_ka, 36);                z_fb <= resize(c_kb, 16);         -- K6 camera law
-                    when 10 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(2051, 16);    -- gain
+                    when 10 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(2564, 16);    -- gain (x 1.25: K6 top +25 %)
                     when others => z_fa <= to_unsigned(C_RIB, 36);      z_fb <= resize(z_a(9 downto 0), 16);   -- table start: c |256 - sR|
                 end case;
             end if;
@@ -559,7 +560,7 @@ begin
                         end case;
                     when 266 => z_a <= f_acc(19 downto 0);                        -- K6 camera law product
                     when 290 =>
-                        if c_kh = '1' then c_gain <= f_acc(30 downto 22) + 78; else c_gain <= f_acc(30 downto 22); end if;
+                        if c_kh = '1' then c_gain <= f_acc(31 downto 22) + 98; else c_gain <= f_acc(31 downto 22); end if;
                         -- red table: entry i reads R at (c (256 - sR) + 8 i sR) >> 11 (Q8 sR); |256 - sR| for the product
                         if c_sr > 256 then z_a <= resize(c_sr - 256, 20); z_neg <= '1';
                         else z_a <= resize(to_unsigned(256, 10) - c_sr, 20); z_neg <= '0'; end if;
@@ -796,10 +797,10 @@ begin
             p5_f0 <= p4_f0; p5_fb0 <= p4_fb0;
             -- 6: key (7-bit over 1/32 unit), the texture in field units / 4 (12 bits)
             p6_key <= f_key(p5_d1, p5_d2);
-            p6_tg  <= p5_tg(17 downto 6);
+            p6_tg  <= p5_tg(18 downto 6);
             p6_f0 <= p5_f0; p6_fb0 <= p5_fb0;
             -- 7: key x texture (the B field's copy comes back from the ring 36 virtual px later)
-            p7_kt <= signed('0' & p6_key) * p6_tg;
+            p7_kt <= resize(signed('0' & p6_key) * p6_tg, 20);              -- |kT| <= 127 x 2534 < 2^19
             p7_f0 <= p6_f0; p7_fb0 <= p6_fb0;
             -- 8: the R / G field: + kT / 128
             v_f := unsigned(resize(signed('0' & p7_f0), 14) + resize(p7_kt(19 downto 7), 14));

@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Marble v0.1.0 -- Heirloom (phase 3), built from the clip still WIN_20230914_01_59_34 at 4.0 s.
+-- 2026-11-15: K6 camera top +25 % (Ron): camera gain c_cg = 1.25 k6 / 128 (0 .. 9, was k6 / 128, 0 .. 7), camera term 11 bits; figure size unchanged.
 --
 -- The still: curved cream bands with cyan nested-rhombus chevrons alternating with yellow / orange / red bands,
 -- a green fringe on every cream band's leading edge, and blue-outlined dark figures in the warm bands; the arcs
@@ -193,7 +194,7 @@ architecture marble of program_top is
     signal c_h00, c_v00, c_v0d : unsigned(19 downto 0) := (others => '0');
     signal c_gr   : unsigned(9 downto 0) := to_unsigned(256, 10);     -- rings gain (Q8)
     signal c_q0   : unsigned(8 downto 0) := to_unsigned(248, 9);      -- figure threshold (Q8)
-    signal c_cg   : unsigned(2 downto 0) := to_unsigned(4, 3);        -- camera / Osc gain (/4)
+    signal c_cg   : unsigned(3 downto 0) := to_unsigned(5, 4);        -- camera / Osc gain (/4), 1.25 k6 / 128
     signal c_vg   : unsigned(2 downto 0) := (others => '0');          -- vein gain
     signal c_yfs  : unsigned(15 downto 0) := to_unsigned(60, 16);     -- y / 1080 step per line (Q16)
     signal c_mdx1, c_mdx2, c_mdx3, c_wxs, c_oxs : signed(15 downto 0) := (others => '0');   -- per pixel (Q16)
@@ -258,7 +259,7 @@ architecture marble of program_top is
     signal p4_src : signed(8 downto 0) := (others => '0');
     signal p5_m   : signed(9 downto 0) := (others => '0');
     signal p5_dlg, p6_dlg : unsigned(9 downto 0) := (others => '0');
-    signal p5_cs  : signed(9 downto 0) := (others => '0');
+    signal p5_cs  : signed(10 downto 0) := (others => '0');
     signal p6_mt  : signed(11 downto 0) := (others => '0');
     signal p6_mtt : signed(10 downto 0) := (others => '0');
     signal p6_ct  : signed(7 downto 0) := (others => '0');
@@ -354,6 +355,7 @@ begin
         variable v_d  : signed(10 downto 0);
         variable v_e  : signed(10 downto 0);
         variable v_dd : unsigned(9 downto 0);
+        variable v_cg : unsigned(10 downto 0);
         variable v_x  : unsigned(15 downto 0);
         variable v_t  : unsigned(15 downto 0);
         variable v_dr : signed(19 downto 0);
@@ -569,7 +571,8 @@ begin
                                 v_d := 512 - signed(resize(s_g6(12 downto 3), 11));
                                 v_e := 248 + shift_right(v_d, 2) - shift_right(v_d, 5) + shift_right(v_d, 8);
                                 c_q0 <= unsigned(v_e(8 downto 0));
-                                c_cg <= s_g6(12 downto 10);
+                                v_cg := resize(s_g6(12 downto 3), 11) + resize(s_g6(12 downto 5), 11);   -- 1.25 k6 (K6 top +25 %)
+                                c_cg <= v_cg(10 downto 7);
                                 -- vein: (p12 - 600) / 64, floored at 0
                                 if s_gp(12 downto 3) > 600 then v_dd := s_gp(12 downto 3) - 600; c_vg <= v_dd(8 downto 6); else c_vg <= (others => '0'); end if;
                         end case;
@@ -825,7 +828,7 @@ begin
             p5_m <= shift_right(p4_s3, 1) + shift_right(p4_s3, 3) + shift_right(p4_s3, 5) + shift_right(p4_s3, 6);
             p5_dlg <= p4_dh(14 downto 5);
             v_pr := resize(p4_src * signed('0' & c_cg), 15);
-            p5_cs <= v_pr(11 downto 2);
+            p5_cs <= v_pr(12 downto 2);
             p5_u <= p4_u; p5_wg <= p4_wg; p5_q <= p4_q;
             -- 6: melt term (x the per-line gain), M total, the source's lattice term, the vein (M x gain)
             p6_mt <= p5_m(9 downto 4) * signed('0' & l_gm);

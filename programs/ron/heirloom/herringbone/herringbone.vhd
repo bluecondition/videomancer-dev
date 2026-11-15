@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Herringbone v0.1.0 -- Heirloom (phase 3, video clips), from the still WIN_20231119_00_47_47 at 0.5 s.
+-- 2026-11-15: K6 camera top +25 % (Ron): etch gain constant 4789 -> 5986 (c_eg x 1.25, max 5974 of 13 bits).
 --
 -- The still: horizontal bands that alternate lavender / blue and cyan / navy, each filled with soft
 -- vertical stripes that lean one way in one band and the other way in the next (a herringbone zigzag,
@@ -447,7 +448,7 @@ begin
                     when 9  => z_fa <= resize(z_vsq, 38);              z_fb <= to_unsigned(3239, 16);      -- roll step
                     when 10 => z_fa <= resize(s_ys, 38);               z_fb <= to_unsigned(3748, 16);      -- psi step
                     when 11 => z_fa <= resize(s_g6(12 downto 3), 38);  z_fb <= resize(s_g6(12 downto 3), 16);  -- etch^2
-                    when others => z_fa <= resize(z_k6, 38);           z_fb <= to_unsigned(4789, 16);      -- etch gain
+                    when others => z_fa <= resize(z_k6, 38);           z_fb <= to_unsigned(5986, 16);      -- etch gain (x 1.25: K6 top +25 %)
                 end case;
             end if;
             if z_ld = '1' then

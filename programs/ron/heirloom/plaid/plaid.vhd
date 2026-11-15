@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Plaid v0.1.0 -- Heirloom (phase 3, video clips), from the still WIN_20231204_23_13_02 at 5.5 s.
+-- 2026-11-15: K6 camera top +25 % (Ron): dye gain constant 494 -> 618 (c_dye x 1.25, 10 bits, max 616), dye partials 14 bits.
 --
 -- The still: a woven plaid.  A smooth colour field (yellow / white on the left through orange to red on the
 -- right; warm at the top, a cool white / cyan / teal zone low in the middle) shows through a grid of cells:
@@ -245,7 +246,7 @@ architecture plaid of program_top is
     signal c_dw   : unsigned(16 downto 0) := to_unsigned(15252, 17);  -- colour W step per line, Q24
     signal c_dpc, c_dpd : unsigned(8 downto 0) := (others => '0');   -- sine phase steps per line, Q16
     signal c_pdb  : unsigned(15 downto 0) := (others => '0');
-    signal c_dye  : unsigned(8 downto 0) := to_unsigned(123, 9);      -- dye gain, Q16 W per luma step
+    signal c_dye  : unsigned(9 downto 0) := to_unsigned(154, 10);     -- dye gain, Q16 W per luma step
     signal c_o1   : unsigned(22 downto 0) := (others => '0');         -- slow weft offset, Q12 lines
     signal c_o2   : unsigned(23 downto 0) := (others => '0');         -- fast weft offset, Q12 lines
     signal c_w0   : unsigned(23 downto 0) := (others => '0');         -- colour scroll, Q24
@@ -323,7 +324,7 @@ architecture plaid of program_top is
     signal p2_lm   : unsigned(7 downto 0) := (others => '0');
     signal p3_gap, p3_frg, p3_mh : std_logic := '0';
     signal p3_w, p4_w, p5_w : unsigned(15 downto 0) := (others => '0');
-    signal p3_ea, p3_eb : unsigned(12 downto 0) := (others => '0');
+    signal p3_ea, p3_eb : unsigned(13 downto 0) := (others => '0');
     signal p3_ws, p3_wf : signed(7 downto 0) := (others => '0');
     signal p4_et   : unsigned(16 downto 0) := (others => '0');
     signal s_gi, s_gc : t_u5a(3 to 5) := (others => (others => '0'));
@@ -566,7 +567,7 @@ begin
                     when 10 => z_fa <= resize(z_b40, 38);               z_fb <= resize(m_x0q, 16);    -- b x0^2
                     when 11 => z_fa <= resize(m_ck, 38);                z_fb <= resize(c_st, 16);     -- slave rate
                     when 12 => z_fa <= resize(s_g6(12 downto 3), 38);   z_fb <= resize(s_g6(12 downto 3), 16);  -- k6^2
-                    when 13 => z_fa <= resize(z_g6sq, 38);              z_fb <= to_unsigned(494, 16); -- dye gain
+                    when 13 => z_fa <= resize(z_g6sq, 38);              z_fb <= to_unsigned(618, 16); -- dye gain (x 1.25: K6 top +25 %)
                     when 14 => z_fa <= resize(s_vm, 38);                z_fb <= resize(s_vm, 16);     -- speed^2
                     when 15 => z_fa <= resize(z_vsq, 38);               z_fb <= to_unsigned(8203, 16);   -- slow weft step
                     when 16 => z_fa <= resize(c_dens, 38);              z_fb <= resize(s_ys, 16);        -- weft per line
@@ -671,7 +672,7 @@ begin
                     when 306 => c_phi0 <= z_ph + f_acc(33 downto 0);
                     when 330 => c_ks <= resize(f_acc(35 downto 16), 24);        -- k st >> 12, Q28 -> Q24
                     when 354 => z_g6sq <= f_acc(19 downto 0);
-                    when 378 => c_dye <= f_acc(28 downto 20);
+                    when 378 => c_dye <= f_acc(29 downto 20);
                     when 402 => z_vsq <= f_acc(17 downto 0);
                     when 426 => c_s1 <= f_acc(31 downto 16);
                     when 450 => c_du <= f_acc(27 downto 8);
@@ -961,8 +962,8 @@ begin
             if p2_dist >= l_hwf then p3_frg <= '1'; else p3_frg <= '0'; end if;
             p3_mh <= p2_mh;
             p3_w <= l_wl + resize(p2_sm, 16);
-            p3_ea <= resize(p2_lm(3 downto 0) * c_dye, 13);
-            p3_eb <= resize(p2_lm(7 downto 4) * c_dye, 13);
+            p3_ea <= resize(p2_lm(3 downto 0) * c_dye, 14);
+            p3_eb <= resize(p2_lm(7 downto 4) * c_dye, 14);
             s_gi(3) <= p2_gi; s_ga(3) <= p2_ga; s_gc(3) <= p2_gc;
             p3_ws <= signed(r_ws_q); p3_wf <= signed(r_wf_q);     -- fabric copies (constant along the line)
             -- 4: weft bar = slow OR fast (distance + bias > 0); dye sum

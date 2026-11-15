@@ -253,3 +253,11 @@ stays visible at any P12.
   - SD shows the centre 4:3 (x 240–1680 virtual px) with the same rows, columns and bands. It is softer, because
     the boxes work per output pixel.
   - P12 near 100 % (fine tartan) aliases at SD.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs the camera effect at the top of the knob is 25 % stronger.
+- **Classification.** Element: K6 Dye shifts the colour field's index by the camera (or Osc) luma, recolouring the plaid.
+- **Change.** The dye constant 494 became 618, so c_dye is x 1.25 at every K6 position. c_dye went from 9 to 10 bits (top 493 -> 616) and the dye partials from 13 to 14 bits; the sum is still taken modulo one colour cycle.
+- Look: `.heirloom_work/rb_plaid/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
+- **Build.** v0.1.1, router1, all six configs on seed 1. HD worst 79.45 MHz (HD Analog 81.49, HD HDMI 79.45, HD Dual 80.98); SD 74.16–87.32 MHz; 7042–7053 / 7680 LC (92 %), 22 EBR.

@@ -155,3 +155,11 @@ Measured in `.heirloom_work/rb_terrace/` (m1–m8.py, fit_fb.py, shape.py; notes
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K3 (Bend), so K3 and K6 swapped: **K6 = Bend** (the camera strength, default now 512 = 50 %), **K3 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 89.62 MHz (HD Analog 89.62, HD HDMI 97.85, HD Dual 99.07), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh terrace`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs the camera effect at the top of the knob is 25 % stronger.
+- **Classification.** Bend (camera part only): K6 Bend sets both the column bend (not camera-driven) and the depth of the camera's step shift.
+- **Change.** The camera gain constant (slot 20) 1197 became 1496, so f_gvv is x 1.25 at every K6 position (top 9548 -> 11933 of 14 bits; the source sum fits its 22 bits). The column bend and everything else K6 drives are unchanged.
+- Look: `.heirloom_work/rb_terrace/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
+- **Build.** v0.5.3, router1, all six configs on seed 1. HD worst 91.21 MHz (HD Analog 93.80, HD HDMI 99.97, HD Dual 91.21); SD 94.92–100.99 MHz; 6847–6868 / 7680 LC (89 %), 7 EBR.

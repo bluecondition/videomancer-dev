@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Terrace v0.5.0 -- Heirloom #11, rebuilt 2026-10-21 from WIN_20230305_23_38_39.
+-- 2026-11-15: K6 camera top +25 % (Ron): camera bend gain constant 1197 -> 1496 (f_gvv x 1.25, max 11933 of 14 bits); the column bend unchanged.
 --
 -- The photo: a strict grid of flat blocks, 25 rows (42.98 lines, the top row
 -- stretched to 54) by 2.72 tiles of 6 columns (705.95 px a tile, the columns
@@ -418,7 +419,7 @@ begin
                     when 17 => m_a <= resize(f_leanu, 24);             m_b <= f_kf;
                     when 18 => m_a <= resize(f_va, 24);                m_b <= resize(f_m, 16);
                     when 19 => m_a <= resize(f_s4sq, 24);              m_b <= to_unsigned(34953, 16);
-                    when others => m_a <= resize(f_am, 24);            m_b <= to_unsigned(1197, 16);
+                    when others => m_a <= resize(f_am, 24);            m_b <= to_unsigned(1496, 16);   -- camera gain x 1.25 (K6 top +25 %)
                 end case;
             end if;
             if q_st = '1' then

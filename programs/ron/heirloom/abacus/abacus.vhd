@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Abacus v0.6.3 -- Heirloom #42, rebuilt from the photo WIN_20230605_01_03_50.
+-- 2026-11-15: K6 camera top +25 % (Ron): Etch gain s_e x 1.25 (state 229), 1.5 k6 / 4 -> 1.875 k6 / 4, max 477.
 --
 -- The photo: rows of glossy red beads between wavy blue/green bands, one bead
 -- every 188 px (10.2 across), the rows mirrored about the bead-row centres
@@ -187,6 +188,7 @@ architecture abacus of program_top is
     signal s_c0   : unsigned(10 downto 0) := to_unsigned(512, 11);           -- 512 + Swell
     signal s_sv, s_sw : signed(10 downto 0) := (others => '0');
     signal s_e    : unsigned(8 downto 0) := to_unsigned(40, 9);              -- Etch gain (Q6)
+    signal s_e0   : unsigned(8 downto 0) := to_unsigned(32, 9);              -- Etch gain before the x1.25
     -- bead warps: Width a0 (1/512 of a 0.75 bead-size factor), Height b0 (Q10);
     -- bead pulses: Slide / Roll depth (s' levels), phase (16 bits, 3/8 cycle per
     -- bead / row), the top row's 3r mod 8; Flip glide level
@@ -585,8 +587,9 @@ begin
                     if s_sv > 0 then s_sw <= s_sv - shift_right(s_sv, 2);
                     else s_sw <= shift_right(s_sv, 1); end if;
                 when 227 => s_c0 <= unsigned(to_signed(512, 11) + s_sw);
-                -- Etch: 1.5 k6 / 4 (Q6)
-                when 228 => s_e <= resize(s_g6(12 downto 5), 9) + resize(s_g6(12 downto 6), 9);
+                -- Etch: 1.5 k6 / 4 (Q6), then x 1.25 (K6 top +25 %): max 382 + 95 = 477
+                when 228 => s_e0 <= resize(s_g6(12 downto 5), 9) + resize(s_g6(12 downto 6), 9);
+                when 229 => s_e <= s_e0 + shift_right(s_e0, 2);
                 -- bead pulses: depth 4 |speed| up to 255 s' levels (full from 64 knob steps off the
                 -- still zone); Height b0 = 2 (k2 - 512)
                 when 230 =>

@@ -211,3 +211,11 @@ knob stays visible at P12 = 0.
   - SD shows the centre 4:3 (x 240–1680 virtual px) with the same bands. Edges there are softer, because the
     boxes work per output pixel.
   - P12 near 100 % and K1 near 0 alias at SD.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs the camera effect at the top of the knob is 25 % stronger.
+- **Classification.** Bend: K6 Etch sets how far the camera (or Osc) luma pushes the stripes sideways.
+- **Change.** The etch gain constant 4789 became 5986, so c_eg is x 1.25 at every K6 position (top 4779 -> 5974 of 13 bits; the etch sum still fits its 21 bits and the phase add stays modulo one cycle).
+- Look: `.heirloom_work/rb_herringbone/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
+- **Build.** v0.1.1, router1, all six configs on seed 1. HD worst 100.14 MHz (HD Analog 103.37, HD HDMI 108.38, HD Dual 100.14); SD 101.10–104.81 MHz; 5974–5986 / 7680 LC (78 %), 12 EBR.

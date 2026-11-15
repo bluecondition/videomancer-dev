@@ -268,3 +268,11 @@ Integer model: `.heirloom_work/rb_cusp/imodel6.py` (`GUARD=0` shows the unguarde
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.6.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs the camera effect at the top of the knob is 25 % stronger.
+- **Classification.** Bend: K6 Bend scales how far the camera (or Osc) luma bends the cusps.
+- **Change.** The bend factor f_m6 is x 1.25 at every K6 position: slot 5's constants 45 / 208 / 13 became 56 / 260 / 16.25, so the factor runs 0 .. 16 (30 %) .. 199 (was 0 .. 13 .. 159; 8 bits). The stripe curl above 30 % is not camera-driven and is unchanged.
+- Look: `.heirloom_work/rb_cusp/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
+- **Build.** v0.6.3, router1, all six configs on seed 1. HD worst 78.49 MHz (HD Analog 81.77, HD HDMI 78.49, HD Dual 81.08); SD 80.66–81.45 MHz; 7418–7441 / 7680 LC (97 %, as the previous build's 7431–7444), 11 EBR.

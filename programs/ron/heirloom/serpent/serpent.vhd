@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Serpent v0.1.0 -- Heirloom phase 3 (video clips), from the clip WIN_20230529_01_27_21 at 0.5 s.
+-- 2026-11-15: K6 camera top +25 % (Ron): etch gain constant 97 -> 121 (c_et x 1.25, max 483 of 9 bits).
 --
 -- The still: a coiled ribbon (an S) on black.  Its colours are one field u per line, a horizontal ramp whose
 -- offset and gain are vertical CVs: green is a sawtooth of u (hard edge, slow ramp), red and blue a diagonal
@@ -552,7 +553,7 @@ begin
                     when 21 => z_fa <= resize(c_cphr, 26);       z_fb <= to_unsigned(37, 16);         -- - 18.5 px
                     when 22 => z_fa <= resize(s_vm, 26);        z_fb <= resize(s_vm, 16);            -- speed^2
                     when 23 => z_fa <= resize(s_g6(12 downto 3), 26); z_fb <= resize(s_g6(12 downto 3), 16);   -- etch^2
-                    when 24 => z_fa <= z_t;                     z_fb <= to_unsigned(97, 16);
+                    when 24 => z_fa <= z_t;                     z_fb <= to_unsigned(121, 16);        -- etch gain (x 1.25: K6 top +25 %)
                     when 25 =>                                                                            -- holes
                         if z_hhi = '1' then z_fa <= resize(s_g5(12 downto 3) - 512, 26);
                         else z_fa <= resize(s_g5(12 downto 3), 26); end if;
