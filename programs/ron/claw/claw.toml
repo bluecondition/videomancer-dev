@@ -1,0 +1,117 @@
+# CLAW
+#
+# An arcade claw machine seen through the glass: marquee with chasing bulbs,
+# gantry + three-prong chrome claw, a heaped pile of video-toy prizes, an
+# acrylic prize chute and the cabinet base.  v0.1.0 = proof of concept
+# (static scene + claw motion); see DESIGN.md for the roadmap.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.claw"
+program_name = "Claw"
+program_version = "0.5.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Game", "Pattern"]
+program_type = "processing"
+description = "Arcade claw machine through the glass: gantry claw, heaped pile of video-toy prizes, acrylic chute, chasing bulbs"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Gantry X"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Depth"
+value_labels = ["Front", "Middle", "Back"]
+initial_value_label = "Front"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Grip"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Cabinet"
+value_labels = ["Classic", "Neon", "Jackpot", "Vaporwave", "Mint", "Studio"]
+initial_value_label = "Classic"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Rig Odds"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Drop"
+value_labels = ["A", "B"]
+initial_value_label = "A"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mode"
+value_labels = ["Manual", "Auto"]
+initial_value_label = "Manual"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Grab"
+value_labels = ["Auto-close", "Manual"]
+initial_value_label = "Auto-close"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Video"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Rigged"
+value_labels = ["Honest", "Rigged"]
+initial_value_label = "Honest"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Cable"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Classic"
+
+[[preset]]
+name = "Neon Grab"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_5 = 256
+linear_potentiometer_12 = 223

@@ -1,0 +1,166 @@
+# Rutt Etra XY — Rutt-Etra scan processor with horizontal AND vertical
+# displacement.
+#
+# Incoming video is redrawn as luma-displaced scan lines (Rutt Etra), and the
+# Mode knob opens the displacement up to both axes: the lines pushed
+# diagonally (Slant), the same with rungs joining them into a wire mesh
+# (Mesh), a second family of vertical lines pushed sideways and woven over
+# the first (Weave), or every point pushed out from the picture centre by its
+# brightness (Zoom).  P12 RELIEF is the performance control.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.ruttetra_xy"
+program_version = "0.2.1"
+abi_version = ">=1.0,<2.0"
+program_name = "Rutt Etra XY"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pixel", "Edges", "Tube"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Rutt-Etra scan processor displaced on both axes: slant, wire mesh, woven lines, or luma zoom."
+url = "https://github.com/lzxindustries/videomancer-community-programs"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scan Lines"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 612
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Thickness/Glow"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 469
+display_float_digits = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Line Color"
+value_labels = ["White", "Green", "Amber", "Cyan", "Magenta", "Video", "Fire", "Terrain"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Contrast"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 200
+initial_value = 743
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Mode"
+value_labels = ["Mesh <", "Slant <<", "Slant <", "Classic", "Slant >", "Slant >>", "Mesh >", "Weave", "Zoom"]
+initial_value_label = "Weave"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Smoothing"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 257
+display_float_digits = 0
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Peaks"
+value_labels = ["Bright", "Dark"]
+initial_value_label = "Dark"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Hidden Line"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Shading"
+value_labels = ["Banded", "Luma"]
+initial_value_label = "Banded"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Roll"
+value_labels = ["Run", "Freeze"]
+initial_value_label = "Run"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Input"
+value_labels = ["Positive", "Negative"]
+initial_value_label = "Positive"
+
+# --- Performance Slider ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Relief"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 55
+display_float_digits = 0
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Woven Net"
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 192
+rotary_potentiometer_5 = 853
+linear_potentiometer_12 = 650
+
+[[preset]]
+name = "Wire Mesh"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_3 = 960
+rotary_potentiometer_5 = 740
+rotary_potentiometer_6 = 450
+linear_potentiometer_12 = 820
+
+[[preset]]
+name = "Sidelong"
+rotary_potentiometer_3 = 704
+rotary_potentiometer_5 = 626
+rotary_potentiometer_6 = 600
+linear_potentiometer_12 = 500
+
+[[preset]]
+name = "Classic"
+rotary_potentiometer_3 = 704
+rotary_potentiometer_5 = 398
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Lean Fire"
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 832
+rotary_potentiometer_5 = 284
+toggle_switch_7 = 0
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Luma Zoom"
+rotary_potentiometer_3 = 704
+rotary_potentiometer_5 = 967
+rotary_potentiometer_6 = 450
+linear_potentiometer_12 = 700
