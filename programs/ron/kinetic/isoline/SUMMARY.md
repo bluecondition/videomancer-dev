@@ -77,6 +77,9 @@ under the islands. The source field lags the picture a little to the right and b
 
 ## Status
 
+**Shipped vmprog: the ROUTER1 rebuild of 2026-11-14** (same sources). Post-route Fmax: HD Analog 76.96 MHz; SD Analog 83.15 MHz; HD HDMI 88.62 MHz; SD HDMI 80.59 MHz; HD Dual 80.85 MHz; SD Dual 81.49 MHz. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic isoline`. The router2 figures below are the first build, kept for the record; it was timing-marginal.
+
+
 - v0.1.0 built 2026-11-14 through the shared queue, router2 (the builder default). Not flashed.
 - Post-route Fmax (HD needs 74.25, SD 27):
 
