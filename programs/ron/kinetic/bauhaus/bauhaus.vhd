@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Bauhaus v0.1.0 -- Kinetic.
+-- Bauhaus v0.1.1 -- Kinetic.
 --
 -- A grid of shape tiles (Bauhaus geometric posters, generative "shape tile" grids): every cell holds one
 -- primitive in two flat palette colours.
@@ -24,8 +24,9 @@
 --   K2  Shape    figure inset: full-bleed .. 40 % of the cell with margins
 --   K3  Mix      curved motifs .. straight motifs
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
---   K5  Spread   phase step per cell 0 .. 1/2 cycle (square law)
---   K6  Colour   the 16 shared palettes
+--   K5  Colour   the 16 shared palettes (was K6; Spread is fixed at 354 = phase step per cell, square law)
+--   K6  Camera   camera / Osc strength: 0 % = the poster alone, 0 .. 25 % a gain (25 % = v0.1.0), past 25 % a
+--                contrast about the middle level (50 % = x 2, 100 % = x 4), glided
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Gutters  Off / On (ground lines between the cells)
@@ -42,6 +43,7 @@
 --   [F] output conditioning: luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1] with resync, luma 13/16, blanking gate
 -- One latency (C_LAT = 42) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 354 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -54,6 +56,7 @@ use work.bauhaus_pkg.all;
 use work.all;
 
 architecture bauhaus of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(354, 10));   -- K6 camera pass: fixed knob
     constant C_NP       : integer := 35;      -- pixel stages up to the colour register
     constant C_LAT      : integer := 42;      -- = processing_delay_clks = C_NP + 7
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
@@ -245,6 +248,21 @@ architecture bauhaus of program_top is
     signal m_done : std_logic := '0';
     signal m_sr  : std_logic_vector(3 to 7) := (others => '0');
     signal s_cs  : std_logic_vector(3 to 14) := (others => '0');
+    -- K6 Camera (2026-11-15): glided knob (Q3); level = (held x c_cg - c_off) / 256, gated-sum product
+    signal c6_g  : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal c6_d  : signed(13 downto 0) := (others => '0');
+    signal c6_t  : unsigned(12 downto 0) := (others => '0');
+    signal c_cg  : unsigned(6 downto 0) := to_unsigned(40, 7);
+    signal c6_e  : unsigned(6 downto 0) := to_unsigned(20, 7);
+    signal c_off : unsigned(12 downto 0) := to_unsigned(1800, 13);
+    signal c_chi : std_logic := '1';
+    signal k_kl  : signed(15 downto 0) := (others => '0');
+    signal k_lv  : unsigned(3 downto 0) := (others => '0');
+    signal k_pa, k_pb, k_pc : unsigned(9 downto 0) := (others => '0');
+    signal k_pd  : unsigned(7 downto 0) := (others => '0');
+    signal k_qa  : unsigned(11 downto 0) := (others => '0');
+    signal k_qb  : unsigned(10 downto 0) := (others => '0');
+    signal k_kg  : unsigned(14 downto 0) := (others => '0');
 
     -- [D] wave engine: line registers and pixel accumulators
     signal ls_y, ls_yn, l_y : signed(26 downto 0) := (others => '0');
@@ -456,8 +474,8 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- Colour: 16 palettes with hysteresis
-                v_d := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(s_pal & "100000", 11));
-                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(5)(9 downto 6)); end if;
+                v_d := signed(resize(unsigned(registers_in(4)), 11)) - signed(resize(s_pal & "100000", 11));
+                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(4)(9 downto 6)); end if;
             end if;
             g_wm1 <= s_w - 1;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
@@ -504,7 +522,7 @@ begin
                 case to_integer(z_sel) is
                     when 0  => z_fa(12 downto 0) <= s_g1;                 z_fb <= to_unsigned(801, 24);       -- pitch exponent
                     when 1  =>                                                                                -- spread^2
-                        z_fa(9 downto 0) <= unsigned(registers_in(4)); z_fb(9 downto 0) <= unsigned(registers_in(4));
+                        z_fa(9 downto 0) <= unsigned(C_KFIX_5); z_fb(9 downto 0) <= unsigned(C_KFIX_5);
                     when 2  => z_fa(22 downto 0) <= c_ip;                 z_fb <= resize(s_ys, 24);           -- cells per line
                     when 3  => z_fa(15 downto 0) <= c_du;                 z_fb <= resize(s_w(11 downto 1) - 4, 24);   -- first pixel
                     when 4  => z_fa(17 downto 0) <= c_dv;                 z_fb <= resize(f_half(s_tid), 24);  -- first line
@@ -553,6 +571,23 @@ begin
                     when 25 => c_hi <= not c_m;
                     when 26 => z_k2 <= resize(unsigned(registers_in(2)) & "0000", 16) + resize(unsigned(registers_in(2)), 16);
                     when 27 => c_thr <= z_k2(14 downto 10);
+                    -- K6 Camera: glide (1/8 of the gap per field, +-4 deadband), then the law: gain c_cg = 5k / 64
+                    -- (0 .. 79; 20 = v0.1.0 at k = 256).  Up to 256 a plain gain (fades the halftone in from the
+                    -- poster); past 256 a contrast about level 7 (held 90): c_off = (c_cg - 20) x 90, level >= 1
+                    when 40 => c6_d <= signed(resize(unsigned(registers_in(5)) & "000", 14)) - signed(resize(c6_g, 14));
+                    when 41 =>
+                        if C_SIM_SNAP then null;
+                        elsif c6_d > 32 or c6_d < -32 then c6_d <= shift_right(c6_d, 3);
+                        else c6_d <= (others => '0'); end if;
+                    when 42 => c6_g <= unsigned(signed(c6_g) + c6_d(12 downto 0));
+                    when 43 => c6_t <= resize(c6_g(12 downto 3) & "00", 13) + resize(c6_g(12 downto 3), 13);
+                    when 44 => c_cg <= c6_t(12 downto 6);
+                    when 45 =>
+                        if c6_g(12 downto 11) = "00" then c6_e <= (others => '0'); c_chi <= '0';
+                        else c6_e <= c_cg - 20; c_chi <= '1'; end if;
+                    when 46 => c_off <= shift_left(resize(c6_e, 13), 6) + shift_left(resize(c6_e, 13), 4);
+                    when 47 => c_off <= c_off + shift_left(resize(c6_e, 13), 3);
+                    when 48 => c_off <= c_off + shift_left(resize(c6_e, 13), 1);
 
                     -- pitch: e = 0.25 + k1 * 3.13 octaves (Q8), P = 32 * 2^e, 2^-e
                     when 60 => z_e <= to_unsigned(64, 11) + resize(f_acc(23 downto 13), 11);
@@ -792,6 +827,20 @@ begin
             v_df := signed(resize(s_y1(11 downto 4), 9)) - signed(resize(k_filt, 9));
             if l_first = '1' then v_fn := s_y1(11 downto 4);
             else v_fn := unsigned(signed(k_filt) + resize(shift_right(v_df, 3), 8)); end if;
+            -- K6 Camera: held x c_cg as gated sums over three stages, the offset, the level (k_held is steady
+            -- for 10 clocks after a cell start; the level is read at s_cs(14), so k_lv is valid with 4 to spare)
+            k_pa <= f_gu(k_held, c_cg(0), 10) + shift_left(f_gu(k_held, c_cg(1), 10), 1);
+            k_pb <= f_gu(k_held, c_cg(2), 10) + shift_left(f_gu(k_held, c_cg(3), 10), 1);
+            k_pc <= f_gu(k_held, c_cg(4), 10) + shift_left(f_gu(k_held, c_cg(5), 10), 1);
+            k_pd <= f_gu(k_held, c_cg(6), 8);
+            k_qa <= resize(k_pa, 12) + shift_left(resize(k_pb, 12), 2);
+            k_qb <= resize(k_pc, 11) + shift_left(resize(k_pd, 11), 2);
+            k_kg <= resize(k_qa, 15) + shift_left(resize(k_qb, 15), 4);
+            k_kl <= signed(resize(k_kg, 16)) - signed(resize(c_off, 16));
+            if k_kl < 0 then k_lv <= (others => '0');
+            elsif k_kl(15 downto 12) /= "0000" then k_lv <= to_unsigned(15, 4);
+            else k_lv <= unsigned(k_kl(11 downto 8)); end if;
+            if c_chi = '1' and k_held >= 13 and (k_kl < 256) then k_lv <= to_unsigned(1, 4); end if;
             hl_wd <= std_logic_vector(k_held) & std_logic_vector(v_fn);
             hl_wa <= k_i;
             hl_we <= m_sr(7);
@@ -941,8 +990,6 @@ begin
     p_look : process(clk)
         variable v_x, v_h : unsigned(17 downto 0);
         variable v_fr  : unsigned(8 downto 0);
-        variable v_k5  : unsigned(10 downto 0);
-        variable v_l   : unsigned(4 downto 0);
         variable v_lp  : unsigned(3 downto 0);
         variable v_cap : unsigned(7 downto 0);
         variable v_p15 : unsigned(14 downto 0);
@@ -976,9 +1023,8 @@ begin
             if v_fr(8 downto 1) > 128 then q15_s <= to_unsigned(128, 8); else q15_s <= v_fr(8 downto 1); end if;
             -- the cell's source level (0 .. 15), latched as the cell start passes
             if s_cs(14) = '1' then
-                v_k5 := resize(k_held & "00", 11) + resize(k_held, 11);
-                v_l := v_k5(10 downto 6);
-                if v_l > 15 then q15_l <= to_unsigned(15, 4); else q15_l <= v_l(3 downto 0); end if;
+                -- K6 Camera: the level from k_lv (K6 = 25 %: held x 5 / 64 as in v0.1.0)
+                q15_l <= k_lv;
             end if;
             -- 16 .. 18: hash rounds 2 .. 4; the level by palette polarity (0 = no source) and its size cap
             v_x := q15_h xor shift_right(q15_h, 7);

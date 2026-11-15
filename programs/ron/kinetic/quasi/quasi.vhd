@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Quasi v0.1.0 -- Kinetic.  Quasicrystal interference: the sum of up to eight plane waves at the angles
+-- Quasi v0.1.1 -- Kinetic.  Quasicrystal interference: the sum of up to eight plane waves at the angles
 -- j * pi / N.  N = 5 draws Penrose-like ten-fold rosettes, N = 4 and 8 the Ammann-Beenker family, N = 3 a plain
 -- honeycomb; the contour bands of the sum are the picture.
 --
@@ -17,8 +17,9 @@
 --   K2  Shape    the colourizer: two-tone .. many contour bands (1 .. 15.5 bands per 4 wave amplitudes)
 --   K3  Depth    phason depth, square law, 0 .. 1 cycle
 --   K4  Rate     bipolar, centre = still (60 s per cycle .. 2 cycles per second)
---   K5  Spread   phase step from wave to wave, square law, 0 .. 1/2 cycle
---   K6  Colour   the 16 shared Kinetic palettes (hysteresis)
+--   K5  Colour   the 16 shared Kinetic palettes (hysteresis; was K6.  Spread, the phase step from wave to
+--                wave, is fixed at 300 = 0.04 cycle, square law)
+--   K6  Camera   camera / Osc strength: source x 0 .. 2.9 (25 % = v0.1.0's x 1, 50 % = x 2), glided
 --   S7  Wave     Smooth (sine) / Angular (triangle: polygonal tiles)
 --   S8  Field    Phason (the offsets breathe) / Drift (a rigid glide of the whole pattern)
 --   S9  Look     Fill (bands) / Lines (the contours alone)
@@ -44,6 +45,7 @@
 -- over pixels j .. j + 8.  The window for assigning a stage-S register is s_gav_sr(S - 3) or s_gav_sr(S + 5).
 -- One latency (36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 300 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -56,7 +58,9 @@ use work.quasi_pkg.all;
 use work.all;
 
 architecture quasi of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(300, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 36;   -- = processing_delay_clks
+    constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
 
     -- TOML defaults: the glides start there
     constant C_DEF_K1  : integer := 300;
@@ -117,6 +121,13 @@ architecture quasi of program_top is
             when others     => return to_unsigned(1080, 11);
         end case;
     end function;
+    -- K6 Camera: an 8-bit value gated by one gain bit, 10 bits wide
+    function f_gu8(x : unsigned(7 downto 0); b : std_logic) return unsigned is
+        variable r : unsigned(9 downto 0) := (others => '0');
+    begin
+        if b = '1' then r := resize(x, 10); end if;
+        return r;
+    end function;
 
     attribute no_rw_check : boolean;
 
@@ -154,7 +165,8 @@ architecture quasi of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(C_DEF_K1 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(C_DEF_K2 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);
-    signal s_g5 : unsigned(12 downto 0) := to_unsigned(C_DEF_K5 * 8, 13);
+    signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);     -- K6 Camera (glided)
+    signal c_cg : unsigned(5 downto 0) := to_unsigned(32, 6);            -- camera gain, Q4 (16 = x 1)
     signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
@@ -251,8 +263,8 @@ architecture quasi of program_top is
     signal s5_p : t_s10x4 := (others => (others => '0'));
     signal s6_a, s6_b : signed(10 downto 0) := (others => '0');
     signal s7_f : signed(11 downto 0) := (others => '0');
-    signal s8_f, s9_fp : signed(12 downto 0) := (others => '0');
-    signal s9_f2 : signed(13 downto 0) := (others => '0');
+    signal s8_f, s9_fp : signed(13 downto 0) := (others => '0');   -- K6: one bit wider (Osc up to x 11.75 of the v0.1.0 camera level)
+    signal s9_f2 : signed(14 downto 0) := (others => '0');
     signal s10_pa, s10_pb, s10_pc, s11_pab, s11_pc : unsigned(17 downto 0) := (others => '0');
     signal s12_g, s13_gp : unsigned(11 downto 0) := (others => '0');
     signal s13_agx, s13_agy, s13_gl, s14_gl : unsigned(9 downto 0) := (others => '0');
@@ -291,10 +303,13 @@ architecture quasi of program_top is
     signal lb_ram : t_lb := (others => (others => '0'));
     attribute no_rw_check of lb_ram : signal is true;
     signal lb_q1, lb_wd : unsigned(7 downto 0) := (others => '0');
-    signal lb_h, lb_d1, lb_d2, lb_d3 : unsigned(7 downto 0) := (others => '0');
     signal lb_wa : unsigned(9 downto 0) := (others => '0');
     signal lb_we : std_logic := '0';
-    signal s6_q, s6_qp, s7_l : unsigned(7 downto 0) := (others => '0');
+    -- K6 Camera: the IIR output x c_cg (Q4) as gated sums, in step with v0.1.0's lb_h / lb_d1 / lb_d2 / lb_d3
+    signal k_pa, k_pb, k_pc, k_pc1 : unsigned(9 downto 0) := (others => '0');
+    signal k_qa : unsigned(11 downto 0) := (others => '0');
+    signal k_g2, k_g3 : unsigned(13 downto 0) := (others => '0');
+    signal s6_q, s6_qp, s7_l : unsigned(13 downto 0) := (others => '0');   -- source x gain, Q4
 
     -- [E] coverage
     signal s15_weff, s16_weff, s17_weff, s16_wh : unsigned(11 downto 0) := (others => '0');
@@ -453,6 +468,7 @@ begin
         variable v_e  : signed(11 downto 0);
         variable v_k  : unsigned(9 downto 0);
         variable v_c  : signed(10 downto 0);
+        variable v_cg : unsigned(10 downto 0);
         variable v_r  : unsigned(27 downto 0);
         variable v_5  : unsigned(15 downto 0);
         variable v_wv : boolean;
@@ -528,11 +544,19 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- palette: 16 steps with hysteresis (leave a step only 8 past its edge)
-                v_k := unsigned(registers_in(5));
+                v_k := unsigned(registers_in(4));
                 v_c := signed(resize(v_k, 11)) - signed(resize(s_pal & "100000", 11));
                 if v_c > 40 or v_c < -40 then s_pal <= v_k(9 downto 6); end if;
             end if;
             g_wm1 <= s_w - 1;
+            -- K6 Camera gain law (Q4, 16 = x 1): k / 16 up to 512 (256 -> x 1 = v0.1.0, 512 -> x 2), then half
+            -- the slope, (k + 512) / 32 (1023 -> x 2.94; x 4 left per-line ragged contours in flat picture areas)
+            if s_g6(12) = '0' then
+                c_cg <= s_g6(12 downto 7);
+            else
+                v_cg := resize(s_g6(12 downto 3), 11) + 512;
+                c_cg <= v_cg(10 downto 5);
+            end if;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
             s_ncl2 <= f_ncl2(s_tid);
 
@@ -546,7 +570,7 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
+                            when 3      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -554,8 +578,10 @@ begin
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
-                            s_gd <= shift_right(s_gd, 3);
+                        if C_SIM_SNAP then
+                            null;
+                        elsif s_gd > 32 or s_gd < -32 or (z_gc /= 3 and (s_gd > 16 or s_gd < -16)) then
+                            s_gd <= shift_right(s_gd, 3);       -- deadband +-2 (K6 Camera: +-4)
                         else
                             s_gd <= (others => '0');
                         end if;
@@ -565,7 +591,7 @@ begin
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 3      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
@@ -599,7 +625,7 @@ begin
             if z_pre = '1' then
                 case to_integer(z_sel) is
                     when 0  => z_fa <= resize(s_g3(12 downto 3), 40); z_fb <= resize(s_g3(12 downto 3), 16);   -- depth^2
-                    when 1  => z_fa <= resize(s_g5(12 downto 3), 40); z_fb <= resize(s_g5(12 downto 3), 16);   -- spread^2
+                    when 1  => z_fa <= resize(unsigned(C_KFIX_5), 40); z_fb <= resize(unsigned(C_KFIX_5), 16); -- spread^2 (fixed)
                     when 2  => z_fa <= resize(s_vm, 40);  z_fb <= to_unsigned(897, 16);                 -- rate exponent
                     when 3  => z_fa <= resize(r_exf, 40); z_fb <= to_unsigned(9321, 16);                -- rate step
                     when 4  => z_fa <= resize(w_dd, 40);  z_fb <= resize(z_f13, 16);                    -- pi / N, interpolated
@@ -935,7 +961,7 @@ begin
     -- gradient (13), w = |grad G| (14)
     ---------------------------------------------------------------------------
     p_pix : process(clk)
-        variable v_lt : unsigned(10 downto 0);
+        variable v_lt : unsigned(12 downto 0);
         variable v_x, v_g0, v_g1, v_p : unsigned(17 downto 0);
         variable v_gq, v_d1, v_d2 : unsigned(11 downto 0);
         variable v_e1, v_e2 : unsigned(7 downto 0);
@@ -954,12 +980,12 @@ begin
             s6_a <= resize(s5_p(0), 11) + resize(s5_p(1), 11);
             s6_b <= resize(s5_p(2), 11) + resize(s5_p(3), 11);
             s7_f <= resize(s6_a, 12) + resize(s6_b, 12);
-            -- 8: + the source (camera x 1, Osc x 4) and the half-unit offsets of the eight signs
-            if s_src = '1' then v_lt := resize(s7_l & "00", 11) + 4; else v_lt := resize(s7_l, 11) + 4; end if;
-            s8_f <= resize(s7_f, 13) + signed(resize(v_lt, 13));
+            -- 8: + the source (camera x gain, Osc x 4 gain; s7_l is Q4) and the half-unit offsets of the eight signs
+            if s_src = '1' then v_lt := resize(s7_l(13 downto 2), 13) + 4; else v_lt := resize(s7_l(13 downto 4), 13) + 4; end if;
+            s8_f <= resize(s7_f, 14) + signed(resize(v_lt, 14));
             -- 9: 2-tap box (halves the table quantisation noise)
             s9_fp <= s8_f;
-            s9_f2 <= resize(s8_f, 14) + resize(s9_fp, 14);
+            s9_f2 <= resize(s8_f, 15) + resize(s9_fp, 15);
             -- 10, 11: x (32 + m5) as three pairs of gated shifts, modulo 2^18
             v_x := unsigned(resize(s9_f2, 18));
             if c_m5(0) = '1' then v_g0 := v_x; else v_g0 := (others => '0'); end if;
@@ -1020,6 +1046,7 @@ begin
         variable v_tap : unsigned(7 downto 0);
         variable v_d : signed(9 downto 0);
         variable v_a : unsigned(8 downto 0);
+        variable v_a15 : unsigned(14 downto 0);
     begin
         if rising_edge(clk) then
             -- oscillator: 2-D triangle lattice, 640 x 540 virtual px, drifting
@@ -1068,12 +1095,20 @@ begin
             -- clocks and reaches stage 6 as pixels 2 a and 2 a + 1 after 3 or 4 more clocks (the generated
             -- avid starts 3 or 4 clocks after the source's); 7 the mean with the previous pixel (a linear
             -- interpolation of the half-resolution field; pixel 0 has no previous), zero outside pixels 0 .. W + 7
-            if lb_we = '1' then lb_h <= lb_wd; end if;
-            lb_d1 <= lb_h; lb_d2 <= lb_d1; lb_d3 <= lb_d2;
-            if g_sel = '0' then s6_q <= lb_d2; else s6_q <= lb_d3; end if;
+            -- K6 Camera: the gain is applied along this delay chain (k_p* = lb_h's slot, k_qa = lb_d1,
+            -- k_g2 = lb_d2, k_g3 = lb_d3), so the source keeps its timing; c_cg = 16 is v0.1.0's x 1
+            if lb_we = '1' then
+                k_pa <= f_gu8(lb_wd, c_cg(0)) + shift_left(f_gu8(lb_wd, c_cg(1)), 1);
+                k_pb <= f_gu8(lb_wd, c_cg(2)) + shift_left(f_gu8(lb_wd, c_cg(3)), 1);
+                k_pc <= f_gu8(lb_wd, c_cg(4)) + shift_left(f_gu8(lb_wd, c_cg(5)), 1);
+            end if;
+            k_qa <= resize(k_pa, 12) + shift_left(resize(k_pb, 12), 2); k_pc1 <= k_pc;
+            k_g2 <= resize(k_qa, 14) + shift_left(resize(k_pc1, 14), 4);
+            k_g3 <= k_g2;
+            if g_sel = '0' then s6_q <= k_g2; else s6_q <= k_g3; end if;
             s6_qp <= s6_q;
-            if s_st(5) = '1' then v_a := s6_q & '1'; else v_a := resize(s6_q, 9) + resize(s6_qp, 9) + 1; end if;
-            if (s_gav_sr(4) or s_gav_sr(12)) = '1' then s7_l <= v_a(8 downto 1); else s7_l <= (others => '0'); end if;
+            if s_st(5) = '1' then v_a15 := s6_q & '1'; else v_a15 := resize(s6_q, 15) + resize(s6_qp, 15) + 16; end if;
+            if (s_gav_sr(4) or s_gav_sr(12)) = '1' then s7_l <= v_a15(14 downto 1); else s7_l <= (others => '0'); end if;
         end if;
     end process p_src;
 

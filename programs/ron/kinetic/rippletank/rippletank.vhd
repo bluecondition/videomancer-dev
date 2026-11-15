@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Rippletank v0.1.0 -- Kinetic.  After the physics ripple tank and the zone-plate moire of op art: two to four
+-- Rippletank v0.1.1 -- Kinetic.  After the physics ripple tank and the zone-plate moire of op art: two to four
 -- wave sources whose ring systems interfere, steered like a phased array.
 --
 -- Element: a source.  State: its phase phi_j = Depth * sin(lfo + Spread * j).
@@ -12,11 +12,13 @@
 --
 --   K1  Spacing     distance between the sources, 11 .. 362 virtual px (exponential, glided)
 --   K2  Sources     2 / 3 / 4
---   K3  Depth       phase swing of the steering wave, square law, 0 .. 1 cycle
+--   K3  Colour      the 16 shared Kinetic palettes (hysteresis; was K6.  Depth, the phase swing of the
+--                   steering wave, is fixed at 720 = 0.5 cycle, square law)
 --   K4  Rate        rings run outwards / inwards, bipolar, centre = still; the steering wave runs at half the
 --                   ring rate and the sources orbit the centre at 1/16 of it
 --   K5  Spread      phase step between sources, square law, 0 .. 1/2 cycle
---   K6  Colour      the 16 shared Kinetic palettes (hysteresis)
+--   K6  Camera      camera / Osc strength, 8 levels: 0 .. 25 % a gain up to v0.1.0's x 3/4, past 25 % a
+--                   contrast about 44 % luma (50 % = slope x 2, 100 % = x 4), glided
 --   S7  Wave        Smooth (shaded) / Hard (two-tone, anti-aliased)
 --   S8  Field       Line (an array through the centre) / Ring (on a circle, turned a quarter)
 --   S9  Mode        Sum (interference) / Max (overlapping ponds)
@@ -44,6 +46,7 @@
 -- over pixels j .. j + 8.  s_gav_sr(S - 2) flags pixels 0 .. W - 1 at stage S.  One latency (28) in every mode.
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Colour (was K6); K3 Depth fixed at 720 (C_KFIX_3).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -56,7 +59,9 @@ use work.rippletank_pkg.all;
 use work.all;
 
 architecture rippletank of program_top is
+    constant C_KFIX_3 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(720, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 28;   -- = processing_delay_clks
+    constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
 
     -- TOML defaults: the glides start there
     constant C_DEF_K1  : integer := 600;
@@ -141,7 +146,10 @@ architecture rippletank of program_top is
 
     -- [B] knobs: glided (Q3), raw rate, switches, palette
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(C_DEF_K1 * 8, 13);
-    signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);
+    signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);     -- K6 Camera (glided)
+    signal c_csh : unsigned(1 downto 0) := to_unsigned(1, 2);            -- camera gain g = (1 + 2 c_cb) << c_csh quarters
+    signal c_cb  : std_logic := '1';
+    signal c_o6  : unsigned(4 downto 0) := to_unsigned(9, 5);            -- contrast offset / 8: 3 (g - 3)
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(C_DEF_K5 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
@@ -183,7 +191,7 @@ architecture rippletank of program_top is
     -- [C] per-field constants
     signal c_q30  : unsigned(15 downto 0) := (others => '0');      -- zone-plate coefficient, 2^-30 cycles per h^2
     signal c_d14  : unsigned(13 downto 0) := (others => '0');      -- source spacing, h Q4
-    signal c_dep  : unsigned(15 downto 0) := (others => '0');      -- phase swing, cycles Q16
+    constant c_dep : unsigned(15 downto 0) := to_unsigned(32400, 16);   -- phase swing, cycles Q16 (K6 pass: Depth fixed, 720^2 / 16)
     signal c_B    : unsigned(23 downto 0) := (others => '0');      -- 2 q d, cycles per h Q28
     signal c_qd2  : unsigned(29 downto 0) := (others => '0');      -- q d^2, cycles Q24
     signal c_spr  : unsigned(11 downto 0) := (others => '0');      -- phase step per source, 1/4096 cycle
@@ -280,7 +288,8 @@ architecture rippletank of program_top is
     signal lb_wa : unsigned(9 downto 0) := (others => '0');
     signal lb_we : std_logic := '0';
     signal lb_rc : unsigned(10 downto 0) := (others => '0');
-    signal s8_q, s8_qp, s9_l : unsigned(7 downto 0) := (others => '0');
+    signal s8_q, s9_l : unsigned(7 downto 0) := (others => '0');
+    signal k_g  : unsigned(11 downto 0) := (others => '0');           -- K6 Camera product (Q2)
 
     -- [F] output conditioning
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
@@ -474,7 +483,7 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- palette: 16 steps with hysteresis (leave a step only 8 past its edge)
-                v_k := unsigned(registers_in(5));
+                v_k := unsigned(registers_in(2));
                 v_c := signed(resize(v_k, 11)) - signed(resize(s_pal & "100000", 11));
                 if v_c > 40 or v_c < -40 then s_pal <= v_k(9 downto 6); end if;
                 -- source count: 2 / 3 / 4 with hysteresis
@@ -483,6 +492,21 @@ begin
                 if v_k >= 690 then s_ge4 <= '1'; elsif v_k < 674 then s_ge4 <= '0'; end if;
             end if;
             g_wm1 <= s_w - 1;
+            -- K6 Camera law, 8 levels on the glided knob: gain g in quarters = (1 + 2 b) << sh: 1/4, 1/2, 3/4 (k = 256:
+            -- v0.1.0), 1, 3/2 (k = 512), 2, 3 (k >= 832).  Up to 256 a plain gain; past 256 a contrast about luma 96
+            -- (about 44 %): lift = l g - (g - 3/4) 96, so the lift at the pivot stays v0.1.0's and only the slope
+            -- grows (a plain x 2 gain whited the frame).  A negative lift does nothing (stage 11 keeps max(F, .)),
+            -- so it needs no floor, and K6 = 0 is g = 1/4 with an offset no luma reaches.  c_o6 x 8 = the offset.
+            case to_integer(s_g6(12 downto 9)) is
+                when 0        => c_csh <= "00"; c_cb <= '0'; c_o6 <= to_unsigned(31, 5);   -- off
+                when 1        => c_csh <= "00"; c_cb <= '0'; c_o6 <= to_unsigned(0, 5);    -- 1/4
+                when 2        => c_csh <= "01"; c_cb <= '0'; c_o6 <= to_unsigned(0, 5);    -- 1/2
+                when 3 | 4    => c_csh <= "00"; c_cb <= '1'; c_o6 <= to_unsigned(0, 5);    -- 3/4 (v0.1.0; k 192 .. 319)
+                when 5 | 6    => c_csh <= "10"; c_cb <= '0'; c_o6 <= to_unsigned(3, 5);    -- 1
+                when 7 | 8    => c_csh <= "01"; c_cb <= '1'; c_o6 <= to_unsigned(9, 5);    -- 3/2 (k 448 .. 575)
+                when 9 to 12  => c_csh <= "11"; c_cb <= '0'; c_o6 <= to_unsigned(15, 5);   -- 2
+                when others   => c_csh <= "10"; c_cb <= '1'; c_o6 <= to_unsigned(27, 5);   -- 3
+            end case;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
 
             -- [B] shared glide (1/8 of the gap per field, +-2 deadband): four clocks per channel
@@ -493,7 +517,7 @@ begin
                     when "00" =>
                         case to_integer(z_gc) is
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
-                            when 1      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
+                            when 1      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
                             when 2      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
@@ -502,7 +526,9 @@ begin
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                        if C_SIM_SNAP then
+                            null;
+                        elsif s_gd > 16 or s_gd < -16 then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -511,7 +537,7 @@ begin
                     when others =>
                         case to_integer(z_gc) is
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 1      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 1      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
@@ -546,7 +572,6 @@ begin
                     case to_integer(z_sel(3 downto 0)) is
                         when 0  => z_fa <= resize(s_gp, 40);  z_fb <= to_unsigned(1001, 16);               -- wavelength octaves
                         when 1  => z_fa <= resize(s_g1, 40);  z_fb <= to_unsigned(1281, 16);               -- spacing octaves
-                        when 2  => z_fa <= resize(s_g3(12 downto 3), 40); z_fb <= resize(s_g3(12 downto 3), 16);   -- depth^2
                         when 3  => z_fa <= resize(c_q30, 40); z_fb <= resize(c_d14, 16);                   -- 2 q d
                         when 4  => z_fa <= resize(c_B, 40);   z_fb <= resize(c_d14, 16);                   -- q d^2
                         when 5  => z_fa <= resize(s_g5(12 downto 3), 40); z_fb <= resize(s_g5(12 downto 3), 16);   -- spread^2
@@ -617,7 +642,6 @@ begin
                             r_ex_a <= '0' & v_e(7 downto 0); z_sh <= resize(11 - v_e(11 downto 8), 3);
                         when 2  =>
                             c_d14 <= resize(shift_right(r_exf, to_integer(z_sh)), 14);
-                            c_dep <= f_acc(19 downto 4);
                         when 3  => c_B <= f_acc(28 downto 5);
                         when 4  => c_qd2 <= f_acc(38 downto 9);
                         when 5  => c_spr <= f_acc(20 downto 9);
@@ -922,7 +946,8 @@ begin
                 s9_F <= resize(shift_right(s8_sum, 2), 10) + resize(shift_right(s8_sum, 3), 10);
             end if;
             -- 10: + 3/4 of the source luma
-            s10_t <= resize(s9_F, 11) + signed(resize(s9_l(7 downto 1), 11)) + signed(resize(s9_l(7 downto 2), 11));
+            -- K6 Camera: + the source's lift l g - offset (may be negative: no effect)
+            s10_t <= resize(s9_F, 11) + signed(resize(k_g(11 downto 2), 11)) - signed(resize(c_o6 & "000", 11));
             s10_F <= s9_F;
             -- 11: the luma lifts the field as far as colour A, never into the accent
             if s10_t > 95 then v_m := to_signed(95, 11); else v_m := s10_t; end if;
@@ -1003,6 +1028,8 @@ begin
     -- (stage 9).
     ---------------------------------------------------------------------------
     p_src : process(clk)
+        variable v_ls : unsigned(10 downto 0);
+        variable v_l2 : unsigned(11 downto 0);
         variable v_l : unsigned(7 downto 0);
         variable v_s : unsigned(7 downto 0);
         variable v_tap : unsigned(7 downto 0);
@@ -1052,11 +1079,21 @@ begin
             lb_wd <= v_a(7 downto 0);
             lb_we <= s_ev; lb_wa <= s_ecol(10 downto 1);
 
-            -- pixel path: 8 fabric copies of this and the last read; 9 the mean (a linear interpolation of
-            -- the half-resolution store)
-            s8_q <= lb_q2; s8_qp <= s8_q;
-            v_a := resize(s8_q, 9) + resize(s8_qp, 9) + 1;
-            s9_l <= v_a(8 downto 1);
+            -- pixel path: 8 a fabric copy of the read; 9 a second copy (K6 pass, for fit: v0.1.0 took the mean of
+            -- this and the last read, a linear interpolation of the half-resolution store; the 32-px-blurred
+            -- field differs by a fraction of a code between neighbouring store words)
+            s8_q <= lb_q2;
+            s9_l <= s8_q;
+            -- K6 Camera: s9_l x g (quarters, Q2) as a shift and one gated add in one stage (k_g reaches stage 10
+            -- one pixel after s9_l: the 32-px-blurred source lags the waves by one more pixel)
+            case c_csh is
+                when "00"   => v_ls := resize(s9_l, 11);
+                when "01"   => v_ls := resize(s9_l & '0', 11);
+                when "10"   => v_ls := resize(s9_l & "00", 11);
+                when others => v_ls := s9_l & "000";
+            end case;
+            if c_cb = '1' then v_l2 := v_ls & '0'; else v_l2 := (others => '0'); end if;
+            k_g  <= resize(v_ls, 12) + v_l2;
         end if;
     end process p_src;
 

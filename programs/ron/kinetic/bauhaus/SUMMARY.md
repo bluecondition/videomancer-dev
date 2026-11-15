@@ -1,6 +1,7 @@
 # Bauhaus (Kinetic)
 
-v0.1.0 built 2026-11-14, all six configs, not flashed. Flash `out/rev_b/ron/kinetic/bauhaus.vmprog`.
+v0.1.1 (K6 camera pass) built 2026-11-15, all six configs, not flashed. Flash `out/rev_b/ron/kinetic/bauhaus.vmprog`.
+(v0.1.0 built 2026-11-14; its build notes are kept below.)
 
 ## What it draws
 
@@ -43,8 +44,8 @@ a different colour.
 | K2 | Shape | figure inset: 0 % = full-bleed (default) .. 100 % = figures at 40 % of the cell with margins of the cell colour |
 | K3 | Mix | share of straight motifs, 0 (all curved) .. 16 sixteenths (all straight); default 5/16 |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
-| K5 | Spread | phase step per cell 0 .. 1/2 cycle, square law |
-| K6 | Colour | the 16 shared palettes with hysteresis (ground, A, B, accent: all four are used as cell and figure colours) |
+| K5 | Colour | the 16 shared palettes with hysteresis (ground, A, B, accent: all four are used as cell and figure colours). Was K6 until v0.1.1 |
+| K6 | Camera | camera / Osc strength, default 50 % (v0.1.1, see "K6 camera pass"). 0 % = the poster alone, 25 % = the v0.1.0 halftone, 50 % / 100 % = its contrast x 2 / x 4 |
 | S7 | Wave | Smooth / Snap (the grid dwells, then re-rolls in bursts) |
 | S8 | Field | Linear (diagonal sweep) / Radial (octagonal ripple from the centre) |
 | S9 | Gutters | Off / On: ground-colour lines between the cells, 4 px + 1/8 of the cell wide |
@@ -63,7 +64,7 @@ halftone of shapes:
   mid-cell runs through a 1/8 filter down the lines in a block-RAM word per cell column, and a cell row uses
   the filter value of the line before the row (the field's first line: the smear at the cell start). Every
   cell is rigid: one level per cell, no per-line edges.
-- level = held x 5 / 64 (0 .. 15). Level 0 (black, under about 6 % luma) leaves the hash poster untouched, so
+- level = held x 5 / 64 (0 .. 15) at K6 Camera = 25 % (v0.1.1: see "K6 camera pass"). Level 0 (black, under about 6 % luma) leaves the hash poster untouched, so
   with a black input or nothing plugged in the wave alone runs. Levels 1 .. 13 replace the cell with a disc
   (or a square, by Mix) on the ground colour that grows with the level: dot at the centre (3 sizes) -> quarter
   at a corner (3 sizes) -> half at an edge (3 sizes) -> full at the centre (3 sizes) -> the whole box. The
@@ -177,3 +178,36 @@ Chassis from louver.vhd ([A] timing / zone / glides / sequencer, [B] generated a
   (b) where a disc is tangent to its cell edge and the neighbour has the disc's colour, the wedge between
   them is one row tall over about 2 sqrt(2R) px (17 px at the defaults, more at large Scale).
 - The picture's 8 filter columns at the left / right edge blend into the ground colour (louver's chassis).
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. Ron: K6 is the camera strength in every program, default 50 %.
+
+- **K6 Camera** (0 .. 100 %, default 512) sets how strongly the picture (or the Osc lattice, which goes through
+  the same path) drives the shape halftone. The held cell luma `held` (0 .. 239) becomes the level by
+  `level = (held x g - off) / 256`, clamped to 0 .. 15, with `g = 5 k / 64` (k = the glided knob, 0 .. 79):
+  - 0 .. 25 %: a plain gain (off = 0). 0 % = level 0 everywhere = exactly the black-input poster; the halftone
+    fades in from the brightest cells; **25 % (k 256, g 20) = v0.1.0 exactly** (held x 5 / 64).
+  - past 25 %: a contrast about the middle level (level 7 at held 90, about 41 % luma): off = (g - 20) x 90, and
+    every cell that v0.1.0 would draw (held >= 13) keeps level 1 or more, so the shadows stay halftone and do
+    not fall back to the poster. **50 % = contrast x 2** (the default), **100 % = x 4**: darker cells go to the
+    full box, brighter ones to the dot (on the light palettes, inverted as before), a near two-tone halftone.
+  - A plain 2 x gain was tried first and rejected: on the default (light) palette it pushed every mid-grey cell
+    to the smallest dot, washing the frame out to the cream ground (selfie render). The contrast law keeps
+    both ends.
+- K6 is decoded per field in the vblank zone (states 40 .. 48: glide 1/8 of the gap per field with a +-4
+  deadband, the gain, the offset by shift-adds). The pixel side is `held x g` as gated sums over three
+  stages, the offset subtract and the level clamp: five single-op stages running while `k_held` is steady
+  (it is latched at the cell start and read 10 clocks later), so no latency change (still 42).
+- **Frozen**: K5 Spread at 354 (its default: a phase step of 0.06 cycle per cell, square law). It was the weakest
+  knob: in a still it only re-phases which cells re-roll (sheet.png K5 row); it mainly shapes the motion.
+- **K6's old function, Colour (all 16 palettes), moved to K5.** Presets: their Colour values moved to K5;
+  Mirror Quilt (Spread 420) and Slot Machine (Spread 150) lose their own Spread.
+- Renders (GHDL, 720p60 at decimation 2, selfie.jpg, glide-bypassed copy): `.kinetic_work/rb_bauhaus/k6sheet.png`
+  (K6 0 / 256 / 512 / 1023 and Osc at 512). K6 0 = the poster; 256 = the v0.1.0 halftone; 512 and 1023 = more
+  full boxes and small dots.
+- **Build v0.1.1** (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic bauhaus`): **router1, every config on
+  seed 1**. Post-route Fmax: HD Analog 80.10 MHz, HD HDMI 83.04, HD Dual 80.58 (worst HD 80.10, up from
+  v0.1.0's 75.39); SD Analog 80.85, SD HDMI 75.45, SD Dual 75.00. 7,058 .. 7,075 / 7,680 LC (92 %, v0.1.0
+  6,731), 23 / 32 EBR (unchanged). Log `.kinetic_work/rb_bauhaus/build_v0.1.1.log`.
+

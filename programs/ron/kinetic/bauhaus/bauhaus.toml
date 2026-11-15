@@ -6,7 +6,7 @@
 processing_delay_clks = 42
 program_id = "com.czartroniks.bauhaus"
 program_name = "Bauhaus"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -58,16 +58,6 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Spread"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 354
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Colour"
 control_mode = "linear"
 display_min_value = 1
@@ -75,6 +65,16 @@ display_max_value = 16
 initial_value = 160
 display_float_digits = 0
 suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -123,8 +123,7 @@ name = "Poster"
 name = "Mirror Quilt"
 rotary_potentiometer_1 = 520
 rotary_potentiometer_3 = 200
-rotary_potentiometer_5 = 420
-rotary_potentiometer_6 = 224
+rotary_potentiometer_5 = 224
 toggle_switch_8 = 1
 toggle_switch_10 = 1
 linear_potentiometer_12 = 500
@@ -135,7 +134,7 @@ rotary_potentiometer_1 = 420
 rotary_potentiometer_2 = 300
 rotary_potentiometer_3 = 900
 rotary_potentiometer_4 = 720
-rotary_potentiometer_6 = 32
+rotary_potentiometer_5 = 32
 toggle_switch_7 = 1
 toggle_switch_9 = 1
 linear_potentiometer_12 = 700
@@ -144,15 +143,14 @@ linear_potentiometer_12 = 700
 name = "Slot Machine"
 rotary_potentiometer_1 = 700
 rotary_potentiometer_4 = 800
-rotary_potentiometer_5 = 150
-rotary_potentiometer_6 = 288
+rotary_potentiometer_5 = 288
 linear_potentiometer_12 = 1023
 
 [[preset]]
 name = "Shape Halftone"
 rotary_potentiometer_1 = 250
 rotary_potentiometer_3 = 0
-rotary_potentiometer_6 = 32
+rotary_potentiometer_5 = 32
 linear_potentiometer_12 = 120
 
 [[preset]]
@@ -160,7 +158,7 @@ name = "Diamond Drift"
 rotary_potentiometer_1 = 380
 rotary_potentiometer_2 = 200
 rotary_potentiometer_3 = 700
-rotary_potentiometer_6 = 608
+rotary_potentiometer_5 = 608
 toggle_switch_9 = 1
 toggle_switch_11 = 1
 linear_potentiometer_12 = 200

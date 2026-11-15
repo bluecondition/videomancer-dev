@@ -6,7 +6,7 @@
 processing_delay_clks = 36
 program_id = "com.czartroniks.quasi"
 program_name = "Quasi"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -58,19 +58,19 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Spread"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 300
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Colour"
 value_labels = ["Ink", "Paper", "Bauhaus", "Vega", "Outrun", "Ultra", "Ocean", "Ice", "Moss", "Citrus", "Terra", "Ember", "Gold", "Candy", "Mint", "Plum"]
 initial_value_label = "Ink"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -120,8 +120,7 @@ name = "Honeycomb"
 rotary_potentiometer_1 = 380
 rotary_potentiometer_2 = 120
 rotary_potentiometer_3 = 620
-rotary_potentiometer_5 = 700
-rotary_potentiometer_6 = 544
+rotary_potentiometer_5 = 544
 linear_potentiometer_12 = 0
 
 [[preset]]
@@ -130,7 +129,7 @@ rotary_potentiometer_1 = 360
 rotary_potentiometer_2 = 330
 rotary_potentiometer_3 = 400
 rotary_potentiometer_4 = 660
-rotary_potentiometer_6 = 224
+rotary_potentiometer_5 = 224
 linear_potentiometer_12 = 205
 
 [[preset]]
@@ -139,7 +138,7 @@ rotary_potentiometer_1 = 420
 rotary_potentiometer_2 = 150
 rotary_potentiometer_3 = 300
 rotary_potentiometer_4 = 620
-rotary_potentiometer_6 = 800
+rotary_potentiometer_5 = 800
 toggle_switch_7 = 1
 toggle_switch_10 = 1
 linear_potentiometer_12 = 410
@@ -150,8 +149,7 @@ rotary_potentiometer_1 = 520
 rotary_potentiometer_2 = 600
 rotary_potentiometer_3 = 512
 rotary_potentiometer_4 = 700
-rotary_potentiometer_5 = 150
-rotary_potentiometer_6 = 480
+rotary_potentiometer_5 = 480
 toggle_switch_9 = 1
 linear_potentiometer_12 = 700
 
@@ -161,7 +159,6 @@ rotary_potentiometer_1 = 460
 rotary_potentiometer_2 = 400
 rotary_potentiometer_3 = 700
 rotary_potentiometer_4 = 330
-rotary_potentiometer_5 = 420
-rotary_potentiometer_6 = 288
+rotary_potentiometer_5 = 288
 toggle_switch_8 = 1
 linear_potentiometer_12 = 1023

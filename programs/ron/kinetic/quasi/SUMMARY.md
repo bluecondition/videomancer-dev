@@ -1,6 +1,7 @@
 # Quasi (Kinetic)
 
-**v0.1.0 built 2026-11-14, not flashed.** Flash `out/rev_b/ron/kinetic/quasi.vmprog`.
+**v0.1.1 (K6 camera pass, 2026-11-15), not flashed.** Flash `out/rev_b/ron/kinetic/quasi.vmprog`.
+(v0.1.0 built 2026-11-14; its build notes are kept below.)
 
 ## What it draws
 
@@ -31,8 +32,8 @@ freezes it and runs `glide_j` = k_j . d(t) instead, a rigid translation along (1
 | K2 | Shape | the colourizer: bands per 4 wave amplitudes, 1 .. 15.5, exponential in 32 steps per octave. 0 % = two-tone (the sign of F), default 1.8, 100 % = a dense contour map |
 | K3 | Depth | phason depth, square law, 0 .. 1 cycle of phase swing (default 1/4). 0 = the still, centre-symmetric pattern |
 | K4 | Rate | bipolar, centre = still; exponential, 60 s per cycle just off the deadband to 2 cycles per second |
-| K5 | Spread | phase step from wave to wave, square law, 0 .. 1/2 cycle. 0 = all waves breathe in unison; more = the waves take turns, so the rearrangement travels through the pattern |
-| K6 | Colour | the 16 shared Kinetic palettes, with hysteresis. Fill: the bands step through ground, A, B, accent. Lines: lines in A, B, A, accent on the ground |
+| K5 | Colour | the 16 shared Kinetic palettes, with hysteresis. Fill: the bands step through ground, A, B, accent. Lines: lines in A, B, A, accent on the ground. Was K6 until v0.1.1 |
+| K6 | Camera | camera / Osc strength, default 50 % (v0.1.1, see "K6 camera pass"): the source term added to F is x 0 .. x 2.9 of v0.1.0's camera level (25 % = v0.1.0, 50 % = x 2) |
 | S7 | Wave | Smooth (sine: round rosettes) / Angular (triangle: straight-edged polygonal tiles). **This replaces the standard Snap**: here the switch shapes the plane waves themselves; the phason modulation stays a sine |
 | S8 | Field | Phason (the offsets breathe: tiles flip in place) / Drift (the whole pattern glides rigidly at Rate; Depth and Spread still set the frozen offsets). **Replaces Linear / Radial**, which have no meaning for eight superposed waves |
 | S9 | Look | Fill (flat bands) / Lines (the contours alone, 3 virtual px, on the ground colour) |
@@ -44,7 +45,7 @@ freezes it and runs `glide_j` = k_j . d(t) instead, a rigid translation along (1
 
 `program_type = "processing"`. The picture's luma is the second modulator and **adds to F** (to the same
 state as the waves): luma -> 32-pixel box (edge-replicated) -> vertical 1/8 IIR in a half-resolution line store
--> added at 1 x (full white = 0.86 wave amplitudes). Bright areas lift the whole field, so the bands widen,
+-> added at 1 x (full white = 0.86 wave amplitudes) at K6 Camera = 25 % (v0.1.1: see "K6 camera pass"). Bright areas lift the whole field, so the bands widen,
 merge and bend around the picture's masses while every edge stays a smooth contour. With a black input the
 term is zero and the waves alone run. Source = Osc substitutes the shell's drifting 640 x 540 triangle lattice
 at the same point at 4 x (up to 3.5 amplitudes): large diamonds of extra contour rings drift across.
@@ -121,3 +122,35 @@ The source field lags the picture by about 12 pixels to the right.
   wave's amplitude has 64 steps.
 - 8-bit wave tables: at 4x zoom the thinnest Lines contours show sub-pixel roughness where F is nearly flat.
 - `field_n` is passed through one register (the core ties it high on every input).
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. Ron: K6 is the camera strength in every program, default 50 %.
+
+- **K6 Camera** (0 .. 100 %, default 512) scales the source term that is added to F (camera luma, or the Osc
+  lattice at its usual 4 x the camera level). Gain law, Q4 (16 = v0.1.0's x 1), on the glided knob k:
+  `g = k / 16` up to k = 512, then half the slope, `g = (k + 512) / 32`. **0 % = x 0** (exactly the
+  black-input picture), **25 % = x 1 = v0.1.0**, **50 % = x 2** (the default), **100 % = x 2.94** (Osc
+  x 4 / x 8 / x 11.8 of the camera's v0.1.0 level).
+  - x 2 is clean on the selfie render: the bands bend around the picture's masses with smooth, anti-aliased
+    outlines (only the image's own texture shows as gentle wobble). A linear x 4 at 100 % (first render) left
+    per-line ragged edges where a contour runs nearly level through a flat picture area (the 8-bit vertical
+    IIR's line-to-line steps, x 4), so the top half of the travel has half the slope.
+- Decode: the old K5 Spread channel of the shared glide now carries K6 (1/8 of the gap per field; deadband
+  +-4 for this channel, +-2 for the others as before); the gain is a slice / one add of the glided value.
+- Pixel side: the gain is applied along the source field's existing delay chain (the IIR output x g as gated
+  sums: partials in lb_h's slot, two adds in lb_d1 / lb_d2's), so the source keeps its old timing and the
+  latency stays 36. The interpolation and the + source stage carry the Q4 product; F's sum is one bit wider
+  (14 / 15 bits) so x 11.8 Osc cannot wrap. No block RAM added (24 / 32).
+- **Frozen**: K5 Spread at 300 (its default: a phase step of 0.04 cycle from wave to wave, square law). It
+  was the weakest knob in a still (sheet.png K5 row: 0 and 300 are nearly the same frame); it mostly shapes
+  how the phason motion travels.
+- **K6's old function, Colour (all 16 palettes, value labels Ink .. Plum), moved to K5.** Presets: their Colour
+  values moved to K5; Honeycomb (Spread 700), Contours (150) and Octagram (420) lose their own Spread.
+- Renders (GHDL, 720p60 at decimation 2, selfie.jpg, glide-bypassed copy; the K5 Colour enum sims at 512 =
+  Moss, not Ink): `.kinetic_work/rb_quasi/k6sheet.png` (K6 0 / 256 / 512 / 1023 and Osc at 512).
+- **Build v0.1.1** (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic quasi`): **router1, every config on seed
+  1**. Post-route Fmax: HD Analog 94.86 MHz, HD HDMI 97.31, HD Dual 87.64 (worst HD 87.64); SD Analog 87.34,
+  SD HDMI 85.65, SD Dual 92.46. 6,963 .. 6,980 / 7,680 LC (91 %, v0.1.0 6,779 .. 6,803), 24 / 32 EBR
+  (unchanged). Log `.kinetic_work/rb_quasi/build_v0.1.1.log`.
+
