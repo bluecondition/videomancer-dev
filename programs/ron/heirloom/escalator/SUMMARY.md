@@ -175,3 +175,12 @@ recommended options):
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 492 -> 512 (v0.6.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 % stronger camera effect at the top of K6; the K6 default is now 100 % (1023, set with the version bump).
+
+- **Class:** BEND: K6 (Bend) is the cubic source bend of the blob edges and, an eighth as much, the slab edges.
+- **Change:** Bend gain x1.25 at every position: `f_bend = 1.25 K6^3 / 2^20` (11 bits, 0 .. 1276, written by the sequencer). The pixel multiplier takes `f_bend(10:2)` (a quarter instead of a half, same 8 x 10 multiply) and the product is doubled for the blob (`<< 1`) and taken `>> 2` for the slabs (was `>> 3`). Max product 81664: inside the 19-bit blob edge and the 16-bit slab distance.
+- **Build:** Built with router1: all six seed 1; worst HD 87.3 MHz (HD Analog 93.92, HD HDMI 87.30, HD Dual 91.58); max 7262 / 7680 LC.
+- **Check:** GHDL 480p render, bear, K6 = 100 %, old vs new (K6 is not glided): `.heirloom_work/rb_escalator/k6b/k6b_cmp.png`, the same picture with a stronger bend.

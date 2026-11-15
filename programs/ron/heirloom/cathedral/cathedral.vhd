@@ -44,6 +44,7 @@
 -- latency-aligned generated avid.  One serial shift-add multiplier runs the per-field
 -- jobs (zone) and the per-line engine (during each line, for the next line).
 -- Latency 56 clocks in every mode.  Colours in hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron); the depth product no longer wraps above K6 ~30 %
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -422,7 +423,8 @@ begin
                 s_inv   <= registers_in(6)(2);
                 s_night <= registers_in(6)(3);
                 s_osc   <= registers_in(6)(4);
-                f_depth <= unsigned(registers_in(5)(9 downto 2));
+                -- depth = 1.25 K6 / 8 (0 .. 159), Q7 in the pixel path (x1.25 the old K6 / 4, Q8)
+                f_depth <= resize(shift_right(resize(unsigned(registers_in(5)), 11) + shift_right(unsigned(registers_in(5)), 2), 3), 8);
             end if;
 
             -- registered decodes of the zone counter
@@ -771,7 +773,7 @@ begin
     p_pix : process(clk)
         variable v_u : unsigned(10 downto 0);
         variable v_x : signed(13 downto 0);
-        variable v_f : signed(13 downto 0);
+        variable v_f : signed(16 downto 0);
         variable v_la : std_logic_vector(19 downto 0);
         variable v_n : std_logic_vector(3 downto 0);
         variable v_s : unsigned(18 downto 0);
@@ -822,8 +824,8 @@ begin
             p4_de <= resize(a_le, 13) + signed(resize(p3_a2, 13));
 
             -- 5
-            v_f := shift_left(p4_svhi, 4) + p4_svlo;
-            p5_sv <= resize(shift_right(v_f, 8), 9);
+            v_f := shift_left(resize(p4_svhi, 17), 4) + resize(p4_svlo, 17);      -- src x depth, up to +-17490
+            p5_sv <= resize(shift_right(v_f, 7), 9);                                -- depth Q7: +-137
             p5_f <= p4_f;
             p5_dd <= p4_dd; p5_de <= p4_de;
             p5_dw <= resize(a_lw, 13) - signed(resize(p4_a3(16 downto 8), 13));

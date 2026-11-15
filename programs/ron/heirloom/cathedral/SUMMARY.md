@@ -172,3 +172,11 @@ v0.5.0 (2026-10-27): router2, seed 1 on every config, 6851–6864 LC, HD 81.12 /
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 205 -> 512 (v0.6.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 % stronger camera effect at the top of K6; the K6 default is now 100 % (1023, set with the version bump).
+
+- **Class:** BEND: K6 (Picture) is the source depth added to the egg-crate field F and the pink / warm distances (the bands bend around the camera; the camera image itself is never shown).
+- **Change:** **Found and fixed a wrap:** the depth product `src x depth` was summed in a 14-bit variable (`shift_left(p4_svhi, 4)` kept 14 bits), so it wrapped once |src x depth| passed 8191, i.e. on bright and dark areas above K6 ~30 % (the old 20 % default was clear of it). Every frame at the 50 % / 100 % defaults was hit. The sum is now 17 bits. Then x1.25: the per-field decode is `depth = 1.25 K6 / 8` (0 .. 159) in Q7 instead of `K6 / 4` (0 .. 255) in Q8, so the source term tops out at +-137 (was +-108 intended, +-32 wrapped). The fixed 100 % is a much stronger bend than the wrapped build showed. Render (480p, bear): `.heirloom_work/rb_cathedral/k6b/k6b_cmp.png` (HEAD wrapped / wrap fixed only / new).
+- **Build:** Built with router1: all six seed 1; worst HD 78.93 MHz (HD Analog 81.12, HD HDMI 78.93, HD Dual 81.12); max 7021 / 7680 LC.

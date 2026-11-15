@@ -36,6 +36,7 @@
 -- output conditioning (U, V through two [1 2 2 2 2 2 2 2 1]/16 boxes with the running-sum resync, luma [1 2 1]
 -- and 13/16) and the blanking gate.  Generated avid; one latency (32) in every mode; virtual 1080-line
 -- coordinates (SD shows the centre 4:3); colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -227,7 +228,7 @@ architecture plumage of program_top is
     signal c_xt   : unsigned(12 downto 0) := to_unsigned(1800, 13);     -- tear region x limit (h)
     signal c_ylim : unsigned(10 downto 0) := to_unsigned(800, 11);      -- tear region y limit (lines)
     signal c_bigth : unsigned(7 downto 0) := to_unsigned(111, 8);
-    signal c_vg   : unsigned(7 downto 0) := to_unsigned(39, 8);          -- camera gain
+    signal c_vg   : unsigned(7 downto 0) := to_unsigned(24, 8);          -- camera gain, Q-1 (half units)
     signal c_xb0  : unsigned(11 downto 0) := (others => '0');
 
     -- field serial multiplier
@@ -303,7 +304,7 @@ architecture plumage of program_top is
     signal q5_p1, q6_p1 : unsigned(3 downto 0) := (others => '0');
     signal q5_vp  : unsigned(15 downto 0) := (others => '0');
     signal q6_top : unsigned(9 downto 0) := (others => '0');
-    signal q6_vz, q7_vz : unsigned(13 downto 0) := (others => '0');
+    signal q6_vz, q7_vz : unsigned(14 downto 0) := (others => '0');
     signal q6_vd  : unsigned(10 downto 0) := (others => '0');
     signal q7_ke, q8_ke : unsigned(16 downto 0) := (others => '0');
     signal q7_dd  : unsigned(10 downto 0) := (others => '0');
@@ -460,6 +461,7 @@ begin
         variable v_m  : unsigned(9 downto 0);
         variable v_e  : signed(12 downto 0);
         variable v_d  : signed(11 downto 0);
+        variable v_og : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -697,9 +699,13 @@ begin
                         c_ylim <= to_unsigned(800, 11) + shift_left(resize(z_dt, 11), 1) - resize(z_dt(9 downto 3), 11);
                     when 184 => c_bigth <= to_unsigned(64, 8) + resize(s_gp(12 downto 6), 8);
                     when 210 =>                        -- bend (k6^2); the Osc drives it twice as hard
-                        if s_src = '0' then c_vg <= f_acc(19 downto 12);
-                        elsif f_acc(19) = '1' then c_vg <= (others => '1');
-                        else c_vg <= f_acc(18 downto 11); end if;
+                        -- K6 top +25 %: 1.25 k6^2 / 4096 in half units (Q-1, 0 .. 158; the pixel path doubles it);
+                        -- the Osc's twice that keeps its old ceiling (127 = the old 255)
+                        if s_src = '0' then c_vg <= resize(f_acc(19 downto 13), 8) + resize(f_acc(19 downto 15), 8);
+                        else
+                            v_og := resize(f_acc(19 downto 12), 9) + resize(f_acc(19 downto 14), 9);
+                            if v_og(8 downto 7) /= "00" then c_vg <= to_unsigned(127, 8); else c_vg <= v_og(7 downto 0); end if;
+                        end if;
                     when others => null;
                 end case;
             end if;
@@ -1037,8 +1043,8 @@ begin
             q6_p1 <= q5_p1;
             q6_top <= r_top_q(9 downto 0);
             q6_xt <= q5_xt; q6_px <= q5_px;
-            q6_vz <= q5_vp(15 downto 2);
-            q6_vd <= q5_vp(15 downto 5);
+            q6_vz <= q5_vp(15 downto 1);         -- c_vg is in half units: one shift less
+            q6_vd <= q5_vp(14 downto 4);         -- (mod 2048, like q7_dd)
             -- 7: exponent part; band phase of this pixel (the camera keys the band), threshold, dither
             q7_ke  <= to_unsigned(C_PL_KE(to_integer(q6_p1)), 17);
             q7_dd  <= l_bl - q6_vd;

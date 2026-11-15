@@ -56,6 +56,7 @@
 -- 13/16), blanking gate.  Latency 28 clocks in every mode.  Colours: u = Cr.
 
 -- K6 camera pass 2026-11-15: K6 = Picture (camera strength, was K3), K3 = Orange (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -488,9 +489,9 @@ begin
                             when others => m_b <= to_unsigned(2184, 16);
                         end case;
                     when 4  => m_a <= resize(s_g2m, 32); m_b <= resize(s_ys, 16);
-                    when 5  => m_a <= resize(s_g3l, 32); m_b <= to_unsigned(77, 16);
+                    when 5  => m_a <= resize(s_g3l, 32); m_b <= to_unsigned(96, 16);     -- x1.25 (was 77)
                     when 6  => m_a <= resize(s_ys, 32); m_b <= to_unsigned(14244, 16);
-                    when 7  => m_a <= resize(s_g3h, 32); m_b <= to_unsigned(180, 16);
+                    when 7  => m_a <= resize(s_g3h, 32); m_b <= to_unsigned(225, 16);    -- x1.25 (was 180)
                     when 8  => m_a <= resize(s_du, 32); m_b <= to_unsigned(256, 16);     -- 16 rows (the photo)
                     when 9  => m_a <= resize(s_u0, 32); m_b <= to_unsigned(256, 16);
                     when 10 => m_a <= resize(s_gp, 32); m_b <= resize(s_gp, 16);
@@ -545,7 +546,7 @@ begin
                 else s_drp <= resize(s_drpm, 28); end if;
                 -- K3: stripe bend (v0.5's slope to the default, steeper beyond) and the cell bend
                 s_pq <= s_pql + s_pqh;
-                s_gc <= resize(shift_left(resize(s_g3h, 12), 1) + resize(s_g3h, 12), 12);
+                s_gc <= shift_left(resize(s_g3h, 12), 2) - resize(shift_right(s_g3h, 2), 12);   -- 3.75 x (was 3 x)
                 -- P12: stripe band width (quantizer step), 2048 .. 4096 (the photo) .. 7162
                 if s_gp > 512 then
                     s_bq <= to_unsigned(4096, 14) + resize(shift_left(resize(s_gph, 14), 2) + shift_left(resize(s_gph, 14), 1), 14);

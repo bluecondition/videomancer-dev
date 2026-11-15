@@ -166,3 +166,12 @@ Working files: `.heirloom_work/rb_sinew/` (`notes.md` has every number).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 85.36 MHz (HD Analog 100.92, HD HDMI 85.36, HD Dual 89.01), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh sinew`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 % stronger camera effect at the top of K6; the K6 default is now 100 % (1023, set with the version bump).
+
+- **Class:** BEND: K6 (Melt) adds luma x the melt step to psi (and an eighth to theta), bending the sinews and ropes.
+- **Change:** Melt x1.25: the sequencer's `f_m5 = 3.75 K6^2 / 8192` (was 3 K6^2), so the 4-bit pixel step code tops out at 14 (was 11, 1.27x; max +-0.87 sinew cycle). Sequencer operand only (`4a - a/4` in place of `2a + a`).
+- **Build:** Built with router1: all six seed 1; worst HD 76.86 MHz (HD Analog 76.86, HD HDMI 96.10, HD Dual 94.07); max 6906 / 7680 LC.
+- **Check:** GHDL 480p render, bear, K6 = 100 %, old vs new (glides snapped in scratch copies): `.heirloom_work/rb_sinew/k6b/k6b_cmp.png`, the same picture with a stronger bend.

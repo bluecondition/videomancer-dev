@@ -35,6 +35,7 @@
 -- phase accumulator per pixel, a 20-stage pixel path.  Virtual 1080-line coordinates (SD shows the centre 4:3).
 -- Generated avid; output conditioning (Y, U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes, luma 13/16) before
 -- the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -469,7 +470,7 @@ begin
                     when 12 => z_fa <= resize(c_inch, 36);              z_fb <= resize(s_xa, 16);
                     when 13 => z_fa <= resize(unsigned(abs(d_k3)), 36); z_fb <= to_unsigned(7282, 16);         -- level
                     when 14 => z_fa <= resize(s_g6(12 downto 3), 36);  z_fb <= resize(s_g6(12 downto 3), 16);  -- k6^2
-                    when 15 => z_fa <= resize(c_z6, 36);                z_fb <= to_unsigned(276, 16);
+                    when 15 => z_fa <= resize(c_z6, 36);                z_fb <= to_unsigned(345, 16);   -- x1.25 (was 276)
                     when others => z_fa <= resize(c_bg, 36);             z_fb <= to_unsigned(111, 16);          -- Osc centre
                 end case;
             end if;
@@ -598,12 +599,12 @@ begin
                     when 370 =>
                         if d_k3(10) = '0' then c_o <= to_signed(C_ONE, 25) + signed(resize(f_acc(21 downto 0), 25));
                         else c_o <= to_signed(C_ONE, 25) - signed(resize(f_acc(21 downto 0), 25)); end if;
-                    -- bend gain: (k6^2 >> 10) * 276 >> 10, x3 for the Osc
+                    -- bend gain: (k6^2 >> 10) * 345 >> 10 (x1.25 the old 276), x3 for the Osc (held at 1023)
                     when 394 => c_z6 <= f_acc(19 downto 10);
                     when 418 =>
                         v_g := resize(f_acc(19 downto 10), 12);
                         if s_src = '1' then v_g := v_g + shift_left(v_g, 1); end if;
-                        c_bg <= v_g(9 downto 0);
+                        if v_g(11 downto 10) /= "00" then c_bg <= (others => '1'); else c_bg <= v_g(9 downto 0); end if;
                     when 442 =>
                         if s_src = '1' then c_ctrg <= f_acc(16 downto 0); else c_ctrg <= (others => '0'); end if;
                     -- next field's LFO phase: step = 33 + k4 * 273 / 1024

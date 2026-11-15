@@ -219,3 +219,15 @@ The whole 10.5 s clip was re-extracted at 10 fps (`seq3/`, `warm.py`, `track.py`
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 % stronger camera effect at the top of K6; the K6 default is now 100 % (1023, set with the version bump).
+
+- **Class:** BEND: K6 (Bend) adds K6^2 x luma to the feather field Z and keys the sky band.
+- **Change:** Gain x1.25 at every position: `c_vg` now holds `1.25 K6^2 / 4096` in half units (Q-1, 0 .. 158, the same 8 bits); the pixel path takes one shift less (`q6_vz = vp >> 1`, widened to 15 bits; `q6_vd = vp(14:4)`, mod 2048 like q7_dd). The Osc keeps twice the camera gain under its old ceiling (127 = the old 255), so the Osc at 100 % is unchanged. 1023 -> 1.24x.
+- **Build:** Built with router2: HD Analog seed 2, the rest seed 1; worst HD 78.15 MHz (HD Analog 78.41, HD HDMI 78.15, HD Dual 78.83); max 7203 / 7680 LC.
+- **Check:** GHDL 480p render, bear, K6 = 100 %, old vs new (glides snapped in scratch copies): `.heirloom_work/rb_plumage/k6b/k6b_cmp.png`, the same picture with a stronger bend.
+- **Router note:** router1 hung on SD Analog (seeds 1 and 2 froze at 6021 remaining arcs, the dup-pin ping-pong; the
+  netlist has 6 LUTs with two equal inputs in the knob-exponent / glide logic, no CARRY I0 == I1). Router2, the
+  default, routed all six. Rebuild with router2.

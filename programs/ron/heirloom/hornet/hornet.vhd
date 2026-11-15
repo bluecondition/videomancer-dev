@@ -43,6 +43,7 @@
 -- Generated avid; output conditioning (U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes with the running-sum
 -- resync, their 8-sample delays in a 16-deep block-RAM ring; luma [1 2 1] and 13/16) before the blanking gate.
 -- Colours in the hardware convention (u = Cr).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -511,10 +512,12 @@ begin
                     when 125 =>
                         if s_src = '1' then
                             -- Osc: 12x the camera's gain (the camera default is a quarter of v0.1.0's; the Osc stays as strong)
-                            v_eo := resize(f_acc(22 downto 6), 18) + resize(f_acc(22 downto 7), 18);
+                            -- K6 top +25 %: 15x the v0.1.1 camera gain (16x - 1x), the same 65535 ceiling
+                            v_eo := resize(f_acc(22 downto 5), 18) - resize(f_acc(22 downto 9), 18);
                             if v_eo(17 downto 16) /= "00" then c_eg <= (others => '1'); else c_eg <= v_eo(15 downto 0); end if;
                         else
-                            c_eg <= resize(f_acc(22 downto 9), 16);
+                            -- camera: 1.25x the v0.1.1 gain (1023 -> 13732: 3.1 cycles at full luma)
+                            c_eg <= resize(f_acc(22 downto 9), 16) + resize(f_acc(22 downto 11), 16);
                         end if;
                     when 141 => c_lean <= f_acc(15 downto 0);                        -- P12 * 55 (Q24 per line)
                     when 157 => c_sawi <= f_acc(23 downto 8);                        -- 65536 / 65.2 per virtual line

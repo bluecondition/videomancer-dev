@@ -170,3 +170,12 @@ Working files are in `.heirloom_work/rb_hornet/` (`notes.md` has the full log).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 150 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 % stronger camera effect at the top of K6; the K6 default is now 100 % (1023, set with the version bump).
+
+- **Class:** BEND: K6 (Etch) adds etch x luma to the field phase (mod 1), so the camera bends the band contours.
+- **Change:** Etch gain x1.25 at every position: camera `c_eg = f_acc >> 9 + f_acc >> 11` (1023 -> 13732, 3.1 cycles at full luma, was 2.5); the Osc keeps 12x the camera gain (now `16x - 1x` of the old base) under the same 65535 ceiling, so the Osc at 100 % is unchanged (it was already saturated). Sequencer only.
+- **Build:** Built with router1: all six seed 1; worst HD 82.15 MHz (HD Analog 82.15, HD HDMI 82.72, HD Dual 85.75); max 7196 / 7680 LC.
+- **Check:** GHDL 480p render, bear, K6 = 100 %, old vs new (glides snapped in scratch copies): `.heirloom_work/rb_hornet/k6b/k6b_cmp.png`, the same picture with a stronger bend.

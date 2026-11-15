@@ -39,6 +39,7 @@
 -- clocks in every mode.  Generated colours in the hardware convention (U carries Cr, V carries Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Melt (camera strength, was K5), K5 = Palette (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -626,7 +627,8 @@ begin
                     when 14 =>
                         if f_p < 512 then f_kk <= resize(v_p(21 downto 10), 12);
                         else f_kk <= to_unsigned(2170, 12) + resize(v_p(21 downto 10), 12); end if;
-                    when 15 => mulu(resize(f_x5, 12) + shift_left(resize(f_x5, 12), 1), f_x5);
+                    -- melt gain 3.75 k6^2 / 8192 (x1.25 the old 3 k6^2; 1023 -> 479: pixel step 14, was 11)
+                    when 15 => mulu(shift_left(resize(f_x5, 12), 2) - resize(shift_right(f_x5, 2), 12), f_x5);
                     when 16 => f_m5 <= resize(v_p(21 downto 13), 9);
                     when 17 => e_st <= 0;
 

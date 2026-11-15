@@ -160,3 +160,12 @@ deadband at 512, which is exactly the still.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 % stronger camera effect at the top of K6; the K6 default is now 100 % (1023, set with the version bump).
+
+- **Class:** BEND: K6 (Bend) adds K6^2 x luma to the staircase value before the quantizer (the rows bend, then posterize).
+- **Change:** Gain x1.25 at every position: sequencer constant 276 -> 345 (camera gain up to 343, was 275). The Osc's 3x is held at the 10-bit ceiling 1023 (was 825 at the top, so 1.24x).
+- **Build:** Built with router1: all six seed 1; worst HD 86.45 MHz (HD Analog 86.45, HD HDMI 91.84, HD Dual 95.65); max 6941 / 7680 LC.
+- **Check:** GHDL 480p render, bear, K6 = 100 %, old vs new (glides snapped in scratch copies): `.heirloom_work/rb_tilework/k6b/k6b_cmp.png`, the same picture with a stronger bend.

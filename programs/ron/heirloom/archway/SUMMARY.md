@@ -228,3 +228,12 @@ Working files are in `.heirloom_work/rb_archway/` (`notes.md` has every step).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K3 (Etch), so K3 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K3 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.2, rebuilt with router1: SD HDMI seed 2; HD worst 74.65 MHz (HD Analog 82.17, HD HDMI 74.65, HD Dual 79.69), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh archway`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 % stronger camera effect at the top of K6; the K6 default is now 100 % (1023, set with the version bump).
+
+- **Class:** BEND: K6 (Etch) adds etch x luma to the arch field F, so the camera bends every contour, cell and line.
+- **Change:** Etch gain x1.25 at every knob position: the sequencer's cube-law constant 1762 -> 2200 and the gain register moved from Q8 to Q7 (`c_ge = k6^3 * 2200 >> 31`, 1023 -> 1096 = 1.248x the old 1756 in Q8), the pixel path shifts by 7 instead of 8. Same widths, no new logic: the etch tops out at 2046 h (luma <= 239, Osc <= 223), still inside the 11-bit p5_e and F < 4096 h for the flag ROMs.
+- **Build:** Built with router1: all six seed 1; worst HD 77.45 MHz (HD Analog 80.68, HD HDMI 90.09, HD Dual 77.45); max 7343 / 7680 LC.
+- **Check:** GHDL 480p render, bear, K6 = 100 %, old vs new (glides snapped in scratch copies): `.heirloom_work/rb_archway/k6b/k6b_cmp.png`, the same picture with a stronger bend.

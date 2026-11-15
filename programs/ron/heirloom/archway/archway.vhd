@@ -48,6 +48,7 @@
 -- in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Etch (camera strength, was K3), K3 = Palette (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -169,7 +170,7 @@ architecture archway of program_top is
     signal c_rk   : unsigned(14 downto 0) := to_unsigned(2048, 15);    -- ring scale 52 / cell_h, Q12
     signal c_rlp  : unsigned(10 downto 0) := to_unsigned(885, 11);     -- line phase per h, Q16
     signal c_k    : unsigned(17 downto 0) := to_unsigned(51990, 18);   -- curvature
-    signal c_ge   : unsigned(10 downto 0) := (others => '0');          -- etch gain per luma step, Q8 h
+    signal c_ge   : unsigned(10 downto 0) := (others => '0');          -- etch gain per luma step, Q7 h
     signal c_dst  : unsigned(15 downto 0) := (others => '0');          -- line drift per field, Q16 periods
     signal c_cst  : unsigned(10 downto 0) := (others => '0');          -- S&H clock crawl per field, Q4 h (< a cell)
     signal c_bst  : unsigned(15 downto 0) := (others => '0');          -- chevron breathing step
@@ -509,7 +510,7 @@ begin
                     -- slots 9 .. 21 chain through the one temporary z_sq
                     when 9  => z_fa <= resize(s_g3(12 downto 3), 32);  z_fb <= resize(s_g3(12 downto 3), 16);  -- etch^2
                     when 10 => z_fa <= resize(s_g3(12 downto 3), 32);  z_fb <= z_sq(19 downto 4);         -- etch^3
-                    when 11 => z_fa <= to_unsigned(1762, 32);          z_fb <= z_sq(15 downto 0);         -- etch gain
+                    when 11 => z_fa <= to_unsigned(2200, 32);          z_fb <= z_sq(15 downto 0);         -- etch gain
                     when 12 => z_fa <= resize(s_vm, 32);               z_fb <= resize(s_vm, 16);          -- speed^2
                     when 13 =>                                                                            -- line drift
                         if s_vneg = '0' then z_fa <= resize(s_vm, 32); z_fb <= to_unsigned(7936, 16);     -- right: m
@@ -611,9 +612,10 @@ begin
                             when others => c_k <= f_acc(31 downto 14);
                         end case;
                     when 266 => z_sq <= f_acc(19 downto 0);
-                    -- etch gain = k3^3 * 1762 >> 30 (400 -> 105 = v0.5's 49 px, 1023 -> 1756)
+                    -- etch gain = k6^3 * 2200 >> 31, Q7 (x1.25 the old Q8 k^3 * 1762 >> 30; 1023 -> 1096, so the
+                    -- etch (luma <= 239) stays under 2048 h in the 11-bit p5_e)
                     when 290 => z_sq <= resize(f_acc(25 downto 10), 20);
-                    when 314 => c_ge <= f_acc(26 downto 16);
+                    when 314 => c_ge <= f_acc(27 downto 17);
                     -- speed: lines (Q16 periods per field) and grid crawl (Q16 cells per field); 640 = v0.5
                     when 338 => z_m2 <= f_acc(17 downto 0);
                     when 362 => c_dst <= f_acc(25 downto 10);
@@ -895,7 +897,7 @@ begin
             p4_eb <= resize(p3_lm(7 downto 4) * c_ge, 15);
             p4_ed <= p3_ed; p4_lag <= p3_lag;
             -- 5: etch; |dx| - s (with the tear for the line path)
-            p5_e   <= resize(shift_right(resize(p4_ea, 19) + shift_left(resize(p4_eb, 19), 4), 8), 11);
+            p5_e   <= resize(shift_right(resize(p4_ea, 19) + shift_left(resize(p4_eb, 19), 4), 7), 11);   -- c_ge Q7
             p5_as  <= signed(resize(p4_adx, 14)) - l_sh;
             p5_asj <= signed(resize(p4_adx, 14)) + l_jms;
             p5_asr <= signed(resize(p4_adx, 14)) - l_shd;

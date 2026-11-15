@@ -47,6 +47,7 @@
 -- width); output conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16,
 -- luma to ~777) before the blanking gate.  Latency 24 clocks in every mode.
 -- Generated colours in the hardware convention (u = Cr, v = Cb), see escalator.py.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -178,7 +179,7 @@ architecture escalator of program_top is
     signal f_s5sq  : unsigned(17 downto 0) := (others => '0');
     signal f_spd   : signed(20 downto 0) := (others => '0');
     signal f_bo    : signed(15 downto 0) := (others => '0');
-    signal f_bend  : unsigned(9 downto 0) := to_unsigned(113, 10);
+    signal f_bend  : unsigned(10 downto 0) := to_unsigned(141, 11);   -- 1.25 K6^3 / 2^20 (0 .. 1276)
     signal f_ride  : unsigned(23 downto 0) := (others => '0');
     signal f_ta, f_tb : unsigned(15 downto 0) := (others => '0');
     signal f_mir, f_ramp, f_inv, f_viv, f_osc : std_logic := '0';
@@ -553,7 +554,7 @@ begin
                     if s_s3 = '1' then f_bo <= -signed(v_pr(19 downto 4));
                     else f_bo <= signed(v_pr(19 downto 4)); end if;
                 end if;
-                if q_wr(19) = '1' then f_bend <= v_pr(19 downto 10); end if;
+                if q_wr(19) = '1' then f_bend <= resize(v_pr(19 downto 10), 11) + resize(v_pr(19 downto 12), 11); end if;
                 if q_wr(21) = '1' then f_cols <= to_unsigned(512, 13) + v_pr(32 downto 20); end if;
                 if q_wr(22) = '1' then f_sinc <= v_pr(27 downto 8); end if;
                 if q_wr(23) = '1' then
@@ -881,14 +882,14 @@ begin
             -- 4: S +- h, bend product
             p4_uf <= p3_uf;
             p4_hs <= l_s + p3_h; p4_hns <= l_s + p3_hn;
-            p4_pe <= p3_src * signed(resize(f_bend(9 downto 1), 10));
+            p4_pe <= p3_src * signed(resize(f_bend(10 downto 2), 10));      -- half the bend: doubled below
 
             -- 5: blob edge, slab distance, rim thresholds
             p5_uf <= p4_uf;
             if p_sync(4) = '1' and l_low = '1' then v_e := resize(l_es, 19); else v_e := resize(l_e, 19); end if;
-            p5_e <= v_e + resize(p4_pe, 19);
-            p5_dd  <= p4_hs + unsigned(resize(shift_right(p4_pe, 3), 16));
-            p5_ddn <= p4_hns + unsigned(resize(shift_right(p4_pe, 3), 16));
+            p5_e <= v_e + shift_left(resize(p4_pe, 19), 1);
+            p5_dd  <= p4_hs + unsigned(resize(shift_right(p4_pe, 2), 16));
+            p5_ddn <= p4_hns + unsigned(resize(shift_right(p4_pe, 2), 16));
             if p_teff(4) > 404 then p5_t405 <= p_teff(4) - 404; else p5_t405 <= (others => '0'); end if;
             if p_teff(4) > 945 then p5_t946 <= p_teff(4) - 945; else p5_t946 <= (others => '0'); end if;
 
