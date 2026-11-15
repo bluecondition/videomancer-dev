@@ -26,7 +26,7 @@ Flash from `out/rev_b/ron/kinetic/<name>.vmprog`; rebuild one with `./build_set.
 | 8 | cogwork | A lattice of meshed gears counter-rotating | Speed and tooth count | in progress |
 | 9 | pendula | Dots orbiting per cell; phase gradients make them read as rolling rings | Phase gradient | in progress |
 | 10 | pinwheel | Fan cells whose blade count and twist morph | Twist | in progress |
-| 11 | hexbloom | A honeycomb of concentric hexagons breathing per cell | Bloom depth | in progress |
+| 11 | [hexbloom](hexbloom/) | A honeycomb of concentric hexagons breathing per cell | Bloom depth | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 97.1-104.2 MHz; 6,604-6,622 LC, 86 %, 10 EBR); not flashed |
 | 12 | tumbler | Rhombille cubes whose shading flips in waves (reversible-cube illusion) | Flip wave | in progress |
 | 13 | bauhaus | Cells of quarter-arcs, half-discs, bars and dots re-rolled by a wave | Re-roll rate | in progress |
 | 14 | quasi | Quasicrystal: 5 to 8 plane waves summed into shimmering Penrose-like contours | Symmetry order | in progress |

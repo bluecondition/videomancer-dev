@@ -1,0 +1,166 @@
+# Hexbloom - Kinetic (v0.1.0, 2026-11-14).  Honeycomb op-art: every hexagonal cell holds a nest of concentric
+# hexagons (hexagrams, triangles) pumping on a travelling wave; the picture's luma, held per cell, shifts the nests.
+# See hexbloom.vhd, hexbloom.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 40
+program_id = "com.czartroniks.hexbloom"
+program_name = "Hexbloom"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Pattern", "Print"]
+program_type = "processing"
+description = "Honeycomb op-art: nests of hexagon rings pump on a travelling wave; video luma blooms each cell."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Shape"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Depth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 440
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 740
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 560
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+value_labels = ["Ink", "Paper", "Bauhaus", "Vega", "Outrun", "Ultra", "Ocean", "Ice", "Moss", "Citrus", "Terra", "Ember", "Gold", "Candy", "Mint", "Plum"]
+initial_value_label = "Vega"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Smooth", "Snap"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Linear", "Radial"]
+initial_value_label = "Linear"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Rings"
+value_labels = ["Bands", "Lines"]
+initial_value_label = "Bands"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Grout"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Bloom"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Honeycomb"
+
+[[preset]]
+name = "Star Field"
+rotary_potentiometer_1 = 760
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 520
+rotary_potentiometer_5 = 420
+rotary_potentiometer_6 = 288
+toggle_switch_8 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Flip Tiles"
+rotary_potentiometer_1 = 560
+rotary_potentiometer_3 = 362
+rotary_potentiometer_4 = 800
+rotary_potentiometer_5 = 640
+rotary_potentiometer_6 = 160
+toggle_switch_7 = 1
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Wire Nests"
+rotary_potentiometer_1 = 820
+rotary_potentiometer_3 = 700
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 32
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Arrowheads"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 500
+rotary_potentiometer_6 = 608
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Full Bloom"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 780
+rotary_potentiometer_5 = 380
+rotary_potentiometer_6 = 480
+toggle_switch_8 = 1
+linear_potentiometer_12 = 1023
