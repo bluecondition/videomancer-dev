@@ -32,7 +32,10 @@
 --   K3  Blocks   mosaic block width 8 .. 240 px (41 = photo)
 --   K4  Speed    bipolar: the bands roll and the noise rides with them; still at the centre
 --   K5  Edge     where the diagonal sits: a corner of mosaic .. all mosaic
---   K6  Hue      colourizer phase (bipolar, photo at the centre)
+--   K6  Camera   camera strength (v0.5.1): a gain on the camera luma above black, ahead of
+--                the colourizer and red terms: 0 = no camera (a black input's picture),
+--                25 % = the shipped x1, 50 % = x2, 100 % = x2.9; the Osc blobs x0 / 0.5 /
+--                1 / 2.  (K6 Hue, the colourizer phase, is dropped: fixed at the photo's centre.)
 --   S7  Mosaic   Blocks / Lines (no S&H: the held lines show as a barcode)
 --   S8  Strips   Sparse (every 8th band) / Dense (every other band)
 --   S9  Flip     mosaic on the right, the diagonal mirrored
@@ -47,6 +50,7 @@
 -- 8-delay ring.
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K6 Hue dropped (fixed at 512, the photo).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -258,10 +262,13 @@ architecture streak of program_top is
     signal s_avq : std_logic := '0';
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
-    -- glides: K1, K2, K3, K5, P12 (Q.3)
-    type t_g is array(0 to 4) of unsigned(12 downto 0);
+    -- glides: K1, K2, K3, K5, P12, K6 (Q.3)
+    type t_g is array(0 to 5) of unsigned(12 downto 0);
     signal s_g : t_g := (to_unsigned(340 * 8, 13), to_unsigned(526 * 8, 13), to_unsigned(605 * 8, 13),
-                         to_unsigned(293 * 8, 13), to_unsigned(445 * 8, 13));
+                         to_unsigned(293 * 8, 13), to_unsigned(445 * 8, 13), to_unsigned(512 * 8, 13));
+    -- K6 Camera: camera gain (Q3, 8 = the shipped x1) and the Osc blob gain select, per field
+    signal c_g5 : unsigned(4 downto 0) := to_unsigned(16, 5);
+    signal c_osel : unsigned(1 downto 0) := to_unsigned(3, 2);
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
     signal gl_w : std_logic := '0';
@@ -346,8 +353,10 @@ architecture streak of program_top is
     signal c_y : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal c_av, c_avq : std_logic := '0';
     signal c_sm : unsigned(13 downto 0) := to_unsigned(502 * 16, 14);
-    signal c_dv : signed(10 downto 0) := (others => '0');
-    signal c_sv : signed(10 downto 0) := (others => '0');
+    signal c_dl : signed(10 downto 0) := (others => '0');
+    signal c_dgp : signed(16 downto 0) := (others => '0');
+    signal c_dv : signed(12 downto 0) := (others => '0');
+    signal c_sv : signed(11 downto 0) := (others => '0');
     signal c_rv : signed(9 downto 0) := (others => '0');
 
     -- beam (stage 0)
@@ -385,6 +394,7 @@ architecture streak of program_top is
     signal p12_nb  : signed(11 downto 0) := (others => '0');
     signal p12_ad  : unsigned(13 downto 0) := (others => '0');
     signal p13_nf, p13_nb : signed(11 downto 0) := (others => '0');
+    signal p13_nbo : signed(12 downto 0) := (others => '0');          -- K6: Osc blobs x gain
     signal p13_rg  : unsigned(8 downto 0) := (others => '0');
     signal p14_wf, p14_wb : signed(7 downto 0) := (others => '0');
     signal p14_pm  : signed(17 downto 0) := (others => '0');
@@ -578,8 +588,8 @@ begin
                 if v_x > 7 then f_sp <= v_x - 8;
                 elsif v_x < -7 then f_sp <= v_x + 8;
                 else f_sp <= (others => '0'); end if;
-                -- K6 Hue: colourizer phase, photo at the centre
-                f_base <= to_signed(220 - 512, 12) + signed(resize(unsigned(registers_in(5)), 12));
+                -- K6 Hue dropped in the K6 camera pass: colourizer phase fixed at the photo's centre
+                f_base <= to_signed(220, 12);
                 f_lines <= registers_in(6)(0);
                 f_dense <= registers_in(6)(1);
                 f_flip  <= registers_in(6)(2);
@@ -599,7 +609,7 @@ begin
             end if;
 
             -- glides: K1, K2, K3, K5, P12 ease 1/8 of the gap per field (deadband 4)
-            if s_zone = '1' and s_zc >= 4 and s_zc < 24 then q_gon <= '1'; else q_gon <= '0'; end if;
+            if s_zone = '1' and s_zc >= 4 and s_zc < 28 then q_gon <= '1'; else q_gon <= '0'; end if;
             q_gi <= s_zc(4 downto 2) - 1; q_gph <= s_zc(1 downto 0);
             if q_gon = '1' then
                 case to_integer(q_gph) is
@@ -609,7 +619,8 @@ begin
                             when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
                             when 2 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(2);
                             when 3 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(3);
-                            when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(4);
+                            when 4 => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(4);
+                            when others => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(5);
                         end case;
                     when 1 =>
                         gl_d <= signed(resize(gl_k, 14)) - signed(resize(gl_o, 14));
@@ -624,10 +635,22 @@ begin
                                 when 1 => s_g(1) <= gl_n;
                                 when 2 => s_g(2) <= gl_n;
                                 when 3 => s_g(3) <= gl_n;
-                                when others => s_g(4) <= gl_n;
+                                when 4 => s_g(4) <= gl_n;
+                                when others => s_g(5) <= gl_n;
                             end case;
                         end if;
                 end case;
+            end if;
+
+            -- K6 Camera (after the glides): camera gain (Q3) k / 128 up to 50 % (x2), then 2 + (k - 512) / 512
+            -- (x2.9 at 100 %); Osc blobs x0 / 0.5 / 1 / 2
+            if s_zone = '1' and s_zc = 30 then
+                if s_g(5)(12) = '0' then c_g5 <= s_g(5)(12 downto 8);
+                else c_g5 <= "10" & s_g(5)(11 downto 9); end if;
+                if s_g(5)(12 downto 8) = 0 then c_osel <= "00";
+                elsif s_g(5)(12 downto 3) < 192 then c_osel <= "01";
+                elsif s_g(5)(12 downto 3) < 384 then c_osel <= "10";
+                else c_osel <= "11"; end if;
             end if;
 
             -- serial products: slot p = zc/32 (1..15), phase 0 load, 1..22 step, 24 store
@@ -875,6 +898,8 @@ begin
     ---------------------------------------------------------------------------
     p_cam : process(clk)
         variable v_d : signed(14 downto 0);
+        variable v_g : signed(13 downto 0);
+        variable v_r : signed(14 downto 0);
     begin
         if rising_edge(clk) then
             c_y <= unsigned(data_in.y);
@@ -887,9 +912,17 @@ begin
                 v_d := signed(resize(c_sm, 15)) + v_d;
                 c_sm <= unsigned(v_d(13 downto 0));
             end if;
-            c_dv <= signed(resize(c_sm(13 downto 4), 11)) - 502;
-            c_sv <= shift_right(c_dv, 1) + shift_right(c_dv, 3) + shift_right(c_dv, 4);
-            c_rv <= resize(shift_right(resize(c_dv, 13) + (resize(c_dv, 13) sll 1), 3), 10);
+            -- K6 Camera: (luma - black) x gain (Q3, its own stage), then the shipped -438 offset,
+            -- so 0 = a black input and gain 8 = the shipped terms exactly
+            c_dl <= signed(resize(c_sm(13 downto 4), 11)) - 64;
+            c_dgp <= c_dl * signed('0' & c_g5);
+            v_g := resize(shift_right(c_dgp, 3), 14) - 438;
+            if v_g > 2900 then c_dv <= to_signed(2900, 13); else c_dv <= v_g(12 downto 0); end if;
+            c_sv <= resize(shift_right(c_dv, 1) + shift_right(c_dv, 3) + shift_right(c_dv, 4), 12);
+            v_r := shift_right(resize(c_dv, 15) + (resize(c_dv, 15) sll 1), 3);
+            if v_r > 383 then c_rv <= to_signed(383, 10);
+            elsif v_r < -383 then c_rv <= to_signed(-383, 10);
+            else c_rv <= v_r(9 downto 0); end if;
         end if;
     end process p_cam;
 
@@ -1055,6 +1088,12 @@ begin
             -- 13: fine state saturated; ridge
             p13_nf <= sats(p12_nv, 12);
             p13_nb <= p12_nb;
+            case to_integer(c_osel) is
+                when 0 => p13_nbo <= (others => '0');
+                when 1 => p13_nbo <= resize(shift_right(p12_nb, 1), 13);
+                when 2 => p13_nbo <= resize(p12_nb, 13);
+                when others => p13_nbo <= shift_left(resize(p12_nb, 13), 1);
+            end case;
             if p12_ad < 384 then p13_rg <= to_unsigned(384, 9) - resize(p12_ad(8 downto 0), 9);
             else p13_rg <= (others => '0'); end if;
 
@@ -1064,8 +1103,11 @@ begin
             v_12 := shift_right(resize(p13_nb, 13) + 8, 4);
             if v_12 > 127 then p14_wb <= to_signed(127, 8); else p14_wb <= v_12(7 downto 0); end if;
             p14_pm <= p13_nf * signed('0' & f_gm);
-            p14_so <= resize(shift_right((resize(p13_nb, 16) sll 3) + resize(p13_nb, 16), 5), 12);
-            p14_ro <= shift_right(p13_nb, 3) + shift_right(p13_nb, 6);
+            p14_so <= resize(shift_right((resize(p13_nbo, 17) sll 3) + resize(p13_nbo, 17), 5), 12);
+            v_13 := shift_right(resize(p13_nbo, 14), 3) + shift_right(resize(p13_nbo, 14), 6);
+            if v_13 > 511 then p14_ro <= to_signed(511, 12);
+            elsif v_13 < -511 then p14_ro <= to_signed(-511, 12);
+            else p14_ro <= resize(v_13, 12); end if;
             p14_rv <= resize(c_rv, 12) + shift_right(p13_nb, 4);
             p14_rg <= resize(p13_rg, 10) + resize(p13_rg(8 downto 3), 10);
 

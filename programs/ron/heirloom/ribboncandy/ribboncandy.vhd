@@ -19,11 +19,15 @@
 -- sample-and-held on the same cell grid and thresholded per RGB channel into the same colours.
 --
 --   K1  Ribbons  ribbon oscillator frequency x0.4 .. x2.6 (3.7 across = the photo)
---   K2  Bends    the slow wave's frequency x0.3 .. x3.5 (1.46 S-bends per frame = the photo)
+--   K2  Patch    RGB cable patch: RGB / RBG / GRB / GBR / BRG / BGR (was K6; v0.5.2)
+--       (Bends, the slow wave's frequency, is fixed at the photo's 1.46 S-bends per frame)
 --   K3  Twist    face oscillator frequency x0.45 .. x2.5 (faces and cells together)
 --   K4  Speed    bipolar, still in the centre: the bends and twists roll down the frame
 --   K5  Cells    cells per face period 2 .. 24 (8 = the photo), rows scale with them
---   K6  Patch    RGB cable patch: RGB / RBG / GRB / GBR / BRG / BGR
+--   K6  Camera   camera strength (v0.5.2): Video = a gain on the camera ahead of the cell
+--                thresholds (0 = no camera: black cells, as with a black input; 50 % = the
+--                shipped look; 100 % = x1.6); Osc = the photo's cells drop out to black below
+--                50 % and light up the black cells above it
 --   S7  Faces    Twist (photo) / Solid (every ribbon on its blue face)
 --   S8  Ground   Cells (photo) / Black
 --   S9  Kinks    On (photo) / Off (the top and bottom zigzags)
@@ -36,6 +40,7 @@
 -- lines.  Generated avid; output conditioning ([1 2 2 2 2 2 2 2 1]/16 on Y, U and V, luma 13/16)
 -- and blanking gate.  Latency 16 clocks in every mode.  Colours: u = Cr, v = Cb.
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Patch (was K6); K2 Bends fixed at 512 (C_KFIX_2).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -48,6 +53,7 @@ use work.ribboncandy_pkg.all;
 use work.all;
 
 architecture ribboncandy of program_top is
+    constant C_KFIX_2 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(512, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 16;   -- matches processing_delay_clks
 
     function f_kx(t : std_logic_vector(3 downto 0)) return unsigned is    -- virtual px per px, Q12
@@ -111,18 +117,23 @@ architecture ribboncandy of program_top is
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
     -- glided knobs (10.3), switches
-    signal g1, g2, g3, g5, g12 : unsigned(12 downto 0) := (others => '0');
+    signal g1, g2, g3, g5, g12, g6 : unsigned(12 downto 0) := (others => '0');
     signal s_sp : signed(10 downto 0) := (others => '0');
     signal s_asp : unsigned(9 downto 0) := (others => '0');
     signal s_patch : unsigned(2 downto 0) := (others => '0');
     signal s_solid, s_black, s_nokink, s_flip, s_osc : std_logic := '0';
     signal s_warm : std_logic := '0';
     -- glide pipeline (3 clocks after the zone start): d = k - g; step = g + d/8, big = |d| > 31; apply
-    type t_gd is array (0 to 4) of signed(14 downto 0);
-    type t_gn is array (0 to 4) of unsigned(12 downto 0);
+    type t_gd is array (0 to 5) of signed(14 downto 0);
+    type t_gn is array (0 to 5) of unsigned(12 downto 0);
     signal s_gd : t_gd := (others => (others => '0'));
     signal s_gn : t_gn := (others => (others => '0'));
-    signal s_gb : std_logic_vector(4 downto 0) := (others => '0');
+    signal s_gb : std_logic_vector(5 downto 0) := (others => '0');
+    -- K6 Camera: camera thresholds (Video) and Osc cell keep / fill levels, per field
+    signal c_tlo : signed(11 downto 0) := to_signed(395, 12);
+    signal c_thi : signed(11 downto 0) := to_signed(653, 12);
+    signal c_okeep : unsigned(8 downto 0) := to_unsigned(256, 9);
+    signal c_ofill : unsigned(7 downto 0) := (others => '0');
     signal s_zgo2, s_zgo3 : std_logic := '0';
 
     -- field constants
@@ -208,6 +219,9 @@ architecture ribboncandy of program_top is
     signal p_thk3, p_thn3 : std_logic := '0';
     signal p_g3, p_rg3 : unsigned(7 downto 0) := (others => '0');
     signal p_cel3 : unsigned(2 downto 0) := (others => '0');
+    signal p_ch2 : unsigned(7 downto 0) := (others => '0');            -- K6 Osc: per-cell hash
+    signal p_odrop3, p_ofill3 : std_logic := '0';
+    signal p_ofc3 : unsigned(2 downto 0) := (others => '0');
     signal p_vc3, s_vhold : unsigned(3 downto 0) := (others => '0');
     signal p_rgb4, p_o5 : t_u8(0 to 2) := (others => (others => '0'));
     signal p_yr6, p_yg6, p_yb6 : unsigned(15 downto 0) := (others => '0');
@@ -309,10 +323,11 @@ begin
             s_zgo2 <= s_zgo; s_zgo3 <= s_zgo2;
             if s_zgo = '1' then
                 s_gd(0) <= signed(resize(unsigned(registers_in(0)) & "000", 15)) - signed(resize(g1, 15));
-                s_gd(1) <= signed(resize(unsigned(registers_in(1)) & "000", 15)) - signed(resize(g2, 15));
+                s_gd(1) <= signed(resize(unsigned(C_KFIX_2) & "000", 15)) - signed(resize(g2, 15));
                 s_gd(2) <= signed(resize(unsigned(registers_in(2)) & "000", 15)) - signed(resize(g3, 15));
                 s_gd(3) <= signed(resize(unsigned(registers_in(4)) & "000", 15)) - signed(resize(g5, 15));
                 s_gd(4) <= signed(resize(unsigned(registers_in(7)) & "000", 15)) - signed(resize(g12, 15));
+                s_gd(5) <= signed(resize(unsigned(registers_in(5)) & "000", 15)) - signed(resize(g6, 15));
             end if;
             if s_zgo2 = '1' then
                 v_g := signed(resize(g1, 15)) + shift_right(s_gd(0), 3); s_gn(0) <= unsigned(v_g(12 downto 0));
@@ -320,22 +335,24 @@ begin
                 v_g := signed(resize(g3, 15)) + shift_right(s_gd(2), 3); s_gn(2) <= unsigned(v_g(12 downto 0));
                 v_g := signed(resize(g5, 15)) + shift_right(s_gd(3), 3); s_gn(3) <= unsigned(v_g(12 downto 0));
                 v_g := signed(resize(g12, 15)) + shift_right(s_gd(4), 3); s_gn(4) <= unsigned(v_g(12 downto 0));
-                for i in 0 to 4 loop
+                v_g := signed(resize(g6, 15)) + shift_right(s_gd(5), 3); s_gn(5) <= unsigned(v_g(12 downto 0));
+                for i in 0 to 5 loop
                     if s_gd(i) > 31 or s_gd(i) < -31 then s_gb(i) <= '1'; else s_gb(i) <= '0'; end if;
                 end loop;
             end if;
             if s_zgo3 = '1' then
                 s_warm <= '1';
                 if s_warm = '0' then
-                    g1 <= unsigned(registers_in(0)) & "000"; g2 <= unsigned(registers_in(1)) & "000";
+                    g1 <= unsigned(registers_in(0)) & "000"; g2 <= unsigned(C_KFIX_2) & "000";
                     g3 <= unsigned(registers_in(2)) & "000"; g5 <= unsigned(registers_in(4)) & "000";
-                    g12 <= unsigned(registers_in(7)) & "000";
+                    g12 <= unsigned(registers_in(7)) & "000"; g6 <= unsigned(registers_in(5)) & "000";
                 else
                     if s_gb(0) = '1' then g1 <= s_gn(0); end if;
                     if s_gb(1) = '1' then g2 <= s_gn(1); end if;
                     if s_gb(2) = '1' then g3 <= s_gn(2); end if;
                     if s_gb(3) = '1' then g5 <= s_gn(3); end if;
                     if s_gb(4) = '1' then g12 <= s_gn(4); end if;
+                    if s_gb(5) = '1' then g6 <= s_gn(5); end if;
                 end if;
                 f_ci <= (others => '0');
                 f_st <= to_unsigned(1, 6);
@@ -348,9 +365,9 @@ begin
                 v_a := -v_s;
                 if v_s < 0 then s_asp <= unsigned(v_a(9 downto 0)); else s_asp <= unsigned(v_s(9 downto 0)); end if;
                 -- K6 patch: (k6 * 3) >> 9 -> 0..5; a labelled default arrives as its index
-                v_t := resize(unsigned(registers_in(5)), 13) + resize(unsigned(registers_in(5)) & '0', 13);
-                if unsigned(registers_in(5)) < 6 then
-                    s_patch <= unsigned(registers_in(5)(2 downto 0));
+                v_t := resize(unsigned(registers_in(1)), 13) + resize(unsigned(registers_in(1)) & '0', 13);
+                if unsigned(registers_in(1)) < 6 then
+                    s_patch <= unsigned(registers_in(1)(2 downto 0));
                 else
                     s_patch <= v_t(11 downto 9);
                 end if;
@@ -562,6 +579,56 @@ begin
                         f_st <= f_st + 1;
                     when 33 =>
                         s_linit <= '1';            -- start the line engine on line 0
+                        f_st <= f_st + 1;
+                    -- K6 Camera: the camera thresholds scaled by s = 1 / gain, from a 32-step table of the
+                    -- glided knob (k / 32): below 50 % s = 1 + 4 ((512 - k) / 512)^3 (0 %: s = 5, every
+                    -- threshold out of reach = no camera; 25 %: s = 1.41), above s = 1 - 0.375 (k - 512) / 512
+                    -- (100 %: gain 1.54).  T = 395 s, 653 s, clamped to 2047; 50 % = the shipped 395 / 653.
+                    -- Osc: keep k/2 of 256 cells below 50 %, fill (k - 512) / 4 of 256 black cells above.
+                    when 34 =>
+                        v_d := g6(12 downto 3);
+                        if v_d(9) = '1' then
+                            c_okeep <= to_unsigned(256, 9);
+                            v_t := resize(v_d - 512, 13);
+                            c_ofill <= v_t(9 downto 2);
+                        else
+                            c_okeep <= resize(v_d(8 downto 1), 9);
+                            c_ofill <= (others => '0');
+                        end if;
+                        case to_integer(g6(12 downto 8)) is
+                            when 0 => c_tlo <= to_signed(1975, 12); c_thi <= to_signed(2047, 12);
+                            when 1 => c_tlo <= to_signed(1570, 12); c_thi <= to_signed(2047, 12);
+                            when 2 => c_tlo <= to_signed(1343, 12); c_thi <= to_signed(2047, 12);
+                            when 3 => c_tlo <= to_signed(1147, 12); c_thi <= to_signed(1897, 12);
+                            when 4 => c_tlo <= to_signed(981, 12); c_thi <= to_signed(1622, 12);
+                            when 5 => c_tlo <= to_signed(840, 12); c_thi <= to_signed(1390, 12);
+                            when 6 => c_tlo <= to_signed(725, 12); c_thi <= to_signed(1198, 12);
+                            when 7 => c_tlo <= to_signed(632, 12); c_thi <= to_signed(1045, 12);
+                            when 8 => c_tlo <= to_signed(557, 12); c_thi <= to_signed(920, 12);
+                            when 9 => c_tlo <= to_signed(501, 12); c_thi <= to_signed(829, 12);
+                            when 10 => c_tlo <= to_signed(459, 12); c_thi <= to_signed(760, 12);
+                            when 11 => c_tlo <= to_signed(430, 12); c_thi <= to_signed(711, 12);
+                            when 12 => c_tlo <= to_signed(411, 12); c_thi <= to_signed(681, 12);
+                            when 13 => c_tlo <= to_signed(401, 12); c_thi <= to_signed(663, 12);
+                            when 14 => c_tlo <= to_signed(396, 12); c_thi <= to_signed(655, 12);
+                            when 15 => c_tlo <= to_signed(395, 12); c_thi <= to_signed(653, 12);
+                            when 16 => c_tlo <= to_signed(395, 12); c_thi <= to_signed(653, 12);
+                            when 17 => c_tlo <= to_signed(385, 12); c_thi <= to_signed(637, 12);
+                            when 18 => c_tlo <= to_signed(376, 12); c_thi <= to_signed(622, 12);
+                            when 19 => c_tlo <= to_signed(367, 12); c_thi <= to_signed(607, 12);
+                            when 20 => c_tlo <= to_signed(357, 12); c_thi <= to_signed(591, 12);
+                            when 21 => c_tlo <= to_signed(348, 12); c_thi <= to_signed(576, 12);
+                            when 22 => c_tlo <= to_signed(339, 12); c_thi <= to_signed(561, 12);
+                            when 23 => c_tlo <= to_signed(330, 12); c_thi <= to_signed(545, 12);
+                            when 24 => c_tlo <= to_signed(320, 12); c_thi <= to_signed(530, 12);
+                            when 25 => c_tlo <= to_signed(311, 12); c_thi <= to_signed(515, 12);
+                            when 26 => c_tlo <= to_signed(302, 12); c_thi <= to_signed(499, 12);
+                            when 27 => c_tlo <= to_signed(293, 12); c_thi <= to_signed(484, 12);
+                            when 28 => c_tlo <= to_signed(283, 12); c_thi <= to_signed(469, 12);
+                            when 29 => c_tlo <= to_signed(274, 12); c_thi <= to_signed(454, 12);
+                            when 30 => c_tlo <= to_signed(265, 12); c_thi <= to_signed(438, 12);
+                            when others => c_tlo <= to_signed(256, 12); c_thi <= to_signed(423, 12);
+                        end case;
                         f_st <= (others => '0');
                     when others =>
                         null;
@@ -777,7 +844,8 @@ begin
     ---------------------------------------------------------------------------
     -- Camera: R, G, B (0 .. 876 over black .. white) thresholded per channel.
     -- Low threshold 395 (bright half of the face period), high 653 (dark half);
-    -- code 8 = light grey (all three on, luma below 687).
+    -- code 8 = light grey (all three on, luma below 687).  K6 Camera scales the two thresholds by
+    -- 1 / gain per field (c_tlo / c_thi): a gain on the camera's colour decisions, no multiply here.
     ---------------------------------------------------------------------------
     p_vid : process(clk)
         variable v_cr, v_cb : signed(10 downto 0);
@@ -799,15 +867,15 @@ begin
                     + resize(shift_right(v_cb, 5), 12);
             v_l2 <= v_l;
             v_c := (others => '0');
-            if v_r2 > 395 then v_c(2) := '1'; end if;
-            if v_g2 > 395 then v_c(1) := '1'; end if;
-            if v_b2 > 395 then v_c(0) := '1'; end if;
+            if v_r2 > c_tlo then v_c(2) := '1'; end if;
+            if v_g2 > c_tlo then v_c(1) := '1'; end if;
+            if v_b2 > c_tlo then v_c(0) := '1'; end if;
             if v_c = "0111" and v_l2 < 687 then v_c := "1000"; end if;
             v_cd3 <= v_c;
             v_c := (others => '0');
-            if v_r2 > 653 then v_c(2) := '1'; end if;
-            if v_g2 > 653 then v_c(1) := '1'; end if;
-            if v_b2 > 653 then v_c(0) := '1'; end if;
+            if v_r2 > c_thi then v_c(2) := '1'; end if;
+            if v_g2 > c_thi then v_c(1) := '1'; end if;
+            if v_b2 > c_thi then v_c(0) := '1'; end if;
             if v_c = "0111" and v_l2 < 687 then v_c := "1000"; end if;
             v_ch3 <= v_c;
         end if;
@@ -827,6 +895,8 @@ begin
         variable v_cc : signed(16 downto 0);
         variable v_sc : unsigned(13 downto 0);
         variable v_dl : unsigned(9 downto 0);
+        variable v_h : unsigned(11 downto 0);
+        variable v_oc : unsigned(2 downto 0);
     begin
         if rising_edge(clk) then
             -- 1: ribbon phase (12 bits), face, cell; ROM / RAM addresses
@@ -850,6 +920,10 @@ begin
             p_gm2 <= v_g;
             v_rm := signed(resize(p_f1, 19)) - 1884;
             p_rm2 <= shift_left(v_rm, 4) + shift_left(v_rm, 3) + shift_left(v_rm, 1) + v_rm;  -- * 27
+            -- K6 Osc: a hash of the cell (row, n) for the keep / fill levels
+            v_h := s_cela xor to_unsigned(16#1E1#, 12);
+            v_h := v_h + (v_h(6 downto 0) & v_h(11 downto 7));
+            p_ch2 <= v_h(7 downto 0);
             s_cwe <= '0';
             if l_first = '1' and p_cs1 = '1' then
                 if p_n1(2 downto 0) = "001" or p_n1(2 downto 0) = "010" or
@@ -881,6 +955,9 @@ begin
                 p_rg3 <= unsigned(p_rm2(15 downto 8)) + 26;
             end if;
             p_cel3 <= unsigned(s_celq);
+            if p_ch2 >= c_okeep then p_odrop3 <= '1'; else p_odrop3 <= '0'; end if;
+            if p_ch2 < c_ofill then p_ofill3 <= '1'; else p_ofill3 <= '0'; end if;
+            if p_ch2(2 downto 0) = "000" then p_ofc3 <= "001"; else p_ofc3 <= p_ch2(2 downto 0); end if;
             if l_first = '1' then p_vc3 <= s_vhold; else p_vc3 <= unsigned(s_crq); end if;
 
             -- 4: colour: thin over thick over the ground
@@ -897,7 +974,13 @@ begin
             elsif s_black = '1' then
                 v_x(0) := to_unsigned(19, 8); v_x(1) := to_unsigned(16, 8); v_x(2) := to_unsigned(7, 8);
             elsif s_osc = '1' then
-                case to_integer(p_cel3) is
+                v_oc := p_cel3;                 -- K6: drop lit cells below 50 %, light black cells above
+                if p_cel3 = 0 then
+                    if p_ofill3 = '1' then v_oc := p_ofc3; end if;
+                elsif p_odrop3 = '1' then
+                    v_oc := (others => '0');
+                end if;
+                case to_integer(v_oc) is
                     when 1 => v_x(0) := to_unsigned(235, 8); v_x(1) := to_unsigned(241, 8); v_x(2) := to_unsigned(235, 8);
                     when 2 => v_x(0) := to_unsigned(198, 8); v_x(1) := to_unsigned(221, 8); v_x(2) := to_unsigned(226, 8);
                     when 3 => v_x(0) := to_unsigned(239, 8); v_x(1) := to_unsigned(247, 8); v_x(2) := to_unsigned(3, 8);

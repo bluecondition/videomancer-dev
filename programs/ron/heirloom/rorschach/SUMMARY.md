@@ -79,11 +79,11 @@ Video mode puts the camera through the same processing chain. Work files:
 | Control | Photo element it drives |
 |---|---|
 | K1 Bands | number of colour bands: colourizer gain 0.5–4 cycles, square law (1 = the photo; Video ×2) |
-| K2 Level | colourizer offset: the bands crawl through the cream → … → pale cyan → dark cycle (0 = the photo) |
+| K2 Palette | Rorschach (the photo) / Ink / Swap / Comp / Turn / Twist / Night / Vivid (moved from K6 in v0.5.2; the colourizer offset, was K2 Level, is fixed at 0 = the photo, K4 still cycles it) |
 | K3 Detail | the busy-strip fragments: 0 = clean blobs, 60 % = the photo; above that they spill into the smooth bands, and at 100 % the inkblot dissolves into fragments |
 | K4 Speed | colour cycling, bipolar, still at the centre (±8); default slow forward (one cycle per ~33 s) |
 | K5 Fold | the fold line, 25–100 % of the frame height (48.7 % = the photo; low = repeated folds, 100 % = unfolded) |
-| K6 Palette | Rorschach (the photo) / Ink / Swap / Comp / Turn / Twist / Night / Vivid |
+| K6 Camera | camera strength (v0.5.2), 0..100 %, default 50 %. Below 50 % the source (camera in Video, the photo's scene in Osc) shows only where the photo's own inkblot phase is under a level, chosen so the revealed share grows linearly with the knob; the rest is the flat ground a black input gives (phase 0: the dark band, colour-cycled). 0 = no camera, 25 % = about half the frame, 50 % = the shipped look; above 50 % the chroma is boosted, ×1.875 at 100 % (clamped at the palette's own ±508). Glided |
 | S7 Mirror | Mirror (the photo) / Repeat: the half above the fold reflected, or repeated |
 | S8 Stairs | Off (the photo: only the hue stair-steps) / On: the whole dark band sample-and-held into 42-px blocks |
 | S9 Split | Hue (red / blue / magenta / green dark band) / Blue (all blue) |
@@ -172,3 +172,30 @@ shows soft blobs of the camera, not its fine detail.
 - **Video read-during-write.** Top-half store rows are read on the same line they are written; a
   pixel may read a cell during its write (undefined EBR data: at most a 1-px speckle, no state
   affected). Watch for it on hardware.
+
+## K6 camera pass (2026-11-15)
+Ron: K6 is the camera strength in every program, default 50 %. Rorschach's camera *is* the picture (the store
+holds the posterized camera), so 50 % keeps the shipped look. **v0.5.2.**
+- **K6 Camera** (0..100 %, default 512), glided as a sixth slot of the time-shared glide unit (1/8 per field, ±4).
+  A plain gain on the camera would only duplicate K1 Bands (the camera's phase is already luma × gain), so:
+  - **Below 50 %: a reveal keyed by the photo's own inkblot.** The Osc scene ROM is read for every pixel anyway;
+    where its phase (the corner the lerp starts from) is at or above a level, the pixel takes the flat ground a
+    black input gives (phase 0 = the dark band, hue blue, no fragments; the colour cycle and tears still act).
+    The level comes from a 32-step table built from the scene's phase histogram, so the revealed share grows
+    linearly with the knob: 0 % = flat ground everywhere (exactly the black-input picture), 25 % = about half
+    the frame shows the camera through inkblot-shaped (mirrored) windows, 50 % = all of it, the shipped look
+    (bit-exact). In Osc the same windows reveal the photo's scene.
+  - **Above 50 %: chroma boost** ×(1 + n/8), n = (k − 512)/64 = 0..7 (×1.875 at 100 %), on the conditioned
+    chroma, split over the last two stages (d·n by gated shifts at stage 23 beside the blanking gate, + d·n/8 and the
+    clamp at the palette's own 512 ± 508 in the stage-24 output register): the pastels turn candy-coloured, luma
+    untouched (no washout). The reveal compare sits at stage 4 (the scene corner is registered at stage 3). No extra
+    pipeline stage; latency 24 unchanged. (The first build did all of the boost in stage 23: 66 MHz on every HD
+    config; it was split before the build that shipped.)
+- **K6's old function (Palette) moved to K2** (same eight labels; presets' K6 keys moved to K2). **K2 Level was the
+  weakest knob**: a static offset of the colour cycle that K4 Speed sweeps through anyway; it is **fixed at 0** (the
+  photo).
+- GHDL renders (720p60, decimation 2, selfie, K2 = Rorschach, K6 glide bypassed in a sim-only copy):
+  `.heirloom_work/rb_rorschach/k6/k6sheet.png`.
+- **Build (v0.5.2, 2026-11-15):** router1, all six configs seed 1. HD Analog 87.32, HD HDMI 86.16, HD Dual 82.67 MHz
+  (worst HD); SD Analog 75.35, SD HDMI 81.17, SD Dual 77.05 MHz; 7189–7211 / 7680 LC (93.9 %), 24/32 EBR.
+  `out/rev_b/ron/heirloom/rorschach.vmprog`. NOT flashed.

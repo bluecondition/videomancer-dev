@@ -8,7 +8,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.rorschach"
 program_name = "Rorschach"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -32,13 +32,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Level"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 0
-display_float_digits = 0
-suffix_label = "%"
+name_label = "Palette"
+value_labels = ["Rorschach", "Ink", "Swap", "Comp", "Turn", "Twist", "Night", "Vivid"]
+initial_value_label = "Rorschach"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -72,9 +68,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Palette"
-value_labels = ["Rorschach", "Ink", "Swap", "Comp", "Turn", "Twist", "Night", "Vivid"]
-initial_value_label = "Rorschach"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 # --- Toggle Switches (7-11) ---
 
@@ -125,11 +125,10 @@ suffix_label = "%"
 [[preset]]
 name = "Photo"
 rotary_potentiometer_1 = 387
-rotary_potentiometer_2 = 0
 rotary_potentiometer_3 = 614
 rotary_potentiometer_4 = 600
 rotary_potentiometer_5 = 323
-rotary_potentiometer_6 = 0
+rotary_potentiometer_2 = 0
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
@@ -140,11 +139,10 @@ linear_potentiometer_12 = 358
 [[preset]]
 name = "Ink Card"
 rotary_potentiometer_1 = 200
-rotary_potentiometer_2 = 0
 rotary_potentiometer_3 = 300
 rotary_potentiometer_4 = 512
 rotary_potentiometer_5 = 323
-rotary_potentiometer_6 = 128
+rotary_potentiometer_2 = 128
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 1
@@ -155,11 +153,10 @@ linear_potentiometer_12 = 0
 [[preset]]
 name = "Kaleido"
 rotary_potentiometer_1 = 640
-rotary_potentiometer_2 = 300
 rotary_potentiometer_3 = 614
 rotary_potentiometer_4 = 760
 rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 384
+rotary_potentiometer_2 = 384
 toggle_switch_7 = 0
 toggle_switch_8 = 1
 toggle_switch_9 = 0
@@ -170,11 +167,10 @@ linear_potentiometer_12 = 200
 [[preset]]
 name = "Shredded"
 rotary_potentiometer_1 = 500
-rotary_potentiometer_2 = 0
 rotary_potentiometer_3 = 800
 rotary_potentiometer_4 = 700
 rotary_potentiometer_5 = 323
-rotary_potentiometer_6 = 0
+rotary_potentiometer_2 = 0
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0

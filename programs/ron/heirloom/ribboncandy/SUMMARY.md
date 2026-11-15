@@ -57,18 +57,18 @@ Working files: `.heirloom_work/rb_ribboncandy/` (`notes.md` has every number).
 |---|---|
 | **P12 Wave** | The ribbons' waviness: the FM depth of both oscillators. 0 % = near-straight ribbons, upright faces and an upright cell grid (floors keep a gentle sway, so Bends, Speed, Kinks and Flip stay live); 50 % = the photo; 100 % = deep sway, sharp kinks and dense twists. Glided. |
 | K1 Ribbons | The ribbon count: ribbon-oscillator frequency ×0.4..1..2.6 (3.7 ribbons across = the photo). Glided. |
-| K2 Bends | The ribbons' S-bends: the slow wave's frequency ×0.3..1..3.5 (1.46 bends per frame = the photo). Glided. |
+| K2 Patch | The whole palette: RGB cable patch RGB (photo) / RBG / GRB / GBR / BRG / BGR (moved from K6 in v0.5.2). A labelled default (index < 6) is read as its index. The S-bends (was K2 Bends) are fixed at the photo's 1.46 per frame. |
 | K3 Twist | The blue/green twist: face-oscillator frequency ×0.45..1..2.5; the background cells follow it. Glided. |
 | K4 Speed | Bipolar, still in the centre ±8. The bends roll down the frame (default 0.63 lines/field) and the twists roll with them. |
 | K5 Cells | The background blocks: 2..8..24 cells per face period (8 = the photo, 38 px × 32.5 lines); rows scale with them. Glided. |
-| K6 Patch | The whole palette: RGB cable patch RGB (photo) / RBG / GRB / GBR / BRG / BGR. A labelled default (index < 6) is read as its index. |
+| K6 Camera | Camera strength (v0.5.2), 0..100 %, default 50 %. Video: a gain on the camera ahead of the cell thresholds: 0 = no camera (black cells, the picture a black input gives), 25 % = ×2/3, 50 % = the shipped look, 100 % = ×1.6 (more cells lit and coloured). Osc: the photo's cells drop out to black below 50 % (k/2 of every 256, by a per-cell hash), and above it up to half of the black cells light in the photo's colours. Glided. |
 | S7 Faces | Twist (photo) / Solid: every ribbon on its blue face, magenta thin ribbons. |
 | S8 Ground | Cells (photo) / Black: the ribbons on black. |
 | S9 Kinks | On (photo) / Off: the zigzags at the top and bottom. |
 | S10 Flip | Down (photo) / Up: the vertical modulators flipped top to bottom (the kinks move to the bottom, the twist pattern inverts). |
 | S11 Source | Video (default) / Osc. |
 
-Defaults: K1–K3, K5 and P12 at 512, K4 640, K6 and all switches at label 0 (S11 Video).
+Defaults: K1, K3, K5, K6 and P12 at 512, K4 640, K2 and all switches at label 0 (S11 Video).
 
 ## Video
 - **Video:** the cells are a sample-and-hold mosaic of the camera on the same FM'd cell grid. Each cell is sampled at
@@ -148,3 +148,28 @@ Defaults: K1–K3, K5 and P12 at 512, K4 640, K6 and all switches at label 0 (S1
 - `imodel.py` (RTL-exact integer model), `tables.py` and `gen_hook.py` (write `ribboncandy.py`), `rtlcmp.py`.
 - GHDL renders: `rtl_osc_final.png`, `rtl_vid_final.png`, `rtl_mot.png`; `cmp_final.png` (photo / proto / RTL Osc / RTL Video).
 - `check_local.sh` (GHDL check including the package), `old_v010_*` (the replaced v0.1.0).
+
+## K6 camera pass (2026-11-15)
+Ron: K6 is the camera strength in every program, default 50 %. Ribboncandy's camera *is* part of the picture (the
+ground cells are a sample-and-hold mosaic of it), so 50 % keeps the shipped look. **v0.5.2.**
+- **K6 Camera** (0..100 %, default 512), glided (1/8 of the gap per field, ±4 deadband) with the other knobs.
+  - **Video:** a gain on the camera ahead of the per-channel cell thresholds, done as the two thresholds (395
+    bright half / 653 dark half) × 1/gain from a 32-step per-field table of the glided knob (one sequencer state;
+    no pixel-path multiply; the light-grey luma test stays at 687). Law (s = 1/gain): below 50 %
+    s = 1 + 4·((512 − k)/512)³, above s = 1 − 0.375·(k − 512)/512.
+    0 % = s 5: every threshold out of reach, black cells = exactly the picture a black input gives;
+    25 % = gain 0.71 (only the brightest camera colours light, sparse cells); 50 % = gain 1, the shipped look
+    (thresholds 395 / 653 exactly); 100 % = gain 1.54 (most cells lit, more white / light grey and colour; the
+    black half-periods still show, no washout).
+  - **Osc:** the photo's cells by a per-cell hash (12-bit (row, cell) xor 0x1E1 plus its 7-bit rotation, low byte;
+    checked: uniform, neighbour correlation 0.12, 50 % masks agree with neighbours 50 %): below 50 % only k/2 of
+    every 256 lit cells stay (25 % = half), above 50 % up to half of the black cells light in the photo's colours
+    (100 %). 50 % = the photo exactly.
+- **K6's old function (Patch) moved to K2** (same six labels, presets' K6 keys moved to K2). **K2 Bends was the
+  weakest knob** (the sheet: min / default / max only change how many S-bends; P12 Wave still sets their depth and
+  K4 still rolls them) and is **fixed at 512** = the photo's 1.46 S-bends per frame.
+- GHDL renders (720p60, decimation 2, selfie, K2 = RGB): `.heirloom_work/rb_ribboncandy/k6/k6sheet.png`.
+- Note for sims: a labelled knob without `--set` sims at 512, so K2 Patch shows GBR unless `rotary_potentiometer_2=0`.
+- **Build (v0.5.2, 2026-11-15):** router1, all six configs seed 1. HD Analog 86.71, HD HDMI 85.41, HD Dual
+  86.39 MHz (worst HD 85.41); SD Analog 79.61, SD HDMI 85.65, SD Dual 87.67 MHz; 7094–7123 / 7680 LC (92.7 %),
+  8/32 EBR. `out/rev_b/ron/heirloom/ribboncandy.vmprog`. NOT flashed.

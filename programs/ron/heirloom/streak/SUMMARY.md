@@ -74,7 +74,7 @@ Work files: `.heirloom_work/rb_streak/`:
 | K3 Blocks | the mosaic blocks | S&H block width 8 .. 240 px (41 = photo); the edge slew follows the width |
 | K4 Speed | (motion) | bipolar, still at the centre ±8: the bands roll through the frame and the streak texture rides with them |
 | K5 Edge | the diagonal | wipe position, from a corner of mosaic to the whole frame frozen; the ridge, edge stripes, blue/green ramps and red corner move with it |
-| K6 Hue | the green/blue/magenta balance | colourizer phase ±½ cycle, photo at the centre |
+| K6 Camera | the camera's weight in the colourizer and red terms | camera strength (v0.5.1), 0..100 %, default 50 %: a gain on the camera luma above black, 0 = no camera (the picture a black input gives), 25 % = the shipped ×1, 50 % = ×2, 100 % = ×2.9 (k / 128 up to 50 %, then 2 + (k − 512) / 512; 24 steps). Osc: the blobs ×0 / 0.5 / 1 / 2 (0, < 19 %, < 38 %, above). The colourizer phase (was K6 Hue) is fixed at the photo's centre |
 | S7 Mosaic | the blocks | Blocks / Lines (no S&H: each band holds a raw line, a vertical barcode) |
 | S8 Strips | the clean blue/green strips | Sparse (every 8th band, photo) / Dense (every other band) |
 | S9 Flip | the diagonal | mosaic on the left (photo) / mirrored to the right |
@@ -164,3 +164,27 @@ Glides (1/8 per field, ±4 deadband) on K1, K2, K3, K5 and P12.
 - LC is 94-95 %, over the ~92 % heirloom budget; the HD timing margins are 8-11 MHz.
 - At SD and 720p the picture is designed to match 1080 (poles and gains normalised per mode); only
   720p was rendered in GHDL.
+
+## K6 camera pass (2026-11-15)
+Ron: K6 is the camera strength in every program, default 50 %; the shipped strength sits at 25 %. **v0.5.1.**
+- **K6 Camera** (0..100 %, default 512), a sixth slot of the time-shared glide unit (1/8 per field, ±4 deadband),
+  decoded per field after the glides (zone clock 30).
+- **Gain law:** the camera's smeared luma *above black* times g (Q3, one 11 × 6 multiply in its own stage of the
+  source-time camera path), then the shipped −438 offset, so both the colourizer source (×0.69) and the red term
+  (×0.375) follow it and K6 = 0 is exactly a black input. g = k / 128 up to 50 %, then 2 + (k − 512) / 512:
+  0 % = no camera (the picture a black input gives: the colourizer and red sit at the black offsets);
+  25 % = ×1, the shipped look (bit-exact terms); 50 % (default) = ×2: the camera reads strongly as colour contours
+  inside the streaks, still clean; 100 % = ×2.9: bold, bright areas push the colourizer into saturated magenta /
+  orange while the contours and streaks still read (×3.9 was tried: magenta flooded most of the frame).
+  The deviation is clamped (c_dv ≤ 2900, red term ±383) so a high gain saturates instead of wrapping.
+  Camera path +2 clocks (the camera is tapped ~12 px ahead of the beam; invisible); output latency unchanged (44).
+- **Osc:** the blob octave ×0 / 0.5 / 1 / 2 (K6 = 0, < 19 %, < 38 %, above), so the Osc flip keeps its shipped
+  strength relative to the camera at 25 % and doubles with it at the default.
+- **K6's old function (Hue) dropped:** on the control sheet K6 Hue's min / default / max were the least different
+  of all controls (a colourizer phase shift of a picture that is mostly noise), so it is fixed at the photo's centre
+  (512) and nothing else moved.
+- GHDL renders (720p60, decimation 2 = the top-left quadrant of the virtual frame, selfie, K6 glide bypassed in a
+  sim-only copy): `.heirloom_work/rb_streak/k6/k6sheet.png`.
+- **Build (v0.5.1, 2026-11-15):** router1. HD Analog 90.13, HD HDMI 87.48 (seed 1), HD Dual 85.37 MHz (**seed 3**:
+  seeds 1–2 stalled router1 at the 600 s timeout); SD Analog 82.44, SD HDMI 86.35, SD Dual 84.31 MHz (seed 1);
+  7526–7568 / 7680 LC (98.5 %, up from 95 %), 20/32 EBR. `out/rev_b/ron/heirloom/streak.vmprog`. NOT flashed.

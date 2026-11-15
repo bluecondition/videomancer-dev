@@ -7,7 +7,7 @@
 processing_delay_clks = 16
 program_id = "com.czartroniks.ribboncandy"
 program_name = "Ribboncandy"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -29,13 +29,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Bends"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 512
-display_float_digits = 0
-suffix_label = "%"
+name_label = "Patch"
+value_labels = ["RGB", "RBG", "GRB", "GBR", "BRG", "BGR"]
+initial_value_label = "RGB"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -69,9 +65,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Patch"
-value_labels = ["RGB", "RBG", "GRB", "GBR", "BRG", "BGR"]
-initial_value_label = "RGB"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
