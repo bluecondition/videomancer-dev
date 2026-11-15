@@ -84,6 +84,9 @@ Chassis sections lifted from louver.vhd ([A] timing / zone / glides / sequencer,
 
 ## Status
 
+**Shipped vmprog: the ROUTER1 rebuild of 2026-11-14** (same sources). Post-route Fmax: HD Analog 84.85 MHz; SD Analog 86.03 MHz; HD HDMI 88.04 MHz; SD HDMI 94.14 MHz; HD Dual 83.13 MHz; SD Dual 83.65 MHz. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic vega`. The router2 figures below are the first build, kept for the record; it was timing-marginal.
+
+
 - Built 2026-11-14 through the shared queue with router2 (the builder default), every config on seed 1.
   Rebuild: `./build_set.sh kinetic vega`.
 
