@@ -16,11 +16,15 @@
 --   lines  where frac(z') or frac(u') is near 0: anti-aliased core + halo, weight and alpha per line
 --
 --   K1  Scale    grid pitch 60 .. 600 virtual px at 512 rows below the horizon (exponential, glided)
---   K2  Shape    cell aspect 1:2 .. 4:1 (wide tiles .. squares .. long lanes)
+--   K2  Colour   the 16 shared Kinetic palettes (ground, A = glow, B = grid, accent = sun top)
+--                [K6 camera pass: was K6; Shape (cell aspect) fixed at its default squares, 341]
 --   K3  Horizon  horizon height, 25 % .. 75 % of the screen
 --   K4  Rate     flight / wave speed, bipolar, centre = still
 --   K5  Spread   wave cycles per cell, square law, 0 .. 1/2
---   K6  Colour   the 16 shared Kinetic palettes (ground, A = glow, B = grid, accent = sun top)
+--   K6  Camera   camera (and Osc) strength: the source field's gain g = K6 / 256 (0 = a black input,
+--                1 = the v0.1.0 look at 25 %, 2 at the 50 % default, 4 at 100 %), glided, one 8 x 8
+--                multiply on the field at stage 9 (s9_g); lifts the terrain and tints the sky (the tint
+--                centred on field value 96 above 25 %, so it gains contrast, not colour)
 --   S7  Wave     Smooth (sine) / Step (terraces)
 --   S8  Field    Linear / Radial
 --   S9  Space    Sky / Tunnel (mirrored ceiling)
@@ -41,6 +45,7 @@
 -- Stage numbering as in riley: a register "at stage S" holds pixel n at T + S + n (T = the g_start clock).
 -- One latency (36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Shape fixed at 341 (C_KFIX_2).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -53,6 +58,7 @@ use work.outrun_pkg.all;
 use work.all;
 
 architecture outrun of program_top is
+    constant C_KFIX_2 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(341, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 36;   -- = processing_delay_clks
 
     -- TOML defaults: the glides start there
@@ -207,7 +213,10 @@ architecture outrun of program_top is
 
     -- [B] knobs: glided (Q3), raw rate, switches, palette
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(C_DEF_K1 * 8, 13);
-    signal s_g2 : unsigned(12 downto 0) := to_unsigned(C_DEF_K2 * 8, 13);
+    signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: the K6 Camera glide (was Shape)
+    signal s_cg : unsigned(7 downto 0) := to_unsigned(127, 8);         -- camera gain, 64 = 1 (the v0.1.0 strength)
+    signal s_cgx : unsigned(7 downto 0) := (others => '0');            -- gain above 1 (s_cg - 64, >= 0)
+    signal s_toff : unsigned(8 downto 0) := (others => '0');           -- the sky tint's offset, 1.5 s_cgx
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(C_DEF_K5 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);
@@ -356,6 +365,9 @@ architecture outrun of program_top is
     signal lb_we : std_logic := '0';
     signal lb_rc : unsigned(10 downto 0) := (others => '0');
     signal s8_q, s8_qp, s9_l : unsigned(7 downto 0) := (others => '0');
+    signal s9_g : unsigned(9 downto 0) := (others => '0');     -- K6 camera pass: the field x gain (one clock later)
+    signal s9_d : signed(10 downto 0) := (others => '0');      -- the field x gain less the tint offset
+    signal s9_t : unsigned(3 downto 0) := (others => '0');     -- and its sky-tint alpha (saturated)
 
     -- [E] blend
     signal s22_cov : unsigned(4 downto 0) := (others => '0');
@@ -511,11 +523,19 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- palette: 16 steps with hysteresis (leave a step only 8 past its edge)
-                v_k := unsigned(registers_in(5));
+                v_k := unsigned(registers_in(1));
                 v_c := signed(resize(v_k, 11)) - signed(resize(s_pal & "100000", 11));
                 if v_c > 40 or v_c < -40 then s_pal <= v_k(9 downto 6); end if;
             end if;
             g_wm1 <= s_w - 1;
+            -- K6 camera pass: gain = (glide - 32) / 32 = K6 / 4 - 1 (64 = the v0.1.0 strength), so the
+            -- glide's +-4 resting band at 0 % gives exactly 0
+            if s_g2(12 downto 5) = 0 then s_cg <= (others => '0'); else s_cg <= s_g2(12 downto 5) - 1; end if;
+            -- above 25 % the sky tint's extra gain is centred on field value 96 (about the mean of a picture):
+            -- tint = (field x gain - (gain - 1) x 96) / 16, so the sky gains contrast at the v0.1.0 mean
+            -- instead of flooding with colour A
+            if s_cg > 64 then s_cgx <= s_cg - 64; else s_cgx <= (others => '0'); end if;
+            s_toff <= resize(s_cgx, 9) + resize(shift_right(s_cgx, 1), 9);
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
 
             -- [B] shared glide (1/8 of the gap per field, +-2 deadband): four clocks per channel
@@ -526,7 +546,7 @@ begin
                     when "00" =>
                         case to_integer(z_gc) is
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
-                            when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
+                            when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(5));   -- K6 Camera
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
@@ -535,8 +555,8 @@ begin
                     when "11" =>
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
-                    when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                    when "01" =>                           -- deadband +-2 codes (the camera, channel 1: +-4)
+                        if (s_gd > 16 or s_gd < -16) and (z_gc /= 1 or s_gd > 32 or s_gd < -32) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -605,7 +625,7 @@ begin
                     when 20 =>                        -- motion (last field's step)
                         c_ph <= f_addsub(c_ph, resize(c_rstep, 32), s_vneg);
                     when 21 =>                        -- aspect: Q8 octaves, -256 .. 511
-                        v_3 := resize(s_g2, 15) + shift_left(resize(s_g2, 15), 1);
+                        v_3 := resize(unsigned(C_KFIX_2) & "000", 15) + shift_left(resize(unsigned(C_KFIX_2) & "000", 15), 1);   -- K6 camera pass: Shape fixed
                         z_a8 <= signed(resize(v_3(14 downto 5), 11)) - 256;
                     when 50  => z_oct <= f_acc(23 downto 13);
                     when 51  =>
@@ -921,7 +941,7 @@ begin
     p_pix : process(clk)
         variable v_aj : unsigned(17 downto 0);
         variable v_fw : unsigned(21 downto 0);
-        variable v_hs : unsigned(12 downto 0);
+        variable v_hs : unsigned(15 downto 0);
         variable v_ag : unsigned(5 downto 0);
         variable v_c  : signed(23 downto 0);
         variable v_gd : unsigned(6 downto 0);
@@ -947,7 +967,7 @@ begin
             s9_fw <= v_fw(21 downto 7);
             s9_neg <= s8_neg;
             -- 10: height = +-wave + source
-            if s_src = '1' then v_hs := s9_l & "00000"; else v_hs := "00" & s9_l & "000"; end if;
+            if s_src = '1' then v_hs := '0' & s9_g & "00000"; else v_hs := "000" & s9_g & "000"; end if;   -- K6: x gain
             s10_h <= signed(f_addsub(resize(v_hs, 16), resize(s9_fw, 16), s9_neg));
             -- 11: z' = z - h
             s11_zp <= l_zf - (unsigned(s10_h(11 downto 0)) & "00");
@@ -973,7 +993,7 @@ begin
             s20_ag <= s19_ag;
             -- 21: the two candidates.  Grid (floor, tunnel) or sky tint (the source, read 11 pixels ahead),
             -- plus the horizon glow, checkerboard-dithered (every row has the same mean); the sun.
-            if s_tun = '1' or l_ceil = '0' then v_ag := '0' & s20_ag; else v_ag := "00" & s9_l(7 downto 4); end if;
+            if s_tun = '1' or l_ceil = '0' then v_ag := '0' & s20_ag; else v_ag := "00" & s9_t; end if;
             v_gd := resize(l_gl, 7) + resize((lb_rc(0) xor l_par) & '1', 7);
             v_ag := v_ag + resize(v_gd(6 downto 2), 6);
             if v_ag > 16 then s21_a2 <= to_unsigned(16, 5); else s21_a2 <= v_ag(4 downto 0); end if;
@@ -1007,6 +1027,7 @@ begin
         variable v_tap : unsigned(7 downto 0);
         variable v_d : signed(9 downto 0);
         variable v_a : unsigned(8 downto 0);
+        variable v_p : unsigned(15 downto 0);
     begin
         if rising_edge(clk) then
             -- oscillator: 2-D triangle lattice, 640 x 540 virtual px, drifting
@@ -1055,6 +1076,15 @@ begin
             s8_q <= lb_q2; s8_qp <= s8_q;
             v_a := resize(s8_q, 9) + resize(s8_qp, 9) + 1;
             if s_gav_sr(6) = '1' then s9_l <= v_a(8 downto 1); end if;      -- held past the line end
+            -- K6 camera pass: the camera gain, one 8 x 8 multiply in its own stage (the field then sits
+            -- one pixel later: invisible on a 64-px box); the tint offset next, the tint alpha (0 .. 15)
+            -- one stage on
+            v_p := s9_l * s_cg;
+            s9_g <= v_p(15 downto 6);
+            s9_d <= signed(resize(s9_g, 11)) - signed(resize(s_toff, 11));
+            if s9_d < 0 then s9_t <= (others => '0');
+            elsif s9_d(9 downto 8) /= "00" then s9_t <= (others => '1');
+            else s9_t <= unsigned(s9_d(7 downto 4)); end if;
         end if;
     end process p_src;
 

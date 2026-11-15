@@ -1,6 +1,7 @@
 # Slinky (Kinetic)
 
-v0.1.0 built 2026-11-14, all six configs, not flashed.
+v0.1.0 built 2026-11-14, all six configs, not flashed. v0.1.1 (2026-11-15): the K6 camera pass (K6 = Camera,
+Colour moved to K2, Shape fixed), built, not flashed; see "K6 camera pass".
 
 ## What it draws
 
@@ -24,11 +25,11 @@ the dark ground colour, crawl round a figure-eight like a caterpillar; the newes
 | Control | Name | What it does |
 |---|---|---|
 | K1 | Scale | head radius 32 .. 255 virtual px, exponential, glided (default 112) |
-| K2 | Shape | taper along the train: cone (tail half the head) .. cylinder at the centre .. flare (tail twice the head) |
+| K2 | Colour | the 16 shared palettes with hysteresis: ground = background and outlines, accent / B / A = the grade. Was K6 until v0.1.1; Shape (the taper) is now fixed at its default cone (380) |
 | K3 | Depth | how far the path swings: 0 .. 900 px across, half that down (0 = all copies on the centre) |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
 | K5 | Spread | phase step per copy 0 .. 1/8 cycle, square law: a tight tube .. separate echoes (at the top the 13 copies fold onto 8 places) |
-| K6 | Colour | the 16 shared palettes with hysteresis: ground = background and outlines, accent / B / A = the grade |
+| K6 | Camera | camera (and Osc) strength 0 .. 100 %, default 50 %: gain on the luma added inside the copies; see "K6 camera pass" |
 | S7 | Wave | Smooth / Snap (hops between 8 stations) |
 | S8 | Field | Swing (figure-eight) / Orbit (ellipse) |
 | S9 | Form | Ring / Square (rounded corners) |
@@ -38,14 +39,49 @@ the dark ground colour, crawl round a figure-eight like a caterpillar; the newes
 
 Presets: Slinky (defaults), Coil, Wire Tunnel, Hop Squares, Echo Windows, Horn.
 
+## K6 camera pass (2026-11-15)
+
+v0.1.1. Ron's set-wide rule: K6 = camera strength, 0 .. 100 %, default 50 %.
+
+- **K6 Camera** (new): the gain on the luma added inside the copies (and on the Osc, which keeps its ~2x over the
+  camera). Glided as a third channel of the shared glide (1/8 of the gap per field, +-4 code deadband);
+  gain = (glide - 32) / 32 = about K6 / 4 - 1, 64 = 1, so the glide's resting band at 0 % gives exactly 0.
+  One 9 x 8 multiply (s_vg = s_v9 x gain / 64) in its own stage ahead of the source delay ring, written one ring
+  slot nearer so the delay is unchanged; 11 bits through the coverage stage.
+- **Law**: gain g = K6 / 256: 0 % = 0 (exactly the black-input picture), 25 % = 1 (the v0.1.0 strength: half the
+  luma added), 50 % = 2, 100 % = about 4. Above 25 % the extra gain is centred on half-scale luma 192 (Y 448): the
+  colour-table fill lowers each copy's fill luma by (g - 1) x 192 x coverage (s_coff = 3 (gain - 64), per field,
+  floor at black), so the copies keep the v0.1.0 mean brightness and the camera gains contrast instead.
+  A plain linear 2x / 4x washed the copies out (55 % / 84 % of copy pixels clipped a channel; at 100 % flat pastel
+  discs with the camera gone). With the offset, the camera part's spread inside the copies is 13 / 21 / 31 codes
+  (8-bit) at 25 / 50 / 100 % with the same mean and no white pixels.
+- **Looks** (selfie.jpg, 720p decimation 2, `.kinetic_work/rb_slinky/k6sheet.png`): 25 % the shipped faint
+  camera texture in the copies; 50 % the camera (the laptop, keyboard) clearly drawn inside every copy in its grade
+  colour; 100 % high-contrast camera windows, dark shadows to bright highlights, still the graded tube; Osc at 50 %
+  a soft lattice shading over pastel copies (as v0.1.0's Osc).
+- **K2 Shape frozen** at its default 380 (a slight cone, the tail about 0.87 of the head; constant C_KFIX_2): the weakest
+  knob on the sheet (0 and 380 nearly the same picture). **K6's old function, Colour** (the 16 palettes, hysteresis,
+  default 288 = Outrun), **moved to K2**. Presets: their Colour values moved to K2; their Shape values are gone
+  (Coil 512, Wire Tunnel 60, Hop Squares 400, Echo Windows 512, Horn 1023), so Horn no longer flares and Wire Tunnel
+  is less of a cone.
+- **Build** (router1 through the K6 queue, 2026-11-15): all six configs on seed 1; HD Analog 79.83, HD HDMI
+  82.70, HD Dual 87.55 MHz (worst HD 79.83); SD 86.15 / 88.53 / 80.77 MHz; 7,225 / 7,680 LC (94.1 %), 17 / 32 block
+  RAMs. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic slinky`. v0.1.0 was a router2 build
+  (seeds 2 / 1 / 1 / 1 / 2 / 1); v0.1.1 is router1.
+- Unsure on hardware: 94.1 % LC is at the set's routing ceiling (it closed with 5 MHz of HD margin, but a later
+  change would need logic removed). The camera's centre (192) suits an average picture; a very dark camera at
+  100 % pulls the copies toward black, a very bright one toward white.
+
 ## Video
 
-- The picture does not move the geometry. It lights the copies: half the incoming luma (less black) is added to
+- The picture does not move the geometry. It lights the copies: at K6 = 25 % (the v0.1.0 strength) half the
+  incoming luma (less black) is added to
   the colour of every drawn copy, times that pixel's coverage, so each copy is a window onto the camera tinted by
   its grade colour (the chroma stays the grade's). In Wire the outlines carry it.
 - Black input: nothing is added and the plain graded tube runs.
 - Source = Osc: a two-axis triangle lattice (640 x 540 virtual px) drifting diagonally replaces the luma at
   full scale (about twice the camera's level).
+- K6 Camera scales both (see "K6 camera pass" below).
 
 ## Engine
 

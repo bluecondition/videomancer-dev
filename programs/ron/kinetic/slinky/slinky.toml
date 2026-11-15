@@ -6,7 +6,7 @@
 processing_delay_clks = 16
 program_id = "com.czartroniks.slinky"
 program_name = "Slinky"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -28,11 +28,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Shape"
+name_label = "Colour"
 control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 380
+display_min_value = 1
+display_max_value = 16
+initial_value = 288
 display_float_digits = 0
 suffix_label = ""
 
@@ -68,13 +68,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Colour"
+name_label = "Camera"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 16
-initial_value = 288
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -122,29 +122,26 @@ name = "Slinky"
 [[preset]]
 name = "Coil"
 rotary_potentiometer_1 = 500
-rotary_potentiometer_2 = 512
 rotary_potentiometer_5 = 800
-rotary_potentiometer_6 = 224
+rotary_potentiometer_2 = 224
 toggle_switch_8 = 1
 linear_potentiometer_12 = 1023
 
 [[preset]]
 name = "Wire Tunnel"
 rotary_potentiometer_1 = 700
-rotary_potentiometer_2 = 60
 rotary_potentiometer_3 = 420
 rotary_potentiometer_5 = 250
-rotary_potentiometer_6 = 352
+rotary_potentiometer_2 = 352
 toggle_switch_10 = 1
 linear_potentiometer_12 = 1023
 
 [[preset]]
 name = "Hop Squares"
 rotary_potentiometer_1 = 520
-rotary_potentiometer_2 = 400
 rotary_potentiometer_4 = 720
 rotary_potentiometer_5 = 520
-rotary_potentiometer_6 = 160
+rotary_potentiometer_2 = 160
 toggle_switch_7 = 1
 toggle_switch_9 = 1
 linear_potentiometer_12 = 800
@@ -152,19 +149,17 @@ linear_potentiometer_12 = 800
 [[preset]]
 name = "Echo Windows"
 rotary_potentiometer_1 = 760
-rotary_potentiometer_2 = 512
 rotary_potentiometer_3 = 800
 rotary_potentiometer_5 = 640
-rotary_potentiometer_6 = 32
+rotary_potentiometer_2 = 32
 toggle_switch_8 = 1
 linear_potentiometer_12 = 420
 
 [[preset]]
 name = "Horn"
 rotary_potentiometer_1 = 300
-rotary_potentiometer_2 = 1023
 rotary_potentiometer_3 = 560
 rotary_potentiometer_5 = 300
-rotary_potentiometer_6 = 544
+rotary_potentiometer_2 = 544
 toggle_switch_10 = 1
 linear_potentiometer_12 = 900

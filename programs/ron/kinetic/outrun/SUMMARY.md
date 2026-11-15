@@ -1,6 +1,7 @@
 # Outrun (Kinetic)
 
 v0.1.0 built 2026-11-14, all six configs, not flashed. Flash `out/rev_b/ron/kinetic/outrun.vmprog`.
+v0.1.1 (2026-11-15): the K6 camera pass (K6 = Camera, Colour moved to K2, Shape fixed); see "K6 camera pass".
 
 ## What it draws
 
@@ -30,11 +31,11 @@ purple flies toward the viewer, its rows rolling as V-shaped ridgelines; the hor
 | Control | Name | What it does |
 |---|---|---|
 | K1 | Scale | grid pitch: a cell is 60 .. 600 virtual px wide 512 rows below the horizon, exponential, glided (default 190) |
-| K2 | Shape | cell aspect 1:2 .. 4:1, exponential, glided: wide tiles .. squares (default) .. long lanes |
+| K2 | Colour | the 16 shared palettes with hysteresis: ground; A = sky haze, sky tint, sun bottom; B = grid and floor glow; accent = sun top (default Outrun). Was K6 until v0.1.1; Shape (the cell aspect) is now fixed at squares |
 | K3 | Horizon | horizon height 25 % .. 75 % of the screen, glided (default 56 %); the sun rides on it |
 | K4 | Rate | flight and wave speed, bipolar, centre = still (+-8 deadband); 60 s per wave cycle .. 2 cycles per second |
 | K5 | Spread | wave cycles per cell 0 .. 1/2, square law (default 1/6: hills six cells long) |
-| K6 | Colour | the 16 shared palettes with hysteresis: ground; A = sky haze, sky tint, sun bottom; B = grid and floor glow; accent = sun top (default Outrun) |
+| K6 | Camera | camera (and Osc) strength 0 .. 100 %, default 50 %: gain K6 / 256 on the source field (0 % = a black input, 25 % = the v0.1.0 strength, 50 % = twice it, 100 % = four times), glided; see "K6 camera pass" |
 | S7 | Wave | Smooth / Step (terraced hills: the rows break along fault lines). Step replaces the standard Snap: a dwell-and-flip wave only reads on discrete elements |
 | S8 | Field | Linear (hills roll toward the viewer) / Radial (diamond ripples from a point on the floor) |
 | S9 | Space | Sky (floor, horizon glow, sky) / Tunnel (floor and mirrored ceiling) |
@@ -45,10 +46,45 @@ purple flies toward the viewer, its rows rolling as V-shaped ridgelines; the hor
 Depth is the headline, so it sits on P12 and K3 became Horizon (the slate's rule for this program).
 Presets: Sunset Drive (defaults), Flatland, Tunnel, Ripple Pool, Terraces, Ranges.
 
+## K6 camera pass (2026-11-15)
+
+v0.1.1. Ron's set-wide rule: K6 = camera strength, 0 .. 100 %, default 50 %.
+
+- **K6 Camera** (new): the gain on the source field (camera luma, or the Osc lattice, which keeps its 4x height gain
+  over the camera). Glided on the shared glide's channel 1 (the one K2 Shape used; 1/8 of the gap per field, +-4
+  code deadband); gain = (glide - 32) / 32 = about K6 / 4 - 1, 64 = 1, so the glide's resting band at 0 % gives
+  exactly 0. One 8 x 8 multiply (s9_g = s9_l x gain / 64) in its own stage after the field's interpolation; the
+  field then sits one pixel later (invisible on a 64-px box).
+- **Law**: gain g = K6 / 256: 0 % = 0 (exactly the black-input picture), 25 % = 1 (the v0.1.0 strength), 50 % = 2,
+  100 % = about 4.
+  - Terrain lift: g x the v0.1.0 lift. Full white lifts 0.43 / 0.86 / 1.7 cells at 25 / 50 / 100 %; the Osc 1.7 /
+    3.5 / 6.9 cells (the height acts modulo one cell, so a large lift folds the rows round the picture's contours).
+  - Sky tint: linear up to 25 %. Above it the extra gain is centred on field value 96 (about a picture's mean):
+    tint = (field x g - (g - 1) x 96) / 16, clamped 0 .. 15 (s_toff = 1.5 (gain - 64), per field). The sky gains
+    contrast at the v0.1.0 mean instead of flooding with colour A: in the sim, a plain 2x turned half the sky flat
+    pink and a plain 4x the whole sky.
+- **Looks** (selfie.jpg, 720p decimation 2 with the horizon lowered to K3 = 57 so the quadrant holds sky, sun and
+  floor: `.kinetic_work/rb_outrun/k6sheet.png`): 25 % the shipped soft pink camera haze in the sky; 50 % the camera
+  clearly in the sky (pink highlights, dark shadows) and the near rows bending more; 100 % a hard two-tone camera
+  picture in the sky with the near rows rippling, grid and sun intact; Osc at 50 % a bold pink lattice diamond
+  over the horizon (its 16 tint steps show as soft contour bands) and mounds rolling the floor.
+- **K2 Shape frozen** at its default 341 (constant C_KFIX_2; the aspect is Q8 -1, squares to 0.3 %), as assigned.
+  On the sheet K5 Spread changes a still about as little as K2, but Spread sets the hills' wavelength (0 = no
+  hills), so K2 stayed the choice. **K6's old function, Colour** (the 16 palettes, hysteresis, default Outrun),
+  **moved to K2**. Presets: their Colour values moved to K2; their Shape values are gone (Flatland and Ripple
+  Pool were at the default; Terraces 600 and Ranges 500 lose their longer lanes).
+- **Build** (router1 through the K6 queue, 2026-11-15): all six configs on seed 1; HD Analog 80.54, HD HDMI
+  83.04, HD Dual 83.67 MHz (worst HD 80.54); SD 86.61 / 86.66 / 80.33 MHz; 7,131 / 7,680 LC (92.9 %, +186 over
+  v0.1.0), 13 / 32 block RAMs. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic outrun`.
+- Unsure on hardware: the sky tint's centre (96) suits an average picture; a very dark camera at 100 % leaves the
+  sky dark, a very bright one floods it. The height lift does not saturate (it wraps a cell), so at 100 % with a
+  busy camera the near rows can fold into the picture's contours; read in a 720p / 2 still, never at full HD.
+
 ## Video
 
 `program_type = "processing"`. Source = Video: the picture's luma (>> 2, less 16) goes through a 64-pixel
 box and a vertical 1/8 IIR (half-resolution line store), so it bends the lines without shredding them, and
+(at K6 = 25 %, the v0.1.0 strength; K6 Camera scales both, see "K6 camera pass" below)
 - adds to the height in place: full white lifts the terrain 0.43 cell (same state as the wave);
 - tints the sky toward colour A (up to 14/16), read 11 pixels ahead, so the picture shows in the sky.
 With a black input both are zero and the wave alone runs. Source = Osc substitutes the shell's drifting
