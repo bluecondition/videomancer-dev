@@ -138,3 +138,11 @@ Glides (1/8 of the gap per field) on K1, K2, K3, K5, K6 and P12.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 160 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top of K6 25 % stronger in bend / element programs; the orchestrator set the K6 default to 100 % (1023) and bumped the version.
+
+- Classification: **BEND.** K6 Etch adds camera (or Osc, 4x) luma x etch^2 to the ring phase.
+- Change: c_eg = 1.25 x etch^2 / 64 (v = acc >> 6 + acc >> 8), widened to 17 bits (Video 0 .. 20440, Osc 4x 0 .. 81760, which no longer fits 16), the 4 x 17 partial products 21 bits; the ring phase is modular so only its low 16 bits matter. Full Etch: ~15 -> ~19 ring periods at full luma.
+- Build: v0.1.2 built 2026-11-15 through the queue, router1, all six configs seed 1. Worst HD 79.88 MHz (HD Analog 81.66, HD HDMI 79.88, HD Dual 83.62); 6771-6783 LC. Output `out/rev_b/ron/heirloom/tunnel.vmprog`. NOT flashed.

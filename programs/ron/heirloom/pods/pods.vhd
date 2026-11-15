@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Pods v0.1.1 -- Heirloom (video phase), from the clip WIN_20230328_00_11_14 at 0.5 s.
 --
 -- The picture: a lattice of cyan "eyes" and maroon cells in olive, yellow-green and red rings, cut into pods by
@@ -554,7 +556,7 @@ begin
                         if z_k5hi = '1' then c_ax <= resize(f_acc(16 downto 9), 8) + 74;
                         else c_ax <= resize(f_acc(16 downto 9), 8) + 16; end if;
                     when 412 => c_dv <= resize(f_acc(17 downto 8), 9) + 32;   -- Dv = 32 + p12 * 59 / 256
-                    when 436 => c_eg <= f_acc(20 downto 13);                  -- eg = k6^2 / 8192
+                    when 436 => c_eg <= f_acc(20 downto 13) + resize(f_acc(20 downto 15), 8);   -- eg = 1.25 k6^2 / 8192 (0 .. 159)
                     when 460 => c_eg112 <= f_acc(14 downto 0);
                     when 484 => c_pyql <= f_acc(30 downto 0) & '0';
                     when 508 => c_pyqe <= f_acc(30 downto 0) & '0';

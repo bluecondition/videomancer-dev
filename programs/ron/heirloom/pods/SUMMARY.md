@@ -237,3 +237,11 @@ Glides (1/8 of the gap per field) on K1, K2, K3, K5, K6 and P12. Floors keep eve
   - SD shows the centre 4:3 (virtual x 240..1680): the corner gaps are mostly outside it; the seam, the arcs and the
     bottom triangle are in view. SD is softer (the boxes act per output pixel).
   - At K2 above ~900 the finest rings are ~10 px apart at SD and blur toward flat bands.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top of K6 25 % stronger in bend / element programs; the orchestrator set the K6 default to 100 % (1023) and bumped the version.
+
+- Classification: **BEND / ELEMENT.** One etch gain both lifts the field (bright areas close the mint gaps and swell the eyes: the drawing recoloured by the camera's brightness) and bends the r^2 ramp.
+- Change: eg = 1.25 x k6^2 / 8192, c_eg = eg + eg >> 2 (0 .. 159, still 8 bits); the luma chain was sized for v0.1.0's 255, so nothing widens (c_eg112 = 112 eg <= 17808).
+- Build: v0.1.2 built 2026-11-15 through the queue, router1, all six configs seed 1. Worst HD 100.39 MHz (HD Analog 102.65, HD HDMI 101.32, HD Dual 100.39); 6437-6457 LC. Output `out/rev_b/ron/heirloom/pods.vmprog`. NOT flashed.

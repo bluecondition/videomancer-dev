@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Tunnel v0.1.0 -- Heirloom (video phase), from the clip WIN_20230723_00_52_24 at 0.5 s.
 --
 -- The still: a black and white relief.  Concentric diamond glow rings around an "eye" (centre x 1000, y 512 of
@@ -172,7 +174,7 @@ architecture tunnel of program_top is
     signal c_hst  : unsigned(23 downto 0) := to_unsigned(264090, 24);  -- per output line
     signal c_xe   : unsigned(9 downto 0) := to_unsigned(255, 10);      -- eye corner |dx| (px)
     signal c_rs   : unsigned(6 downto 0) := to_unsigned(37, 7);        -- ray slope step, Q8
-    signal c_eg   : unsigned(15 downto 0) := to_unsigned(400, 16);     -- etch gain
+    signal c_eg   : unsigned(16 downto 0) := to_unsigned(500, 17);     -- etch gain (x1.25: video 0 .. 20440, Osc 4x)
     signal c_xb0  : unsigned(11 downto 0) := to_unsigned(16, 12);      -- beam start x (h)
     signal c_xs8  : unsigned(16 downto 0) := to_unsigned(2048, 17);    -- beam start x, Q8 px
     signal c_curve : unsigned(1 downto 0) := "00";
@@ -271,7 +273,7 @@ architecture tunnel of program_top is
     signal k_d1, k_d2, k_d3, k_d4, k_d5, k_d6, k_d7 : unsigned(7 downto 0) := (others => '0');
     signal k_s4a, k_s4b : unsigned(9 downto 0) := (others => '0');
     signal k_sum  : unsigned(10 downto 0) := (others => '0');
-    signal k_pa, k_pb : unsigned(19 downto 0) := (others => '0');
+    signal k_pa, k_pb : unsigned(20 downto 0) := (others => '0');
     signal k_et   : unsigned(15 downto 0) := (others => '0');
     signal s_y21, s_u21, s_v21 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal c_ky, c_ku, c_kv : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -598,8 +600,9 @@ begin
                         if z_neg = '1' then c_rs <= to_unsigned(77, 7) - f_acc(15 downto 9);
                         else c_rs <= to_unsigned(37, 7) - f_acc(15 downto 9); end if;
                     when 386 =>
-                        if s_src = '1' then c_eg <= f_acc(19 downto 6) & "00";
-                        else c_eg <= f_acc(21 downto 6); end if;
+                        v_l := resize(f_acc(21 downto 6), 22) + resize(f_acc(21 downto 8), 22);     -- etch^2 x1.25
+                        if s_src = '1' then c_eg <= v_l(14 downto 0) & "00";
+                        else c_eg <= v_l(16 downto 0); end if;
                         if s_line = '1' then c_curve <= "10";
                         elsif s_gp(12 downto 3) >= 768 or s_gp(12 downto 3) < 160 then c_curve <= "01";
                         else c_curve <= "00"; end if;

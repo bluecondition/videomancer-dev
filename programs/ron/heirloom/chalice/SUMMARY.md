@@ -169,3 +169,11 @@ proto, `imodel.py` = the integer model, `diag.py` = the landmark comparer, `fit.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 256 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top of K6 25 % stronger in bend / element programs; the orchestrator set the K6 default to 100 % (1023) and bumped the version.
+
+- Classification: **BEND.** K6 Camera adds camera (or Osc) luma x gain to the field phase phi: the rings bend around the picture.
+- Change: The camera gain code is 1.25 x the glided knob, c_cg = (s_g6 + s_g6 >> 2) >> 3, and the pixel multiply uses 6 bits of it (0 .. 39, was 5 bits, 0 .. 31): an 8 x 6 product, p7_ca 14 bits, p8_cam widened to 10 bits so it cannot wrap. Full Camera: 1.8 -> 2.3 rings per full luma.
+- Build: v0.1.2 built 2026-11-15 through the queue, router1 (v0.1.0 was router2), all six configs seed 1. Worst HD 92.19 MHz (HD Analog 96.39, HD HDMI 92.19, HD Dual 96.53); 6968-6995 LC. Output `out/rev_b/ron/heirloom/chalice.vmprog`. NOT flashed.

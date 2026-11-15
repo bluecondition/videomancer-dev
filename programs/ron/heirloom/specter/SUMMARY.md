@@ -221,3 +221,11 @@ Working files are in `.heirloom_work/rb_specter/` (`notes.md`, `meas1..8.py`, `f
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top of K6 25 % stronger in bend / element programs; the orchestrator set the K6 default to 100 % (1023) and bumped the version.
+
+- Classification: **MIXED.** K6 Etch bends the haze and ghost lookups (the drawing) and glows the camera luma above 140 into the ghost layer in green (the camera image shown). The +25 % goes to the bend only.
+- Change: The bend gain constants in the per-field multiply are x1.25 (Video 154 -> 192, Osc 384 -> 480; c_eb max 76 -> 95 / 191 -> 239, still 8 bits). The glow is the bend beyond the 140-level threshold, which scales with the gain (so it stays at luma 140); its factor 0.92 -> 0.734 (= 0.92 / 1.25) keeps the glow as it was. Full Etch at white: bend 283 -> 354 px.
+- Build: v0.1.2 built 2026-11-15 through the queue, router1, all six configs seed 1. Worst HD 81.68 MHz (HD Analog 82.34, HD HDMI 84.88, HD Dual 81.68); 7196-7228 LC. Output `out/rev_b/ron/heirloom/specter.vmprog`. NOT flashed.

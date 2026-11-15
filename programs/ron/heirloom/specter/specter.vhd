@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Specter v0.1.0 -- Heirloom (video clips), from the clip WIN_20230904_01_56_58 at 0.5 s.
 --
 -- The still: a green ghost figure (a striped head, outstretched arms, legs streaming down to the floor) in a green
@@ -560,7 +562,7 @@ begin
                         z_fb <= to_unsigned(55, 16);
                     when others =>                                                              -- etch: bend
                         z_fa <= resize(s_g6(12 downto 3), 16);
-                        if s_src = '1' then z_fb <= to_unsigned(384, 16); else z_fb <= to_unsigned(154, 16); end if;
+                        if s_src = '1' then z_fb <= to_unsigned(480, 16); else z_fb <= to_unsigned(192, 16); end if;   -- x1.25 (was 384 / 154)
                 end case;
             end if;
             if z_ld = '1' then
@@ -1047,12 +1049,12 @@ begin
             p2_tc <= f_tri8(b_cp);
             p2_d <= b_u(25 downto 10) - 1082;                               -- Q6 cells
             if p6_bnd > c_b140 then p2_g1 <= p6_bnd - c_b140; else p2_g1 <= (others => '0'); end if;
-            -- 3: profile pairs (EBR); |distance| (Q6 cells, one's complement); comb product; glow (x 0.92)
+            -- 3: profile pairs (EBR); |distance| (Q6 cells, one's complement); comb product; glow (x 0.92 of the pre-+25 % bend)
             p3_fxb <= p2_fxb; p3_fxf <= p2_fxf; p3_ok <= p2_ok;
             if p2_d(15) = '1' then v_d := not p2_d; else v_d := p2_d; end if;
             if v_d(15 downto 12) /= "0000" then p3_au <= (others => '1'); else p3_au <= unsigned(v_d(11 downto 0)); end if;
             p3_dc <= signed('0' & l_dcl) * p2_tc;
-            v_g1 := p2_g1 - shift_right(p2_g1, 4) - shift_right(p2_g1, 6);
+            v_g1 := p2_g1 - shift_right(p2_g1, 2) - shift_right(p2_g1, 6);           -- x0.734 = 0.92 / 1.25: glow unchanged
             if v_g1 > 511 then p_glw(3) <= (others => '1'); else p_glw(3) <= v_g1(8 downto 0); end if;
             for i in 4 to 7 loop p_glw(i) <= p_glw(i - 1); end loop;
             -- 4: profile pairs {v, dv} (fabric); aura slope (x 0.094); comb multiplier 256 + depth x triangle

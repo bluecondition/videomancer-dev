@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Monodala v0.2.0 -- one colour, topographic rings (from Heirloom Mandala).
 --
 -- Mandala with its red key at -100 reads as a blue field crossed by light green
@@ -145,7 +147,8 @@ architecture monodala of program_top is
     -- per-field values
     signal f_hue, f_acc, f_lhue : unsigned(7 downto 0) := (others => '0');
     signal f_wl    : unsigned(3 downto 0) := to_unsigned(15, 4);
-    signal f_melt  : unsigned(8 downto 0) := to_unsigned(100, 9);
+    signal f_melt0 : unsigned(8 downto 0) := to_unsigned(100, 9);
+    signal f_melt  : unsigned(9 downto 0) := to_unsigned(125, 10); -- f_melt0 x1.25 (K6 top +25 %)
     signal f_lev   : unsigned(7 downto 0) := to_unsigned(200, 8);  -- Level: the ground level (Solid)
     signal f_sv    : unsigned(9 downto 0) := to_unsigned(74, 10);  -- Video ground: black level
     signal f_p8    : unsigned(7 downto 0) := to_unsigned(128, 8);
@@ -388,11 +391,12 @@ begin
             f_wl   <= s_g(2)(12 downto 9);                                     -- 16 banks, 15 = hair-thin
             -- Melt: Mandala's curve, the v0.5 line up to 100, then 2.5x steeper (x1.9 at the top)
             if s_g(3)(12 downto 5) <= 100 then
-                f_melt <= resize(s_g(3)(12 downto 5), 9);
+                f_melt0 <= resize(s_g(3)(12 downto 5), 9);
             else
                 v_md := shift_left(resize(s_g(3)(12 downto 5), 11), 1) + resize(s_g(3)(12 downto 6), 11);
-                f_melt <= resize(v_md - 150, 9);
+                f_melt0 <= resize(v_md - 150, 9);
             end if;
+            f_melt <= resize(f_melt0, 10) + resize(f_melt0(8 downto 2), 10);   -- x1.25: 0 .. 608
             -- Level: Solid ground level 0..255; Video ground black level 19 + (255 - level)
             f_lev <= s_g(4)(12 downto 5);
             f_sv  <= to_unsigned(274, 10) - resize(f_lev, 10);

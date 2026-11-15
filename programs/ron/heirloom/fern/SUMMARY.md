@@ -298,3 +298,11 @@ Glides: K1, K2, K4, K5, K6 and P12 move 1/8 of the gap per field (deadband 4).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 256 -> 512 (v0.6.3). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top of K6 25 % stronger in bend / element programs; the orchestrator set the K6 default to 100 % (1023) and bumped the version.
+
+- Classification: **BEND.** K6 Bend displaces the arms, the boundary, the dart and the maze by the source luma.
+- Change: f_bk = 1.25 x f_k6s at half scale, (f_k6s + f_k6s >> 2) >> 1 (0 .. 39), with one shift less downstream (p3_bp unshifted into the ramp, >> 8 into the delay ring), so the 8 x 6 bend multiply keeps its width. Full Bend: +-250 -> +-312 px at full luma. The orchestrator-tested full-scale form (f_bk 0 .. 78) is the same within one gain LSB but added ~50 LUTs and missed HD Analog (router1 s1-s10 best 70.91, router2 s1-s6 63.76; the HEAD netlist does 75.72 on s7). Timing fix, logic-equivalent: the line engine's critical path (e_st -> m_a enable, 4 ns logic + 10 ns routing, also HEAD's) now uses a registered m_z = (m_cnt = 0) flag, and the two engine kicks (zone zc 40, line start) are registered, so the engine starts one clock later (no visible effect: it computes the next line). Standalone HD Analog router1: s2 77.24, s5 74.97, s7 79.71, s8 81.15 MHz, 7200 LC (HEAD 7204).
+- Build: v0.6.4 built 2026-11-15, ROUTER1. **Build seeds: HD Analog = seed 2 (77.24 MHz), HD HDMI = seed 5 (78.83, hand re-route: the queue build's seeds 1-4 missed, best 72.65; `.heirloom_work/resync/reroute.sh fern hd_hdmi router1 5`), HD Dual = seed 2 (74.64, thin)**; SD Analog s1 75.71, SD HDMI s1 79.01, SD Dual s1 74.96. 7189-7230 LC (94 %), 25 EBR, iceunpack OK x 6. A plain `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh fern` (6 seed retries) lands the same seeds. Output `out/rev_b/ron/heirloom/fern.vmprog`. NOT flashed.

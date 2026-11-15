@@ -262,3 +262,11 @@ Working files are in `.heirloom_work/rb_aureole/`: `notes.md`, `proto_final.py`,
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top of K6 25 % stronger in bend / element programs; the orchestrator set the K6 default to 100 % (1023) and bumped the version.
+
+- Classification: **BEND.** K6 Etch multiplies the camera (or Osc) luma into the floor / horn position and the band field: it displaces and bends the drawing.
+- Change: The per-field Etch code is now 1.25 x the glided knob at half step size, c_e = (s_g6 + s_g6 >> 2) >> 6 (0 .. 159, still 8 bits), and the pixel path takes the product one bit lower (p4_pe(15:6) for the position, (15:8) for the bands), so the 8 x 8 product is unchanged in width. Full Etch: push +-476 -> +-594 px, band bend 119 -> 148 F. The gain steps are 1.6x coarser (160 steps), invisible under the glide.
+- Build: v0.1.3 built 2026-11-15 through the queue, router1. **Build seeds: HD HDMI = seed 2 (75.06 MHz), HD Dual = seed 2 (74.32, thin: +0.07)**; HD Analog s1 77.09, SD Analog s1 77.42, SD HDMI s1 78.19, SD Dual s1 72.99. 7215-7231 LC (94 %). Output `out/rev_b/ron/heirloom/aureole.vmprog`. NOT flashed. If HD Dual shows timing trouble, re-seed it first.

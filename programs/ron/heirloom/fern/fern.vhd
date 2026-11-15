@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Fern v0.6.0 -- Heirloom #46, rebuilt from the photo WIN_20230713_00_17_11 (phase 2: Fan, Lean, Speed waves,
 -- flames follow Arrow, Echo).
 --
@@ -124,7 +126,7 @@ architecture fern of program_top is
     signal f_sxf : unsigned(10 downto 0) := to_unsigned(512, 11);
     signal f_ps : unsigned(10 downto 0) := to_unsigned(318, 11);
     signal f_pb : unsigned(10 downto 0) := to_unsigned(119, 11);
-    signal f_bk : unsigned(6 downto 0) := to_unsigned(16, 7);
+    signal f_bk : unsigned(6 downto 0) := to_unsigned(10, 7);           -- K6 Bend gain at half scale (0 .. 39)
     constant C_P0 : unsigned(15 downto 0) := to_unsigned(53447, 16);    -- the stem phase at x' = 82
     -- the window on c_T (Q.4): blue ground 282 < c < 856, rims 270..282 and 856..876
     constant C_TLO  : integer := 282 * 16;
@@ -142,6 +144,7 @@ architecture fern of program_top is
     signal n_pa : unsigned(15 downto 0) := (others => '0');
     signal n_pp : std_logic := '0';
     signal e_st : unsigned(5 downto 0) := (others => '0');
+    signal e_kick, e_z40 : std_logic := '0';
     signal e_dy : signed(20 downto 0) := (others => '0');
     signal e_neg : std_logic := '0';
     signal e_ga, e_apx : unsigned(9 downto 0) := (others => '0');
@@ -163,6 +166,7 @@ architecture fern of program_top is
     signal m_h : unsigned(18 downto 0) := (others => '0');
     signal m_l : unsigned(15 downto 0) := (others => '0');
     signal m_cnt : unsigned(4 downto 0) := (others => '0');
+    signal m_z : std_logic := '1';                                      -- = (m_cnt = 0), registered (timing)
     signal d_r : unsigned(22 downto 0) := (others => '0');
     signal d_q : unsigned(15 downto 0) := (others => '0');
     signal d_cnt : unsigned(4 downto 0) := (others => '0');
@@ -536,7 +540,7 @@ begin
             v_k := v_k - resize(v_k(9 downto 3), 10) - resize(v_k(9 downto 5), 10);
             f_mza5 <= v_k(9 downto 5);
             f_k6s <= s_g(4)(12 downto 7);                                               -- K6 Bend
-            f_bk <= resize(f_k6s, 7);
+            f_bk <= shift_right(resize(f_k6s, 7) + resize(f_k6s(5 downto 2), 7), 1);   -- x1.25 / 2 (top 39 = 78 / 2; bit 6 stays 0)
             -- P12 Arrow: octaves 1/16x .. 1x over the lower half (128 counts each), then linear 1x .. 3x
             v_k := s_g(5)(12 downto 3);
             if v_k(9) = '0' then
@@ -649,6 +653,7 @@ begin
                 m_l <= v_s(0) & m_l(15 downto 1);
                 m_b <= '0' & m_b(15 downto 1);
                 m_cnt <= m_cnt - 1;
+                if m_cnt = 1 then m_z <= '1'; end if;
             end if;
             v_pr := m_h(18 downto 0) & m_l;
             -- serial divider: 2^35 / den, 16 quotient bits
@@ -662,9 +667,12 @@ begin
                 d_cnt <= d_cnt - 1;
             end if;
 
-            if s_zone = '1' and s_zc = 40 then
+            -- the kicks are registered (one clock late) to keep the zone / avid compares out of the engine cone
+            e_kick <= v_kick;
+            if s_zone = '1' and s_zc = 40 then e_z40 <= '1'; else e_z40 <= '0'; end if;
+            if e_z40 = '1' then
                 e_st <= to_unsigned(32, 6);
-            elsif v_kick = '1' then
+            elsif e_kick = '1' then
                 e_st <= to_unsigned(1, 6);
             else
                 case to_integer(e_st) is
@@ -690,7 +698,7 @@ begin
                         v_w9 := f_wph(15 downto 7) - e_apx(8 downto 0);
                         e_ga <= "111" & v_w9(8 downto 2);                         -- 896 + ripple phase
                         m_a <= resize(e_g0, 18); m_b <= resize(f_gs, 16);
-                        m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                        m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                         e_st <= e_st + 1;
                     when 6 =>
                         n_q8 <= unsigned(r_egq(7 downto 0));
@@ -701,24 +709,24 @@ begin
                     when 8 =>
                         e_st <= e_st + 1;
                     when 9 =>
-                        if m_cnt = 0 then
+                        if m_z = '1' then
                             -- g' = g0 Arrow (Q.1); the flame bands follow it (7 bands over 492 px)
                             e_gp <= v_pr(19 downto 8);
                             e_gpn <= f_sw and e_neg;                          -- Sweep: signed above the axis
                             m_a <= resize(v_pr(19 downto 8), 18); m_b <= to_unsigned(1865, 16);
-                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                             e_st <= e_st + 1;
                         end if;
                     when 10 =>
-                        if m_cnt = 0 then
+                        if m_z = '1' then
                             if v_pr(22 downto 18) >= 7 then e_j <= to_unsigned(6, 3); e_fg <= to_unsigned(15, 4);
                             else e_j <= v_pr(20 downto 18); e_fg <= v_pr(17 downto 14); end if;
                             m_a <= resize(e_gp, 18); m_b <= resize(f_kmag, 16);
-                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                             e_st <= e_st + 1;
                         end if;
                     when 11 =>
-                        if m_cnt = 0 then
+                        if m_z = '1' then
                             -- den = 2^20 -+ |k| g' / 2 (Fan; Sweep flips it above the axis), floored at 2^19 + 4096
                             if (f_kneg xor e_gpn) = '1' then
                                 e_den <= to_unsigned(1048576, 22) + resize(v_pr(21 downto 1), 22);
@@ -733,7 +741,7 @@ begin
                     when 12 =>
                         d_r <= to_unsigned(524288, 23); d_q <= (others => '0'); d_cnt <= to_unsigned(16, 5);
                         m_a <= resize(f_a1, 18); m_b <= resize(e_gp, 16);
-                        m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                        m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                         e_st <= e_st + 1;
                     when 13 =>
                         if d_cnt = 0 then
@@ -749,33 +757,33 @@ begin
                         end if;
                     when 14 =>
                         m_a <= resize(e_xa, 18); m_b <= e_m;
-                        m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                        m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                         e_st <= e_st + 1;
                     when 15 =>
-                        if m_cnt = 0 then
+                        if m_z = '1' then
                             if e_xan = '1' then n_c0 <= -signed(resize(v_pr(28 downto 12), 19));
                             else n_c0 <= signed(resize(v_pr(28 downto 12), 19)); end if;
                             m_a <= resize(e_m, 18); m_b <= resize(f_sxf, 16);
-                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                             e_st <= e_st + 1;
                         end if;
                     when 16 =>
-                        if m_cnt = 0 then
+                        if m_z = '1' then
                             n_dc <= v_pr(26 downto 12);
                             m_a <= resize(e_apx, 18); m_b <= resize(f_lean, 16);          -- Lean |dy| (Q.16)
-                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                             e_st <= e_st + 1;
                         end if;
                     when 17 =>
-                        if m_cnt = 0 then
+                        if m_z = '1' then
                             if (f_lneg xor (f_sw and e_neg)) = '1' then e_lo <= C_P0 - v_pr(15 downto 0);
                             else e_lo <= C_P0 + v_pr(15 downto 0); end if;
                             m_a <= resize(f_m3sq(17 downto 10), 18); m_b <= resize(unsigned(e_sr(7 downto 0)), 16);
-                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                             e_st <= e_st + 1;
                         end if;
                     when 18 =>
-                        if m_cnt = 0 then
+                        if m_z = '1' then
                             -- ripple r (theta Q.10): arm phase offset = stream + r; stem start = Lean - 128 r (sway)
                             if e_sr(9) = '1' then
                                 n_tho <= f_thoff(15 downto 6) - resize(v_pr(15 downto 8), 10);
@@ -789,24 +797,24 @@ begin
                     -- zone products
                     when 32 =>
                         m_a <= resize(s_m3, 18); m_b <= resize(s_m3, 16);
-                        m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                        m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                         e_st <= e_st + 1;
                     when 33 =>
-                        if m_cnt = 0 then
+                        if m_z = '1' then
                             f_m3sq <= v_pr(17 downto 0);
                             m_a <= v_pr(17 downto 0); m_b <= to_unsigned(13, 16);
-                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                             e_st <= e_st + 1;
                         end if;
                     when 34 =>
-                        if m_cnt = 0 then
+                        if m_z = '1' then
                             f_spd <= v_pr(25 downto 10);
                             m_a <= resize(f_kmag, 18); m_b <= to_unsigned(866, 16);
-                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5);
+                            m_h <= (others => '0'); m_l <= (others => '0'); m_cnt <= to_unsigned(16, 5); m_z <= '0';
                             e_st <= e_st + 1;
                         end if;
                     when 35 =>
-                        if m_cnt = 0 then
+                        if m_z = '1' then
                             if f_kneg = '1' then f_a1 <= to_unsigned(65536, 17) + resize(v_pr(19 downto 4), 17);
                             else f_a1 <= to_unsigned(65536, 17) - resize(v_pr(19 downto 4), 17); end if;
                             e_st <= (others => '0');
@@ -956,8 +964,8 @@ begin
             p3_c4 <= p2_c4;
             p3_bp <= resize(p2_src * signed('0' & f_bk), 16);
             -- 4: bent ramp
-            p4_cp <= p3_c4 + resize(shift_right(p3_bp, 1), 19);
-            p_bp5(4) <= resize(shift_right(p3_bp, 9), 6);
+            p4_cp <= p3_c4 + resize(p3_bp, 19);                                 -- f_bk is half scale: one shift less
+            p_bp5(4) <= resize(shift_right(p3_bp, 8), 6);
             -- 5: T ROM address (16-px knots), window, rim distances (Q.4, c_T units)
             v_cp := p4_cp;
             if v_cp < 0 then r_ta <= (others => '0'); p_f4(5) <= (others => '0');

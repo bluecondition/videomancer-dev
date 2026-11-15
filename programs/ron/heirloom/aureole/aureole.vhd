@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Aureole v0.1.1 -- Heirloom from the video clips, from WIN_20230314_23_42_54 at 7.5 s.
 -- v0.1.1: S9 Gold is a full-frame gold halo on every line (was only the afterglow below the warm cap,
 -- off screen at the default phase); S9 Blue (the default) is bit-identical with v0.1.0.
@@ -518,7 +520,8 @@ begin
                             if c_off8 < c_step then c_off8 <= c_off8 + C_P8 - c_step; else c_off8 <= c_off8 - c_step; end if;
                         end if;
                         c_xb0 <= resize(s_x0, 12) + shift_left(resize(s_xs, 12), 3);
-                        c_e <= s_g6(12 downto 5);
+                        v_t := resize(s_g6, 16) + resize(s_g6(12 downto 2), 16);          -- K6 x1.25, half-step code (0..159)
+                        c_e <= v_t(13 downto 6);
                     when 21 =>
                         -- horns A = (k2 * 100) >> 8 ; width exponent ; skew exponent
                         v_u := shift_left(resize(s_g2(12 downto 3), 32), 6) + shift_left(resize(s_g2(12 downto 3), 32), 5)
@@ -950,9 +953,9 @@ begin
             p4_pe <= p3_lm * c_e;
             p4_fh <= p3_fh; p4_dw <= p3_dw;
             -- 5: displaced position and the bent field
-            v_s := signed(resize(l_pos, 14)) + resize(p4_dw, 14) + signed(resize(p4_pe(15 downto 7), 14));
+            v_s := signed(resize(l_pos, 14)) + resize(p4_dw, 14) + signed(resize(p4_pe(15 downto 6), 14));
             p5_pos <= v_s;
-            p5_fb <= resize(p4_fh, 10) + resize(p4_pe(15 downto 9), 10);
+            p5_fb <= resize(p4_fh, 10) + resize(p4_pe(15 downto 8), 10);
             -- 6: mod P straight into the table's address register
             if p5_pos < 0 then
                 v_pm := resize(p5_pos + C_P, 12);

@@ -157,3 +157,11 @@ Working files are in `.heirloom_work/rb_ironwork/` (`notes.md`, `meas*.py`, `fit
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top of K6 25 % stronger in bend / element programs; the orchestrator set the K6 default to 100 % (1023) and bumped the version.
+
+- Classification: **BEND.** K6 Etch adds camera (or Osc) luma x etch^2 to the ring phase and the stripe phase: the lenses and lace bend into contours.
+- Change: The etch gain is 1.25 x etch^2 / 256, c_eg = eg + eg >> 2 (0 .. 317, widened to 9 bits), computed in the sequencer store; the two 4 x 9 partial products are 13 bits. Downstream only the phase bits are used, so nothing can wrap. Full Etch: 3.4 -> 4.2 rings per full luma.
+- Build: v0.1.3 built 2026-11-15 through the queue, router1, all six configs seed 1. Worst HD 80.15 MHz (HD Analog 90.76, HD HDMI 80.15, HD Dual 86.40); 6819-6848 LC. Output `out/rev_b/ron/heirloom/ironwork.vmprog`. NOT flashed.

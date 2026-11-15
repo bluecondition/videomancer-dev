@@ -135,3 +135,11 @@ v0.2.0, 2026-11-04, router2, all six configs on seed 1. Post-route Fmax:
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K4 (Melt), so K4 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K4 = Level** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.2.1, rebuilt with router1: all six seed 1; HD worst 91.69 MHz (HD Analog 95.05, HD HDMI 93.74, HD Dual 91.69), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh monodala`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top of K6 25 % stronger in bend / element programs; the orchestrator set the K6 default to 100 % (1023) and bumped the version.
+
+- Classification: **BEND.** K6 Melt bends the rings by the video (or Osc) luma.
+- Change: f_melt = 1.25 x the old Melt curve, registered one clock after it (f_melt0 -> f_melt, 10 bits, 0 .. 608); the melt product (19 bits, max 258 x 608) and the 13-bit offset (breathe 276 + melt 2455 < 4096) have room. Full Melt: +-3.8 -> +-4.75 rings.
+- Build: v0.2.2 built 2026-11-15 through the queue, router1, all six configs seed 1. Worst HD 94.98 MHz (HD Analog 97.58, HD HDMI 100.96, HD Dual 94.98); 6133-6160 LC. Output `out/rev_b/ron/heirloom/monodala.vmprog`. NOT flashed.

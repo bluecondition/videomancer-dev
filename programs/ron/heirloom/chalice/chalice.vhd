@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Chalice v0.1.0 -- Heirloom from the video clips, built from the still WIN_20230305_00_05_43 t0.5
 -- (the clip is static: only the per-line jitter texture changes frame to frame).
 --
@@ -190,7 +192,7 @@ architecture chalice of program_top is
     signal c_tmag : unsigned(14 downto 0) := (others => '0');
     signal c_tneg : std_logic := '0';
     signal c_lfo  : signed(10 downto 0) := (others => '0');
-    signal c_cg   : unsigned(9 downto 0) := to_unsigned(256, 10);
+    signal c_cg   : unsigned(10 downto 0) := to_unsigned(320, 11);
     signal c_dly  : unsigned(5 downto 0) := to_unsigned(40, 6);
     signal c_xb0  : unsigned(11 downto 0) := to_unsigned(16, 12);
     signal c_u0h  : unsigned(10 downto 0) := to_unsigned(1904, 11);
@@ -278,8 +280,8 @@ architecture chalice of program_top is
     signal p6_kh  : unsigned(13 downto 0) := (others => '0');
     signal p6_dd  : unsigned(11 downto 0) := (others => '0');
     signal p6_lm  : unsigned(7 downto 0) := (others => '0');
-    signal p7_ca  : unsigned(12 downto 0) := (others => '0');
-    signal p8_cam : unsigned(8 downto 0) := (others => '0');
+    signal p7_ca  : unsigned(13 downto 0) := (others => '0');
+    signal p8_cam : unsigned(9 downto 0) := (others => '0');
     signal p7_t1  : unsigned(12 downto 0) := (others => '0');
     signal p7_t2  : signed(14 downto 0) := (others => '0');
     signal p8_a, p9_a, p10_x : signed(15 downto 0) := (others => '0');
@@ -530,7 +532,8 @@ begin
                         c_sp <= v_p(15 downto 6);
                         v_p := resize(s_g5, 16) + shift_left(resize(s_g5, 16), 1);   -- 24 k5: breathe amplitude (k5 * 384) >> 10
                         c_amp <= v_p(14 downto 6);
-                        c_cg <= s_g6(12 downto 3);
+                        v_p := resize(s_g6, 16) + resize(s_g6(12 downto 2), 16);     -- K6 x1.25: 0 .. 1278
+                        c_cg <= v_p(13 downto 3);
                         if c_ph(15) = '1' then c_tri <= not c_ph(14 downto 0); else c_tri <= c_ph(14 downto 0); end if;
                     when 44 => z_mt <= r_ex_q;
                     when 45 =>
@@ -974,13 +977,13 @@ begin
             p6_kh <= resize(shift_right(shift_left(resize(p5_a, 24), 6) + resize(p5_b, 24), 10), 14);
             p6_dd <= resize(shift_right(p5_dd, 7), 12);
             p6_lm <= unsigned(s_lb_q);
-            -- 7: base + skirt, K h - Kd d, camera x gain (8 x 5)
+            -- 7: base + skirt, K h - Kd d, camera x gain (8 x 6, code 0 .. 39)
             p7_t1 <= resize(l_base, 13) + resize(unsigned(b_f(27 downto 16)), 13);
             p7_t2 <= signed(resize(p6_kh, 15)) - signed(resize(p6_dd, 15));
-            p7_ca <= p6_lm * c_cg(9 downto 5);
+            p7_ca <= p6_lm * c_cg(10 downto 5);
             -- 8: raw phase (+3 rings bias); camera term
             p8_a <= signed(resize(p7_t1, 16)) - resize(p7_t2, 16);
-            p8_cam <= resize(shift_right(p7_ca, 4), 9);
+            p8_cam <= resize(shift_right(p7_ca, 4), 10);
             -- 9: + camera
             p9_a <= p8_a + signed(resize(p8_cam, 16));
             -- 10: the wavefolder (Rim on): |a|

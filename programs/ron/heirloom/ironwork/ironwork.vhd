@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Ironwork v0.1.1 -- Heirloom phase 3 (video clips), from the still WIN_20230717_23_51_09 at 7.5 s.
 --
 -- The still: a magenta / green / black lace of contour ironwork.  Two tiles across (944 px, mirrored), rows of
@@ -177,7 +179,7 @@ architecture ironwork of program_top is
     signal c_x0   : unsigned(35 downto 0) := (others => '0');           -- beta^2, Q12.24
     signal c_k0   : unsigned(18 downto 0) := to_unsigned(223696, 19);   -- stripe phase per h (Q24)
     signal c_v2   : unsigned(17 downto 0) := (others => '0');           -- speed^2
-    signal c_eg   : unsigned(7 downto 0) := (others => '0');            -- etch gain
+    signal c_eg   : unsigned(8 downto 0) := (others => '0');            -- etch gain (x1.25: 0 .. 317)
     signal c_as   : unsigned(7 downto 0) := to_unsigned(90, 8);         -- lace depth into the rings (Q8 ring)
     signal c_tw   : unsigned(6 downto 0) := (others => '0');            -- threshold lift (lace > 50 %), added
     signal c_oh   : unsigned(15 downto 0) := (others => '0');           -- colour cycle (Q16)
@@ -251,7 +253,7 @@ architecture ironwork of program_top is
     -- pixel path (stage numbers in the names)
     signal p2_sp, p3_sp, p4_sp, p5_sp, p6_sp : unsigned(15 downto 0) := (others => '0');   -- stripe phase, Q16
     signal p4_x   : unsigned(19 downto 0) := (others => '0');
-    signal p4_lea, p4_leb : unsigned(11 downto 0) := (others => '0');
+    signal p4_lea, p4_leb : unsigned(12 downto 0) := (others => '0');
     signal p5_s2, p6_s2 : unsigned(19 downto 0) := (others => '0');
     signal p5_le  : unsigned(15 downto 0) := (others => '0');
     signal p6_le, p7_le, p8_le, p9_le : unsigned(11 downto 0) := (others => '0');
@@ -606,7 +608,7 @@ begin
                     when 342 => c_x0 <= f_acc(47 downto 12);
                     when 370 => c_k0  <= f_acc(37 downto 19);       -- 223696 2^ep
                     when 398 => c_v2 <= f_acc(17 downto 0);
-                    when 426 => c_eg <= f_acc(15 downto 8);
+                    when 426 => c_eg <= resize(f_acc(15 downto 8), 9) + resize(f_acc(15 downto 10), 9);   -- etch^2 x1.25
                     when 454 =>
                         if s_gp(12 downto 3) > 512 then c_as <= f_acc(16 downto 9) + 90;
                         else c_as <= f_acc(16 downto 9); end if;
@@ -897,8 +899,8 @@ begin
             -- 4: fabric copy; etch partials
             p4_x  <= t_rq;
             p4_sp <= p3_sp;
-            p4_lea <= resize(unsigned(s_lb_q(3 downto 0)) * c_eg, 12);
-            p4_leb <= resize(unsigned(s_lb_q(7 downto 4)) * c_eg, 12);
+            p4_lea <= resize(unsigned(s_lb_q(3 downto 0)) * c_eg, 13);
+            p4_leb <= resize(unsigned(s_lb_q(7 downto 4)) * c_eg, 13);
             -- 5: r^2 / Pr^2 = X + Y (saturated); etch
             v_s := resize(p4_x, 21) + resize(l_y, 21);
             if v_s(20) = '1' then p5_s2 <= (others => '1'); else p5_s2 <= v_s(19 downto 0); end if;
