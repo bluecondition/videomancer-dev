@@ -162,3 +162,11 @@ Working files are in `.heirloom_work/rb_frogspawn/` (`notes.md` has the full log
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where K6 bends the drawing, the camera effect at the top of the knob is 25 % stronger. The K6 default is now 1023 (100 %), v0.1.3.
+- **Classification: bend.** K6 Etch adds the camera luma to the field, so the rings bend and the ovals grow.
+- **Change.** The per-field etch-gain product uses the constant 240 instead of 192 with the camera (sequencer slot 12), so c_eg = 1.25× at every knob position (max 191 -> 239, still 8 bits). The pixel etch sum peaks at 57,121, inside its 16 bits. The Osc keeps 192, so Osc mode is unchanged.
+- Look: `.heirloom_work/rb_frogspawn/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). Same lattice, with bright areas pushing the rings further.
+- Build: router1. SD HDMI and HD Dual closed on seed 2 (the other configs on seed 1). HD worst 75.00 MHz (HD Analog, thin as before); 6,755 LC.

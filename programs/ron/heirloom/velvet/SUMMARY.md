@@ -263,3 +263,15 @@ Glides (1/8 of the gap per field) on K1, K2, K4, K5, K6 and P12.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 240 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where K6 bends the drawing, the camera effect at the top of the knob is 25 % stronger. The K6 default is now 1023 (100 %), v0.1.3.
+- **Classification: bend.** K6 Etch adds the camera luma to X and to the chevron (axis-distance) coordinate, so the strands are pushed sideways.
+- **Change.**
+  - The per-field etch-gain product uses 146 instead of 117 with the camera (slot 10), so c_g6 is ×1.25 at every knob position (max 58 -> 72). c_g6 widened to 7 bits, stored as f_acc(27 downto 21).
+  - The pixel product is resized to its 15 bits; the camera's push peaks at 2142 (Q2), inside the 13-bit p7_et.
+  - Overflow guard: the stage-10 axis-distance wrap now folds two periods each way (±3776 or ±7552). sd + band displacement + the camera's push can now reach 6078, past the old single fold's 5664 limit; the old maximum was 5659. This also covers the Osc's larger push, which could already pass 5664.
+  - The Osc keeps 117, so its gain is unchanged (now 3.2× the camera rather than 4×).
+- Look: `.heirloom_work/rb_velvet/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). Same curtain, with the strands pushed further around the face.
+- Build: router1, all six configs seed 1. HD worst 78.34 MHz (HD Analog 89.34, HD HDMI 82.48, HD Dual 78.34; it was 84.76-90.36). 7,206 LC (93.8 %, +63).

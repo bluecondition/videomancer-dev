@@ -35,6 +35,7 @@
 -- two beam DDAs (band phase, interior phase), a 25-stage pixel path.  Virtual 1080-line coordinates (SD shows
 -- the centre 4:3).  Generated avid; output conditioning (Y, U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes,
 -- luma 13/16) before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -162,7 +163,7 @@ architecture neon of program_top is
     signal c_d2   : unsigned(17 downto 0) := (others => '0');
     signal c_dr   : unsigned(18 downto 0) := (others => '0');          -- drift per field, Q24 cycles
     signal c_th0  : unsigned(23 downto 0) := to_unsigned(K_TH0, 24);   -- FM phase of line 0
-    signal c_g6   : unsigned(9 downto 0) := to_unsigned(156, 10);      -- etch gain
+    signal c_g6   : unsigned(10 downto 0) := to_unsigned(156, 11);     -- etch gain (camera x 1.25: max 1277)
     signal c_kj1  : unsigned(23 downto 0) := (others => '0');          -- zipper phases per line
     signal c_kj2  : unsigned(23 downto 0) := (others => '0');
     signal c_gap  : signed(23 downto 0) := (others => '0');            -- interior width offset (Q24 band)
@@ -236,7 +237,7 @@ architecture neon of program_top is
     signal p3_r   : unsigned(9 downto 0) := (others => '0');
     signal p3_k0  : std_logic := '0';
     signal p3_lm  : unsigned(7 downto 0) := (others => '0');
-    signal p4_ea, p4_eb : unsigned(13 downto 0) := (others => '0');
+    signal p4_ea, p4_eb : unsigned(14 downto 0) := (others => '0');
     signal p4_v   : unsigned(15 downto 0) := (others => '0');
     signal p4_ax  : unsigned(9 downto 0) := (others => '0');
     signal p4_out, p4_tr : std_logic := '0';
@@ -578,7 +579,9 @@ begin
                     when 338 => c_amp <= to_unsigned(164, 12) + f_acc(31 downto 20);
                     when 362 => c_d2  <= f_acc(17 downto 0);
                     when 386 => c_dr  <= f_acc(26 downto 8);
-                    when 410 => c_g6  <= f_acc(19 downto 10);
+                    when 410 =>                       -- the camera (not the Osc) at x 1.25: g + g / 4
+                        if s_src = '1' then c_g6 <= resize(f_acc(19 downto 10), 11);
+                        else c_g6 <= resize(f_acc(19 downto 10), 11) + resize(f_acc(19 downto 12), 11); end if;
                     when 434 => c_kj1 <= f_acc(31 downto 8);
                     when 458 => c_kj2 <= f_acc(31 downto 8);
                     when 482 =>

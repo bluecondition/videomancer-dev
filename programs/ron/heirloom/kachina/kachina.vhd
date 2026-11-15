@@ -45,6 +45,7 @@
 -- convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Etch (camera strength, was K5), K5 = Colour (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -574,7 +575,7 @@ begin
                     when 352 => c_eg <= f_acc(19 downto 10);
                     when 353 =>                                   -- Osc: the lattice enters at 3x the camera's level
                         if s_src = '1' then c_egx <= resize(c_eg, 12) + shift_left(resize(c_eg, 12), 1);
-                        else c_egx <= resize(c_eg, 12); end if;
+                        else c_egx <= resize(c_eg, 12) + resize(c_eg(9 downto 2), 12); end if;   -- camera x 1.25 (max 1277)
                     when 354 => c_phtop <= to_unsigned(C_PHM, 24) - c_aykp;
                     when 355 => c_phtop <= c_phtop + c_phs;
                     when others => null;

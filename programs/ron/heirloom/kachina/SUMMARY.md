@@ -177,3 +177,11 @@ proto; `imodel.py` / `imrun.py` / `cycles.py` = the integer model; `sheet.py` = 
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Etch), so K5 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K5 = Colour** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.1.2, rebuilt with router1: all six seed 1; HD worst 82.07 MHz (HD Analog 82.17, HD HDMI 82.07, HD Dual 88.32), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh kachina`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where K6 bends the drawing, the camera effect at the top of the knob is 25 % stronger. The K6 default is now 1023 (100 %), v0.1.3.
+- **Classification: bend.** K6 Etch adds the camera luma to u, so the bands, masks and arms are pushed outward.
+- **Change.** Per field (step 353), the camera's applied gain is c_egx = eg + eg/4 (×1.25 at every knob position; max 1022 -> 1277, inside the 12-bit register; the 20-bit etch sum peaks at ~305 k). The camera now pushes up to ~298 px per full luma instead of 239. The table fold at 1024 is the design's own mirror, not a wrap. The Osc keeps 3 eg, so Osc mode is unchanged (it is now 2.4× the camera rather than 3×).
+- Look: `.heirloom_work/rb_kachina/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). Same totem, with the face pushed further, so more of it folds back into the table's other end.
+- Build: router1, all six configs seed 1; HD worst 82.53 MHz (HD Analog 82.53, HD HDMI 85.31, HD Dual 82.54); 6,875 LC.

@@ -46,6 +46,7 @@
 -- the hardware convention (U carries Cr, V carries Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Melt (camera strength, was K5), K5 = Breathe (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -190,7 +191,7 @@ architecture blossom of program_top is
     signal b_v     : signed(10 downto 0) := (others => '0');             -- Bloom - centre
     signal b_3v    : signed(12 downto 0) := (others => '0');             -- 3 v
     signal b_3d    : signed(11 downto 0) := (others => '0');             -- 3 (v -+ 256) beyond half travel
-    signal f_melt  : unsigned(7 downto 0) := to_unsigned(115, 8);
+    signal f_melt  : unsigned(8 downto 0) := to_unsigned(115, 9);      -- x 1.25 with the camera (0 .. 318)
     signal f_bd    : unsigned(6 downto 0) := to_unsigned(28, 7);         -- heartbeat swell depth, Q8
     signal f_cbd   : unsigned(9 downto 0) := to_unsigned(147, 10);       -- depth x the beat's mean (1/3), Q12
     signal k_sw    : unsigned(12 downto 0) := to_unsigned(4243, 13);     -- 1 + depth / 3: swell = k_sw - depth e^2
@@ -529,7 +530,9 @@ begin
             end if;
             b_3d <= shift_left(resize(v_d, 12), 1) + resize(v_d, 12);
             f_bloom <= resize(shift_right(b_3v, 2), 12) + resize(shift_right(b_3d, 1), 12);
-            f_melt <= s_g(3)(12 downto 5);
+            -- K6 Melt; with the camera (not the Osc) x 1.25: g + g / 4
+            if f_osc = '1' then f_melt <= resize(s_g(3)(12 downto 5), 9);
+            else f_melt <= resize(s_g(3)(12 downto 5), 9) + resize(s_g(3)(12 downto 7), 9); end if;
             -- K6 Breathe: swell depth 0 .. 0.44 (Q8); the heartbeat e^2 has mean 1/3, folded into the
             -- per-field constants so the per-line products stay unsigned
             f_bd <= resize(s_g(4)(12 downto 6), 7) - resize(s_g(4)(12 downto 9), 7);

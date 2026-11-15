@@ -36,6 +36,7 @@
 -- terms), beam DDAs (mirror-aware), a 25-stage pixel path.  Virtual 1080-line coordinates (SD shows the centre
 -- 4:3).  Generated avid; output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16, luma [1 2 1]/4, luma 13/16) before
 -- the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -191,7 +192,7 @@ architecture velvet of program_top is
     signal c_dr   : unsigned(9 downto 0) := (others => '0');          -- band roll per field, Q4 lines
     signal c_drs  : unsigned(23 downto 0) := (others => '0');         -- ... in strips, Q16
     signal c_e2   : unsigned(19 downto 0) := (others => '0');         -- etch^2
-    signal c_g6   : unsigned(5 downto 0) := to_unsigned(3, 6);        -- etch gain
+    signal c_g6   : unsigned(6 downto 0) := to_unsigned(3, 7);        -- etch gain (camera x 1.25: max 72)
     signal c_hem  : signed(13 downto 0) := (others => '0');           -- Hem, Q12 of the frame height
     signal c_ya   : unsigned(11 downto 0) := to_unsigned(655, 12);    -- chevron apex row
     signal c_phi0 : signed(19 downto 0) := (others => '0');           -- chevron phi of line 0, Q8 px
@@ -531,7 +532,9 @@ begin
                     when 7  => z_fa <= resize(c_ks, 28);           z_fb <= resize(c_dr, 16);          -- roll in strips
                     when 8  => z_fa <= resize(z_d, 28);            z_fb <= to_unsigned(960, 16);      -- wrap threshold
                     when 9  => z_fa <= resize(s_g6(12 downto 3), 28); z_fb <= resize(s_g6(12 downto 3), 16);  -- etch^2
-                    when 10 => z_fa <= resize(c_e2, 28);           z_fb <= to_unsigned(117, 16);
+                    when 10 =>                                                                       -- camera x 1.25: 146
+                        z_fa <= resize(c_e2, 28);
+                        if s_src = '1' then z_fb <= to_unsigned(117, 16); else z_fb <= to_unsigned(146, 16); end if;
                     when 11 => z_fa <= resize(z_hm, 28);           z_fb <= to_unsigned(4920, 16);     -- Hem
                     when 12 => z_fa <= resize(z_hm, 28);           z_fb <= to_unsigned(1297, 16);     -- apex row
                     when 13 => z_fa <= resize(c_ya, 28);           z_fb <= to_unsigned(151, 16);      -- phi of line 0
@@ -630,7 +633,7 @@ begin
                     when 218 => c_drs <= resize(f_acc(27 downto 8), 24);
                     when 242 => c_neg <= to_unsigned(1536, 11) + resize(f_acc(18 downto 10), 11);    -- 1536 + 0.94 d
                     when 266 => c_e2  <= f_acc(19 downto 0);
-                    when 290 => c_g6  <= f_acc(26 downto 21);
+                    when 290 => c_g6  <= f_acc(27 downto 21);
                     when 314 =>
                         if z_hneg = '1' then c_hem <= -signed(resize(f_acc(23 downto 10), 14));
                         else c_hem <= signed(resize(f_acc(23 downto 10), 14)); end if;
@@ -962,7 +965,7 @@ begin
             p6_p1 <= signed(p5_col(13 downto 6)) * l_f1;
             p6_p2 <= signed(p5_col(5 downto 0)) * l_f2;
             p6_q1 <= p5_s * signed('0' & p5_amp);
-            p6_et <= resize(shift_right(p5_lm, 1), 8) * signed('0' & c_g6);
+            p6_et <= resize(resize(shift_right(p5_lm, 1), 8) * signed('0' & c_g6), 15);
             p6_sh <= p5_sh; p6_xm <= p5_xm; p6_sd <= p5_sd;
             -- 7: X0 = x + sway (Q2 px); band inner (Q2 px); etch (Q2 px; Osc twice)
             v_x0 := signed(resize(p6_xm & '0', 17)) + resize(shift_right(p6_p1, 4), 17) + resize(shift_right(p6_p2, 3), 17);
@@ -999,7 +1002,9 @@ begin
                 when others => p10_t2 <= shift_left(v_xc, 2) + shift_left(v_xc, 1);
             end case;
             v_sd := p9_sd;
-            if v_sd >= 1888 then v_sd := v_sd - 3776; elsif v_sd < -1888 then v_sd := v_sd + 3776; end if;
+            -- two periods each way: sd + band + the camera's push can pass 5664 since the K6 top +25 %
+            if v_sd >= 5664 then v_sd := v_sd - 7552; elsif v_sd >= 1888 then v_sd := v_sd - 3776;
+            elsif v_sd < -5664 then v_sd := v_sd + 7552; elsif v_sd < -1888 then v_sd := v_sd + 3776; end if;
             p10_sd <= v_sd;
             p10_sh <= p9_sh;
             p10_xd <= p9_xb - signed(resize(l_xc, 13));

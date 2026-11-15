@@ -39,6 +39,7 @@
 -- seven modulo counters, a 512 x 8 cell-sample RAM (ping-pong by cell-row parity), four glyph ROM reads,
 -- a 21-stage pixel path.  Generated avid; output conditioning (Y, U and V through two
 -- [1 2 2 2 2 2 2 2 1]/16 boxes, luma 13/16) before the blanking gate; colours in the hardware convention.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -590,12 +591,12 @@ begin
                         c_e <= z_e13(20 downto 10);
                         if s_src = '1' then c_elv <= resize(s_g6(12 downto 5), 8);
                         else c_elv <= resize(s_g6(12 downto 6), 8); end if;
-                        z_e4 <= shift_left(resize(z_e13(20 downto 10), 13), 2);
+                        -- glyph shift: Osc 4 E, the camera 1.25 E (E + E / 4); both capped at P - 1 below
+                        if s_src = '1' then z_e4 <= shift_left(resize(z_e13(20 downto 10), 13), 2);
+                        else z_e4 <= resize(z_e13(20 downto 10), 13) + resize(z_e13(20 downto 12), 13); end if;
                         z_em <= shift_left(resize(c_pm1, 13), 4);
                     when 245 =>
-                        if s_src = '1' then
-                            if z_e4 < z_em then c_e <= z_e4(10 downto 0); else c_e <= z_em(10 downto 0); end if;
-                        end if;
+                        if z_e4 < z_em then c_e <= z_e4(10 downto 0); else c_e <= z_em(10 downto 0); end if;
                     when 265 => c_inc <= f_acc(17 downto 4);
                     when 266 =>
                         v_g := signed(resize(s_g3(12 downto 3), 11)) - 512;

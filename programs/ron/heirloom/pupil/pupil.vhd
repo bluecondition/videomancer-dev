@@ -37,6 +37,7 @@
 -- coordinates (SD shows the centre 4:3).  Generated avid; output conditioning (Y, U and V through two
 -- [1 2 2 2 2 2 2 2 1]/16 boxes with the running-sum resync, luma 13/16) before the blanking gate.  Colours in
 -- the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -515,7 +516,7 @@ begin
                     when 314 => c_g6 <= f_acc(19 downto 12);
                     when 315 =>
                         if s_src = '1' then c_g6e <= shift_left(resize(c_g6, 10), 1);              -- Osc: x2
-                        else c_g6e <= resize(c_g6, 10); end if;
+                        else c_g6e <= resize(c_g6, 10) + resize(c_g6(7 downto 2), 10); end if;   -- camera x 1.25 (max 318)
                     when 338 =>                      -- beat step = 12960 m4 >> (15 - sh4) virtual lines, Q8
                         case to_integer(z_sh4) is
                             when -2     => v_t := shift_right(f_acc, 17);

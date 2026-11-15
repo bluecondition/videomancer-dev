@@ -216,3 +216,11 @@ Working files: `.heirloom_work/rb_blossom/` (`notes.md` has every number).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Breathe** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.2, rebuilt with router1: all six seed 1; HD worst 78.83 MHz (HD Analog 78.83, HD HDMI 82.14, HD Dual 83.74), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh blossom`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where K6 bends the drawing, the camera effect at the top of the knob is 25 % stronger. The K6 default is now 1023 (100 %), v0.6.3.
+- **Classification: bend.** K6 Melt multiplies the camera luma that is added to the field, so it bends the bands.
+- **Change.** Per field, with the camera f_melt = g + g/4 (×1.25 at every knob position; max 255 -> 318). f_melt widened to 9 bits. Melt + beat/4 peaks at ~620, inside the 10-bit l_m; the source term (≤ 1238) plus the bloom offset stays below the 13-bit q9_om limit (~2600 of 4095). The beat's own share (K5 Breathe) is not scaled. With Source = Osc, f_melt is the old g, so Osc mode is unchanged.
+- Look: `.heirloom_work/rb_blossom/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). The same rows and flood, with the bands bending a little harder around the face.
+- Build: router1. HD HDMI closed on seed 4 (seeds 1-3 stalled the router) and SD HDMI on seed 2; the other configs on seed 1. HD worst 74.28 MHz: HD Dual, only 0.03 over Fmin; it was 83.74 on the same seed before, so this is routing noise. HD Analog 82.33, HD HDMI 80.62. 7,319 LC.

@@ -232,3 +232,11 @@ Working files are in `.heirloom_work/rb_staircase/` (`notes.md`, `cells.py`, `ta
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 224 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after looking at fern and kiln renders with K6 at 100 %: the bend / element part of K6's camera effect is 25 % stronger at the top of the knob; the picture part is left alone. The K6 default is now 1023 (100 %), v0.1.2.
+- **Classification: mixed.** K6 Etch both shifts the glyphs (bend) and walks the brick colour (at full Etch, an 8-colour posterised mosaic of the camera: picture-type, already at its limit of one palette cycle per full luma).
+- **Change.** Only the camera's glyph shift is scaled: per field (step 244) it is E + E/4, and step 245 now caps it at 16 (P − 1) in camera mode too, as Osc mode always did. The cap keeps the shift below P, so the single mod-P subtract and the 11-bit c_e stay valid. The ×1.25 holds up to ~97 % of the knob; at 100 % the cap gives ~×1.2 at the still's P = 32. The colour walk (c_elv) and Osc mode (4 E, the same cap) are unchanged.
+- Look: `.heirloom_work/rb_staircase/k6b/k6b_cmp.png` (bear, 720p dec 4 renders the cells as coarse blocks; the bricks match and the glyph positions differ).
+- Build: router1, all six configs seed 1; HD worst 104.66 MHz (HD Dual); 6,482 LC.

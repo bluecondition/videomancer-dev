@@ -34,6 +34,7 @@
 -- centre for Mirror), a 25-stage pixel path.  Virtual 1080-line coordinates (SD shows the centre 4:3).  Generated
 -- avid; output conditioning (Y, U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes with the running-sum resync, luma
 -- 13/16) before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -513,7 +514,8 @@ begin
                     when 363 =>
                         z_eo <= shift_left(resize(z_e, 15), 2) + shift_left(resize(z_e, 15), 1);   -- the Osc at 6x the camera's gain
                     when 364 =>
-                        if s_src = '1' then c_e <= z_eo; else c_e <= resize(z_e, 15); end if;
+                        -- the camera (not the Osc) at x 1.25: e + e / 4 (max 5488)
+                        if s_src = '1' then c_e <= z_eo; else c_e <= resize(z_e, 15) + resize(z_e(12 downto 2), 15); end if;
                     when 386 =>
                         if s_src = '1' then c_eoff <= m_acc(21 downto 0) & "0000"; else c_eoff <= (others => '0'); end if;
                     when others => null;

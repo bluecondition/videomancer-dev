@@ -219,3 +219,11 @@ All 177 frames were extracted (29.98 fps, 5.9 s; `breath.txt`, `palx.py` per-eye
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 354 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where K6 bends the drawing, the camera effect at the top of the knob is 25 % stronger. The K6 default is now 1023 (100 %), v0.1.2.
+- **Classification: bend.** K6 Bend adds the camera luma to the eye depth, so the rings and the core edge bend around the picture.
+- **Change.** Per field (step 315), the camera's applied gain is c_g6e = g + g/4 (×1.25 at every knob position; max 255 -> 318, inside the 10-bit register; nibble products ≤ 4770 of 14 bits, the bend sum ≤ 76 k of 18 bits, e clamped as before). That is up to ~2.5 px per luma step instead of 2. The Osc keeps 2 g, so Osc mode is unchanged (now 1.6× the camera rather than 2×).
+- Look: `.heirloom_work/rb_pupil/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). The same eye, with more of the camera's outlines bent into it and the blue core showing where bright areas dilate past it.
+- Build: router1. HD Dual closed on seed 2 (seed 1 stalled the router); the other configs on seed 1. HD worst 85.51 MHz (HD Analog 85.51, HD HDMI 94.26, HD Dual 98.18); 6,566 LC.

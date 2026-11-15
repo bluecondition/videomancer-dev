@@ -241,3 +241,11 @@ Glides (1/8 of the gap per field, +-2 deadband) on K1, K2, K4, K5, K6 and P12.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where K6 bends the drawing, the camera effect at the top of the knob is 25 % stronger. The K6 default is now 1023 (100 %), v0.1.2.
+- **Classification: bend.** K6 Etch adds the camera luma to the band phase and the interior field, so the tubes bend and the stripes and eyes are pushed aside.
+- **Change.** Per field (step 410), the camera's etch gain is c_g6 = g + g/4 (×1.25 at every knob position; max 1022 -> 1277). c_g6 widened to 11 bits and the two pixel nibble products to 15 bits; the 19-bit etch product peaks at ~305 k. The band phase is modular by design, and the S term is clamped at the palette address. Full luma now gives 0.59 band and 596 q instead of 0.47 and 477. The Osc keeps the old g (its 2× path and its mean-centring use it), so Osc mode is unchanged.
+- Look: `.heirloom_work/rb_neon/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). Same picture, with the tube edges pushed further into the face.
+- Build: router1, all six configs seed 1; HD worst 91.84 MHz (HD Analog 91.84, HD HDMI 94.57, HD Dual 92.64); 6,787 LC.

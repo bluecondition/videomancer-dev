@@ -43,6 +43,7 @@
 -- [1 2 2 2 2 2 2 2 1]/16 boxes with the per-line resync, luma 13/16) and the blanking gate.  Virtual
 -- 1080-line coordinates (SD shows the centre 4:3).  Generated avid; one latency (C_LAT 20) in every mode.
 -- Colours in the hardware convention (u = Cr, v = Cb).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -483,7 +484,9 @@ begin
                             when others => z_fb <= to_unsigned(2184, 16);
                         end case;
                     when 11 => z_fa <= resize(s_g6(12 downto 3), 36);   z_fb <= resize(s_g6(12 downto 3), 16);  -- etch^2
-                    when 12 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(192, 16);      -- etch gain
+                    when 12 =>                                                                               -- etch gain
+                        z_fa <= resize(z_a, 36);                                                             -- (camera x 1.25: 240)
+                        if s_src = '1' then z_fb <= to_unsigned(192, 16); else z_fb <= to_unsigned(240, 16); end if;
                     when others =>                                                                           -- start phase
                         z_fa <= resize(c_kx, 36);
                         if s_twin = '1' then z_fb <= resize(to_unsigned(1914, 12) - c_xb0, 16);

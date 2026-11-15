@@ -192,3 +192,11 @@ Glides (1/8 of the gap per field, ±2 deadband) on K1, K2, K3, K5, K6 and P12.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where K6 bends the drawing, the camera effect at the top of the knob is 25 % stronger. The K6 default is now 1023 (100 %), v0.1.2.
+- **Classification: bend.** K6 Etch adds the camera luma to the ramp u, so it bends the coast, the arc and every band.
+- **Change.** Per field (sequencer step 364), the camera's etch gain is now c_e = e + e/4 (×1.25 at every knob position; max 4391 -> 5488, which fits the 15-bit register and the 19 / 23-bit pixel products). Full white now bends u by up to 1.34 cycles instead of 1.07. The Osc path is unchanged: its 6× gain and centring still use the old e.
+- Look: `.heirloom_work/rb_coastline/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). Same coast, with more of the face pushed into the next bands.
+- Build: router1, all six configs seed 1; HD worst 88.15 MHz; 6,879 LC.
