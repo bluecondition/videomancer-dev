@@ -1,6 +1,6 @@
 # Horologe (Kinetic)
 
-v0.1.0 built 2026-11-14, all six configs, not flashed.
+v0.1.0 built 2026-11-14, all six configs, not flashed. v0.1.1 (2026-11-15): K6 camera pass, see the end.
 
 ## What it draws
 
@@ -30,11 +30,11 @@ running along the diagonal opens and closes them in turn.
 | Control | Name | What it does |
 |---|---|---|
 | K1 | Scale | clock pitch 56 .. 267 virtual px, exponential, glided (default 120: 16 x 9 clocks) |
-| K2 | Shape | long needles .. short fat batons (length and weight together) |
+| K2 | Colour | the 16 shared palettes with hysteresis (was K6): ground = wall, A = hand 1, B = hand 2, accent = hub; face = 7/8 ground + 1/8 A |
 | K3 | Depth | swing 0 .. 1.25 turns, square law (default 1/4 turn each way) |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
 | K5 | Hands | hand 2 against hand 1: 0 % locked in one line .. 50 % mirrored .. 100 % counter-running at 3x (glided) |
-| K6 | Colour | the 16 shared palettes with hysteresis: ground = wall, A = hand 1, B = hand 2, accent = hub; face = 7/8 ground + 1/8 A |
+| K6 | Camera | camera strength 0 .. 100 %, default 50 %: the source term = luma x 0 .. 80 (Osc x2 that); 25 % = the v0.1.0 gain (glided, +-4 deadband) |
 | S7 | Wave | Smooth / Snap (hands tick between the 8 compass points) |
 | S8 | Field | Linear (diagonal wave) / Radial (octagonal ripple from the centre clock) |
 | S9 | Dial | Faces (dial discs drawn) / Hands (hands and hubs alone on the wall) |
@@ -49,8 +49,8 @@ Presets: Scissor Wave (defaults), Line Field, Ripple Wall, Semaphore, Standing F
 - Source = Video: the luma (>> 2, less 16) is smeared along x by a 1/64 one-pole filter and HELD per clock:
   on the last line of each row of clocks the smeared value at each clock's right edge is written into the
   other bank of a 2 x 256 block RAM (banks by row parity) and the row below reads it for all of its lines, so
-  every clock is rigid. hand 1 += 20 x luma: white turns a clock 0.27 turn, so the picture shows as hand
-  directions.
+  every clock is rigid. hand 1 += K6 gain x luma (v0.1.1: x40 at the default; v0.1.0 was a fixed x20, white
+  0.27 turn), so the picture shows as hand directions.
 - Black input: the offset is zero and the wave alone runs.
 - Source = Osc: a two-axis triangle lattice (640 x 540 virtual px) drifting diagonally replaces the luma at
   twice the camera's gain.
@@ -132,3 +132,50 @@ field and hold; [D] wave engine; [E] the clocks; [F] output conditioning (lifted
   horizontal needle never sits on one scan line), and edges are softer. Same layout otherwise.
 - First RTL (8 parallel serial products + a combine stage, 28-bit spread accumulators, pitch from 40 px) was
   7,421 LC (96 %) and missed timing on router2; the machine was rebuilt around 4 accumulators.
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. K6 is now Camera: how hard the held camera luma turns the hands.
+
+- Gain law (linear): the source term (Q14 turns) = luma x 5/16 K6 / 4, i.e. x0 at 0 %, x20 at 25 % (exactly the
+  v0.1.0 fixed gain: white = 0.27 turn), x40 at 50 % (default, white = 0.53 turn) and x80 at 100 % (white = 1.07
+  turns, so bright areas spin the hands past a full turn). Source = Osc keeps its x2: x80 at the default.
+  0 % draws exactly what a black input draws.
+- Twice the v0.1.0 gain stays clean (every clock is rigid by construction, so there are no per-line jaggies), so
+  50 % is the full 2x.
+- K6 is read once per field through the shared glide (a fourth slot: 1/8 of the gap per field, +-4 deadband) and
+  turned into the gain in the vblank sequencer (zc 80: K6/4 + K6/16, x2 for Osc). The gain is applied where the
+  held sample is READ, through a 256-entry gain table (one block RAM) refilled every field in the vblank zone by
+  repeated addition (zc 768 .. 1023, address = zc's low byte: gt(n) = n x gain / 16, one 18-bit add per entry):
+  no multiplier at all. The hold RAM's read data (stage 9) addresses the table directly and the table's output
+  (stage 10) takes the place of v0.1.0's fabric copy of the hold, so the latency, the hold (512 x 8) and its
+  sampling are all unchanged; stage 11 is a plain x4. K6 changes reach every clock at once. The hand-1 sum is one
+  bit wider (17 bits, up to 3.6 turns) so hand 2 never sees a wrap. Shape's two per-field fractions are now
+  constants (hand length 370 / 1024 P, half-width 46 / 1024 P), which frees their registers.
+- Fit history: the first K6 RTL (a gated-sum 8 x 10 multiply on the hold's write path, as on cogwork / pendula,
+  7,167 LC) and a second (the gain table on the write path with a 16-bit hold, 7,033 - 7,058 LC, 20 block RAMs)
+  both stopped nextpnr's placer at its first legalisation ("Unable to find legal placement for all cells", router1
+  and router2 alike, seeds 1 and 2), although v0.1.0 (6,937 LC, 18 RAMs) places. The design has ~220 flip-flop
+  control sets (many 1 - 7 FF sets from the per-field sequencer and gated sums), so its real fill is higher than
+  the LC count says. The read-side table (7,024 LC, 19 RAMs) placed HD Analog but not HD HDMI (6,994 LC).
+- To get back under v0.1.0's fill, the generated-avid delay line was shortened: taps 40 and 47 now ride the cvr
+  delay ring's spare bits (written as taps 1 and 8; 39 clocks to the fabric copy) and taps 48 .. 56 follow tap
+  47 in flip-flops, so only taps 0 .. 8 remain a flip-flop chain (37 fewer flip-flops). It is bit-identical (the
+  K6 50 % render is 0 pixels different) and places on seed 1 in all three HD configs (placement-only probes:
+  6,951 - 6,961 LC).
+- Frozen: K2 Shape at 450 (its default: hand length 0.43 - 0.07 P, half-width 0.018 + 0.027 P) - the C_KFIX_2
+  constant. K2 is now Colour (all 16 palettes, unchanged). Shape was the assigned knob; the v0.1.0 sheet shows no
+  clearly weaker one (Rate is the only speed control; Scale, Depth and Hands each change the figure more).
+- Presets: the Shape values in Line Field (200), Semaphore (800), Standing Figs (300) and Portrait Hands (350) are
+  gone (they all draw at 450 now); their colours moved from K6 to K2; Camera is at its 50 % default in all of them.
+- GHDL look (720p60, decimation 2, selfie.jpg, glides bypassed in a sim-only copy), final RTL:
+  .kinetic_work/rb_horologe/k6/k6sheet.png (K6 0 / 25 / 50 / 100 %, Osc at 50 %, v0.1.0 Osc). The multiply
+  version's renders are in k6/mult/ (same gain law; its sample was taken 2 px earlier, so a few clocks differ by a
+  small angle).
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic horologe`): router1, every config on seed 1.
+  Post-route Fmax HD Analog 81.80, SD Analog 78.35, HD HDMI 80.33, SD HDMI 78.78, HD Dual 78.17, SD Dual 72.06 MHz
+  (worst HD 78.17; v0.1.0's router1 build was 74.43). 6,978 LC at most (90.9 %, +6 over v0.1.0), 19 of 32 block
+  RAMs (+1: the gain table). vmprog: out/rev_b/ron/kinetic/horologe.vmprog. Not flashed.
+- Unsure on hardware: whether 100 % (white spins a clock 1.07 turns, so the picture no longer maps one way onto the
+  hand angles) reads as the climax Ron wants, and whether a noisy camera makes the hands jitter more at 2x; the
+  hold has no smoothing along y or time.

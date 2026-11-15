@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Cogwork v0.1.0 -- Kinetic.
+-- Cogwork v0.1.1 -- Kinetic.
 --
 -- A wall of meshed cogs on a square lattice turning as one train (clockwork, gear walls).  Alternate gears turn
 -- opposite ways and sit half a tooth apart, so neighbours mesh.
@@ -23,8 +23,10 @@
 --   K2  Teeth    6, 8, 10, 12, 16, 20, 24, 32 teeth (hysteresis)
 --   K3  Depth    spoke swing 0 .. 1/2 turn and hub swell (square law)
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
---   K5  Spread   phase step per gear 0 .. 1/2 cycle (square law)
---   K6  Colour   the 16 shared palettes (ground, A / B = gears by parity, accent = hubs)
+--   K5  Colour   the 16 shared palettes (ground, A / B = gears by parity, accent = hubs) (was K6; Spread is
+--                fixed at 450 = the old default, C_KFIX_5)
+--   K6  Camera   camera strength 0 .. 100 % (default 50 % = twice the v0.1.0 gain): state += luma x 0 .. 32
+--                (25 % = x8 = v0.1.0), Osc x3.  Applied to the held sample before the hold.
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Body     Spoked / Disc
@@ -41,6 +43,7 @@
 --   [F] output conditioning: luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1] with resync, luma 13/16, blanking gate
 -- One latency (C_LAT = 32) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 450 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -53,6 +56,7 @@ use work.cogwork_pkg.all;
 use work.all;
 
 architecture cogwork of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(450, 10));   -- K6 camera pass: fixed knob
     constant C_LAT      : integer := 32;      -- = processing_delay_clks
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
 
@@ -150,6 +154,12 @@ architecture cogwork of program_top is
     signal sl_ra, sl_wa : unsigned(7 downto 0) := (others => '0');
     signal sl_q, sl_wd  : std_logic_vector(15 downto 0) := (others => '0');
     signal sl_we : std_logic := '0';
+    -- K6 camera gain: glided knob (Q3), per-field gain (K6 / 4, x3 for Osc), the gated-sum product stages
+    signal s_g6  : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal c_cg  : unsigned(9 downto 0) := to_unsigned(128, 10);
+    type t_u12c is array (0 to 3) of unsigned(11 downto 0);
+    signal cm1_p : t_u12c := (others => (others => '0'));
+    signal cm2_a, cm2_b : unsigned(13 downto 0) := (others => '0');
     -- delay rings (write at rc + d, read at rc, RAM register, fabric register: d + 2 stages)
     signal dr : t_r16 := (others => (others => '0'));          -- {par, hy, hx, swap, max}: stage 3 -> 11
     attribute no_rw_check of dr : signal is true;
@@ -284,8 +294,8 @@ architecture cogwork of program_top is
     signal q11_qa : unsigned(13 downto 0) := (others => '0');
     signal q11_p2 : unsigned(11 downto 0) := (others => '0');
     signal q12_aw : unsigned(12 downto 0) := (others => '0');
-    signal q11_src : unsigned(7 downto 0) := (others => '0');
-    signal q12_st : unsigned(12 downto 0) := (others => '0');
+    signal q11_src : unsigned(13 downto 0) := (others => '0');
+    signal q12_st : unsigned(14 downto 0) := (others => '0');
     signal q13_stt : signed(15 downto 0) := (others => '0');
     signal q14_hs : signed(9 downto 0) := (others => '0');
     type t_ix is array (2 to 8) of unsigned(4 downto 0);
@@ -464,8 +474,8 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- Colour: 16 palettes with hysteresis
-                v_d := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(s_pal & "100000", 11));
-                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(5)(9 downto 6)); end if;
+                v_d := signed(resize(unsigned(registers_in(4)), 11)) - signed(resize(s_pal & "100000", 11));
+                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(4)(9 downto 6)); end if;
                 -- Teeth: 8 steps with hysteresis
                 v_d := signed(resize(unsigned(registers_in(1)), 11)) - signed(resize(s_nix & "1000000", 11));
                 if v_d > 80 or v_d < -80 then s_nix <= unsigned(registers_in(1)(9 downto 7)); end if;
@@ -492,13 +502,14 @@ begin
             c_zd  <= to_signed(1998, 13) - v_a;
             c_nph <= 0 - c_ph(25 downto 10);
 
-            -- shared glide for Scale and Drive (1/8 of the gap per field, +-2 deadband): four clocks per channel
+            -- shared glide for Scale and Drive (1/8 of the gap per field, +-2 deadband) and Camera (+-4): four clocks per channel
             if s_zgo = '1' then
                 z_gp <= "00"; z_gc <= "000"; z_grun <= '1';
             elsif z_grun = '1' then
                 case z_gp is
                     when "00" =>
-                        if z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
+                        if z_gc(1) = '1' then s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                        elsif z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                         else s_gm <= s_gp; s_gr <= unsigned(registers_in(7)); end if;
                         z_gp <= "11";
                     when "11" =>
@@ -507,17 +518,18 @@ begin
                     when "01" =>
                         if C_SIM_SNAP then
                             null;
-                        elsif s_gd > 16 or s_gd < -16 then
+                        elsif (z_gc(1) = '0' and (s_gd > 16 or s_gd < -16)) or s_gd > 32 or s_gd < -32 then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
                         end if;
                         z_gp <= "10";
                     when others =>
-                        if z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        if z_gc(1) = '1' then s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        elsif z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         else s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0)); end if;
                         z_gp <= "00";
-                        if z_gc = 1 then z_grun <= '0'; end if;
+                        if z_gc = 2 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -541,7 +553,7 @@ begin
                     when 3  =>                                                                                -- depth^2
                         z_fa(12 downto 3) <= unsigned(registers_in(2)); z_fb(12 downto 3) <= unsigned(registers_in(2));
                     when 4  =>                                                                                -- spread^2
-                        z_fa(12 downto 3) <= unsigned(registers_in(4)); z_fb(12 downto 3) <= unsigned(registers_in(4));
+                        z_fa(12 downto 3) <= unsigned(C_KFIX_5); z_fb(12 downto 3) <= unsigned(C_KFIX_5);
                     when 5  => z_fa(14 downto 0) <= c_s;                  z_fb <= resize(0 - c_x0(31 downto 24), 21);   -- Spread * first column
                     when 6  => z_fa(14 downto 0) <= c_s;                  z_fb <= resize(0 - c_y0(31 downto 24), 21);   -- Spread * first row
                     when 7  => z_fa(22 downto 0) <= z_v;                  z_fb <= resize(c_rn, 21);           -- drive: teeth -> turns
@@ -606,6 +618,10 @@ begin
                         v_a27 := (c_ph & '1') + (v_b & s_vneg);
                         c_ph <= v_a27(26 downto 1);
                     when 21 => c_psi <= c_psi + resize(c_dpsi, 28);
+                    -- Camera: gain = K6 / 4 (K6 256 -> 64 = the v0.1.0 x8), Osc x3
+                    when 24 =>
+                        if s_src = '1' then c_cg <= resize(s_g6(12 downto 5), 10) + resize(s_g6(12 downto 4), 10);
+                        else c_cg <= resize(s_g6(12 downto 5), 10); end if;
                     when 60  => c_sy <= f_acc(28 downto 8);
                     when 92  => c_x0 <= to_unsigned(8388608, 32) - f_acc(31 downto 0);
                     when 124 => c_y0 <= to_unsigned(8388608, 32) - f_acc(31 downto 0);
@@ -768,6 +784,7 @@ begin
         variable v_l  : unsigned(7 downto 0);
         variable v_x  : unsigned(13 downto 0);
         variable v_d1 : signed(14 downto 0);
+        variable v_cp : unsigned(17 downto 0);
     begin
         if rising_edge(clk) then
             -- oscillator
@@ -805,7 +822,15 @@ begin
 
             -- hold: write as the stage-1 pixel crosses the cell centre on a cell row's first line
             sl_wa <= "000" & a_x(28 downto 24);
-            sl_wd <= "00000000" & std_logic_vector(s_y1(13 downto 6));
+            -- K6 camera gain on the smeared sample (3 stages: the written sample is the smear 2 px before the write
+            -- point): h = sample x c_cg / 16 = the source term / 2, max 255 x 765 / 16 < 2^14
+            for i in 0 to 3 loop
+                cm1_p(i) <= f_gu(c_cg, s_y1(6 + 2 * i), 12) + shift_left(f_gu(c_cg, s_y1(7 + 2 * i), 12), 1);
+            end loop;
+            cm2_a <= resize(cm1_p(0), 14) + shift_left(resize(cm1_p(1), 14), 2);
+            cm2_b <= resize(cm1_p(2), 14) + shift_left(resize(cm1_p(3), 14), 2);
+            v_cp := resize(cm2_a, 18) + shift_left(resize(cm2_b, 18), 4);
+            sl_wd <= "00" & std_logic_vector(v_cp(17 downto 4));
             if l_first = '1' and g_avid = '1' and a_x(23) = '1' and q2_hx = '1' then sl_we <= '1'; else sl_we <= '0'; end if;
         end if;
     end process p_src;
@@ -896,11 +921,11 @@ begin
             v_p := resize(q11_qa, 16) + shift_left(resize(q11_p2, 16), 4);
             q12_aw <= v_p(15 downto 3);
 
-            -- source hold read: address at 9, RAM at 10, fabric at 11, scaled at 12 (Video x8, Osc x24)
+            -- source hold read: address at 9, RAM at 10, fabric at 11, x2 at 12 (gained before the hold by K6:
+            -- Video x0 .. x32, default x16; Osc x3 that)
             sl_ra <= "000" & q_ix(8);
-            q11_src <= unsigned(sl_q(7 downto 0));
-            if s_src = '1' then q12_st <= resize(q11_src & "000", 13) + resize(q11_src & "0000", 13);
-            else q12_st <= resize(q11_src & "000", 13); end if;
+            q11_src <= unsigned(sl_q(13 downto 0));
+            q12_st <= q11_src & '0';
             -- 13: the state = +-Depth * wave + source (14 bits per turn)
             v_st := signed(resize(q12_aw, 16));
             if s_neg(12) = '1' then v_st := -v_st; end if;

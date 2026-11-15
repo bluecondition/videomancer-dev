@@ -1,6 +1,6 @@
 # Pendula (Kinetic)
 
-v0.1.0 built 2026-11-14, all six configs, not flashed.
+v0.1.0 built 2026-11-14, all six configs, not flashed. v0.1.1 (2026-11-15): K6 camera pass, see the end.
 
 ## What it draws
 
@@ -32,11 +32,11 @@ that travels across the screen, each dot sliding from red to blue and back with 
 | Control | Name | What it does |
 |---|---|---|
 | K1 | Scale | cell pitch 32 .. 256 virtual px, exponential, glided (default 120: 16 x 9 dots) |
-| K2 | Shape | the orbit: horizontal line .. circle (centre) .. vertical line |
+| K2 | Colour | the 16 shared palettes with hysteresis (was K6): ground, A / B = the dot by phase, accent = rest mark |
 | K3 | Depth | orbit size 0 .. 69 % of the half cell, square law; the dots shrink to keep inside their cells |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
 | K5 | Size | dot radius 25 % .. 87 % of the room the orbit leaves (Rlim) |
-| K6 | Colour | the 16 shared palettes with hysteresis: ground, A / B = the dot by phase, accent = rest mark |
+| K6 | Camera | camera strength 0 .. 100 %, default 50 %: the held luma (and the Osc lattice) x 0 .. 3 with a soft knee at white; 25 % = the v0.1.0 picture (glided, +-4 deadband) |
 | S7 | Wave | Smooth / Snap (dots dwell at the ends of their orbit and flip across) |
 | S8 | Field | Linear (the wave crosses the screen) / Radial (octagonal rings from the centre) |
 | S9 | Lattice | Square / Hex (alternate rows offset half a pitch) |
@@ -131,3 +131,37 @@ with a stage per adder level; block-RAM data gets a fabric register before arith
   field's first line shows the top row with the previous field's sizes until its own samples land (one line).
 - Only Scale and Phase are glided; Shape, Depth and Size read the knob once per field.
 - The smear is 16 real pixels at every resolution (twice as wide in picture terms on SD).
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. K6 is now Camera: how strongly the held camera luma grows the dots.
+
+- The camera drives the dot SIZE, and in v0.1.0 white already grew the dot to the largest that stays inside its
+  cell, so more strength can only be contrast gain: the 8-bit held sample x g, with a soft knee (values up to
+  223 unchanged, 1/4 slope above, 255 from 348) so the highlights roll off instead of flattening.
+- Gain law: g = K6 / 256 up to 50 % (x0 at 0 %, x1 at 25 % = exactly the v0.1.0 picture, since the v0.1.0
+  white, 219, sits under the knee; x2 at 50 %, the default), then 1 + K6 / 512 up to x3 at 100 %. 0 % draws
+  exactly what a black input draws (every dot at the Size radius). Osc gets the same gain (it had no extra gain).
+- x4 at 100 % was tried and rejected: on selfie.jpg it turned nearly every dot into the largest dot (the
+  picture washed out to a uniform lattice). At x3 the bright face is mostly full dots and the darker parts still
+  show; at x2 the dot sizes still vary clearly.
+- K6 is read once per field through the shared glide (a third slot: 1/8 of the gap per field, +-4 deadband),
+  turned into the gain in the vblank sequencer (zc 21), and applied by ONE gated-sum multiply (3 stages) plus the
+  knee (1 stage) on the smeared sample BEFORE it goes into the hold RAM (8-bit words, unchanged). The written sample
+  is the smear 3 px before the write point (16 px smear): invisible.
+- Frozen: K2 Shape at 128 (its default: a flat horizontal ellipse, the Compression look) - the C_KFIX_2
+  constant. K2 is now Colour (all 16 palettes, unchanged). Shape was the assigned knob and the v0.1.0 sheet agrees
+  it is the subtlest in a still (its 0 / default / 100 % panels differ least). It does matter in motion: the
+  presets Pendulum Wave (vertical line orbit), Tusi Rings (horizontal line, the Tusi figure with Fan) and Water
+  Orbits / Ripple Tank (circles) now all draw the default flat ellipse; their colours moved from K6 to K2 and
+  Camera is at its 50 % default in all of them.
+- GHDL look (720p60, decimation 2, selfie.jpg, glides bypassed in a sim-only copy): .kinetic_work/rb_pendula/k6/
+  k6sheet.png (K6 0 / 25 / 50 / 100 %, Osc at 50 %, v0.1.0 Osc); the rejected x4 law's 75 % / 100 % renders are in
+  .kinetic_work/rb_pendula/k6/x4law/.
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic pendula`): router1, every config on seed 1. Post-route
+  Fmax HD Analog 92.07, SD Analog 87.37, HD HDMI 95.68, SD HDMI 98.25, HD Dual 95.65, SD Dual 94.32 MHz (worst HD
+  92.07). 6,802 LC at most (88.6 %, +238 over v0.1.0), 21 of 32 block RAMs (unchanged). vmprog:
+  out/rev_b/ron/kinetic/pendula.vmprog. Not flashed.
+- Unsure on hardware: the 50 % / 100 % levels were judged on one bright test photo (selfie.jpg fills the frame
+  with a lit face); a darker camera picture will look less saturated at the same setting. Also whether losing the
+  orbit-shape knob is acceptable for the line / circle presets (see above).

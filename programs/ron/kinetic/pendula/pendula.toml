@@ -6,7 +6,7 @@
 processing_delay_clks = 36
 program_id = "com.czartroniks.pendula"
 program_name = "Pendula"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -28,11 +28,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Shape"
+name_label = "Colour"
 control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 128
+display_min_value = 1
+display_max_value = 16
+initial_value = 160
 display_float_digits = 0
 suffix_label = ""
 
@@ -68,13 +68,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Colour"
+name_label = "Camera"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 16
-initial_value = 160
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -121,35 +121,31 @@ name = "Compression"
 
 [[preset]]
 name = "Pendulum Wave"
-rotary_potentiometer_2 = 1023
 rotary_potentiometer_3 = 850
 rotary_potentiometer_5 = 420
-rotary_potentiometer_6 = 32
+rotary_potentiometer_2 = 32
 linear_potentiometer_12 = 300
 
 [[preset]]
 name = "Tusi Rings"
-rotary_potentiometer_2 = 0
 rotary_potentiometer_3 = 800
-rotary_potentiometer_6 = 224
+rotary_potentiometer_2 = 224
 toggle_switch_10 = 1
 linear_potentiometer_12 = 512
 
 [[preset]]
 name = "Water Orbits"
 rotary_potentiometer_1 = 520
-rotary_potentiometer_2 = 512
 rotary_potentiometer_3 = 760
-rotary_potentiometer_6 = 416
+rotary_potentiometer_2 = 416
 toggle_switch_9 = 1
 linear_potentiometer_12 = 380
 
 [[preset]]
 name = "Ripple Tank"
 rotary_potentiometer_1 = 480
-rotary_potentiometer_2 = 512
 rotary_potentiometer_4 = 720
-rotary_potentiometer_6 = 480
+rotary_potentiometer_2 = 480
 toggle_switch_8 = 1
 linear_potentiometer_12 = 560
 
@@ -157,7 +153,7 @@ linear_potentiometer_12 = 560
 name = "Flip Dots"
 rotary_potentiometer_1 = 560
 rotary_potentiometer_3 = 900
-rotary_potentiometer_6 = 800
+rotary_potentiometer_2 = 800
 toggle_switch_7 = 1
 linear_potentiometer_12 = 1023
 
@@ -166,6 +162,6 @@ name = "Halftone"
 rotary_potentiometer_1 = 300
 rotary_potentiometer_3 = 500
 rotary_potentiometer_5 = 100
-rotary_potentiometer_6 = 96
+rotary_potentiometer_2 = 96
 toggle_switch_9 = 1
 linear_potentiometer_12 = 250

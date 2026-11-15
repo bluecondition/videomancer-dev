@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Pendula v0.1.0 -- Kinetic.
+-- Pendula v0.1.1 -- Kinetic.
 --
 -- A lattice of dots, one per cell, each riding its own small orbit, phased by a travelling wave (pendulum-wave
 -- machines, the Tusi-couple illusion, water-wave particle orbits).
@@ -22,11 +22,13 @@
 --              until the output filter
 --
 --   K1  Scale    cell pitch 32 .. 256 virtual px (exponential, glided)
---   K2  Shape    orbit: horizontal line .. circle .. vertical line
+--   K2  Colour   the 16 shared palettes (was K6; Shape, the orbit, is fixed at 128 = the old default, a flat
+--                ellipse: C_KFIX_2)
 --   K3  Depth    orbit size 0 .. 69 % of the half cell (square law)
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Size     dot radius 25 % .. 87 % of the room the orbit leaves
---   K6  Colour   the 16 shared palettes (ground, A / B = dot by phase, accent = rest mark)
+--   K6  Camera   camera strength 0 .. 100 % (default 50 %): the held luma (and the Osc lattice) x 0 .. 3 with a
+--                soft knee at white, before the hold; 25 % = x1 = v0.1.0, 50 % = x2
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Lattice  Square / Hex (alternate rows offset half a pitch)
@@ -43,6 +45,7 @@
 --   [F] output conditioning: luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1] with resync, luma 13/16, blanking gate
 -- One latency (C_LAT = 36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Shape fixed at 128 (C_KFIX_2).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -55,6 +58,7 @@ use work.pendula_pkg.all;
 use work.all;
 
 architecture pendula of program_top is
+    constant C_KFIX_2 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(128, 10));   -- K6 camera pass: fixed knob
     constant C_LAT      : integer := 36;      -- = processing_delay_clks
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
 
@@ -127,6 +131,13 @@ architecture pendula of program_top is
     signal h_ra, h_wa : unsigned(7 downto 0) := (others => '0');
     signal h_q   : std_logic_vector(15 downto 0) := (others => '0');
     signal h_wd  : std_logic_vector(7 downto 0) := (others => '0');
+    -- K6 camera gain: glided knob (Q3), per-field gain (Q8), the gated-sum product stages
+    signal s_g6  : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal c_cg  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    type t_u12c is array (0 to 3) of unsigned(11 downto 0);
+    signal cm1_p : t_u12c := (others => (others => '0'));
+    signal cm2_a, cm2_b : unsigned(13 downto 0) := (others => '0');
+    signal cm3_x : unsigned(9 downto 0) := (others => '0');
     signal h_we, h_col, h_fl : std_logic := '0';
     -- delay rings (write at rc + d, read at rc, RAM register, fabric register: d + 2 stages)
     signal lr : t_r16 := (others => (others => '0'));          -- cell-local x: stage 3 -> 18
@@ -451,19 +462,20 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9); s_sd <= '0';
                 end case;
                 -- Colour: 16 palettes with hysteresis
-                v_d := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(s_pal & "100000", 11));
-                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(5)(9 downto 6)); end if;
+                v_d := signed(resize(unsigned(registers_in(1)), 11)) - signed(resize(s_pal & "100000", 11));
+                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(1)(9 downto 6)); end if;
             end if;
             g_wm1 <= s_w - 1;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
 
-            -- shared glide for Scale and Phase (1/8 of the gap per field, +-2 deadband): four clocks per channel
+            -- shared glide for Scale and Phase (1/8 of the gap per field, +-2 deadband) and Camera (+-4): four clocks per channel
             if s_zgo = '1' then
                 z_gp <= "00"; z_gc <= "000"; z_grun <= '1';
             elsif z_grun = '1' then
                 case z_gp is
                     when "00" =>
-                        if z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
+                        if z_gc(1) = '1' then s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                        elsif z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                         else s_gm <= s_gp; s_gr <= unsigned(registers_in(7)); end if;
                         z_gp <= "11";
                     when "11" =>
@@ -472,17 +484,18 @@ begin
                     when "01" =>
                         if C_SIM_SNAP then
                             null;
-                        elsif s_gd > 16 or s_gd < -16 then
+                        elsif (z_gc(1) = '0' and (s_gd > 16 or s_gd < -16)) or s_gd > 32 or s_gd < -32 then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
                         end if;
                         z_gp <= "10";
                     when others =>
-                        if z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        if z_gc(1) = '1' then s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        elsif z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         else s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0)); end if;
                         z_gp <= "00";
-                        if z_gc = 1 then z_grun <= '0'; end if;
+                        if z_gc = 2 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -549,6 +562,11 @@ begin
                         if s_vneg = '1' then v_b := not v_b; end if;
                         v_a27 := (c_ph & '1') + (v_b & s_vneg);
                         c_ph <= v_a27(26 downto 1);
+                    -- Camera: gain Q8 = K6 up to 512 (256 = x1 = v0.1.0, 512 = x2), then 256 + K6 / 2 (1023 = x3: x4
+                    -- turned nearly every dot of a bright picture into the largest dot)
+                    when 21 =>
+                        if s_g6(12) = '1' then c_cg <= to_unsigned(256, 10) + resize(s_g6(12 downto 4), 10);
+                        else c_cg <= s_g6(12 downto 3); end if;
                     -- palette: ground, A, B, accent (chroma kept to 8 bits); B and accent as differences
                     when 22 => r_pl_a <= "00" & s_pal & "00";
                     when 25 =>
@@ -579,10 +597,10 @@ begin
                         v_x8 := resize(s_xs, 10);
                         c_xst <= shift_left(v_x8, 7);
                         z_pm2 <= c_ph1 - 2;
-                        v_s := signed(resize(unsigned(registers_in(1)), 11)) - 512;
+                        v_s := signed(resize(unsigned(C_KFIX_2), 11)) - 512;
                         if v_s(10) = '1' then v_s := -v_s; end if;       -- |k2 - 512| (0 .. 512: sliced, not resized)
                         z_t <= unsigned(v_s(9 downto 0));
-                        if unsigned(registers_in(1)) > 512 then c_bneg <= '1'; else c_bneg <= '0'; end if;
+                        if unsigned(C_KFIX_2) > 512 then c_bneg <= '1'; else c_bneg <= '0'; end if;
                         v_k5 := unsigned(registers_in(4));
                         z_f10 <= to_unsigned(256, 10) + shift_right(v_k5, 1) + shift_right(v_k5, 3);
                         c_rm <= resize(c_p(15 downto 12), 6) + 5;
@@ -752,6 +770,8 @@ begin
         variable v_l  : unsigned(7 downto 0);
         variable v_x  : unsigned(13 downto 0);
         variable v_d1 : signed(14 downto 0);
+        variable v_cp : unsigned(17 downto 0);
+        variable v_kn : unsigned(9 downto 0);
         variable v_av, v_f, v_l2, v_tn, v_fe, v_ev, v_ts : std_logic;
         variable v_ix : signed(7 downto 0);
     begin
@@ -808,7 +828,20 @@ begin
             if v_av = '1' then h_fl <= v_fe or v_ev; end if;
             h_we <= v_ev and v_av and l_srow;
             h_wa <= l_tp & unsigned(v_ix(6 downto 0));
-            h_wd <= std_logic_vector(s_y1(13 downto 6));
+            -- K6 camera gain on the smeared sample (4 stages: the written sample is the smear 3 px before the write
+            -- point): x = sample x c_cg / 256, then a soft knee: x up to 223 unchanged (above the v0.1.0 white,
+            -- 219, so 25 % is the v0.1.0 picture), 1/4 slope above, 255 from x = 348
+            for i in 0 to 3 loop
+                cm1_p(i) <= f_gu(c_cg, s_y1(6 + 2 * i), 12) + shift_left(f_gu(c_cg, s_y1(7 + 2 * i), 12), 1);
+            end loop;
+            cm2_a <= resize(cm1_p(0), 14) + shift_left(resize(cm1_p(1), 14), 2);
+            cm2_b <= resize(cm1_p(2), 14) + shift_left(resize(cm1_p(3), 14), 2);
+            v_cp := resize(cm2_a, 18) + shift_left(resize(cm2_b, 18), 4);
+            cm3_x <= v_cp(17 downto 8);
+            v_kn := cm3_x - 224;
+            if cm3_x < 224 then h_wd <= std_logic_vector(cm3_x(7 downto 0));
+            elsif cm3_x >= 348 then h_wd <= (others => '1');
+            else h_wd <= std_logic_vector(to_unsigned(224, 8) + resize(v_kn(6 downto 2), 8)); end if;
             -- the read of the address being written (only possible on a field's first line) is discarded
             if h_we = '1' and h_wa = h_ra then h_col <= '1'; else h_col <= '0'; end if;
             if h_col = '0' then q6_lum <= unsigned(h_q(7 downto 0)); end if;

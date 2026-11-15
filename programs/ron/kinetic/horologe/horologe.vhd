@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Horologe v0.1.0 -- Kinetic.
+-- Horologe v0.1.1 -- Kinetic.
 --
 -- A wall of analog clocks whose hands are choreographed by a travelling wave ("A Million Times", Humans
 -- since 1982): lines, waves and standing figures run across the grid.
@@ -18,11 +18,13 @@
 --            (ground, face, hand 2 = B, hand 1 = A, hub = accent); luma 10 bits, chroma 8 until the output filter
 --
 --   K1  Scale    clock pitch 56 .. 267 virtual px (exponential, glided)
---   K2  Shape    long needles .. short fat batons
+--   K2  Colour   the 16 shared palettes (was K6; Shape is fixed at 450 = the old default, C_KFIX_2)
 --   K3  Depth    swing 0 .. 1.25 turns (square law)
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Hands    hand 2 against hand 1: locked in line .. mirrored (centre) .. counter-running at up to x3 (glided)
---   K6  Colour   the 16 shared palettes
+--   K6  Camera   camera strength 0 .. 100 % (default 50 % = twice the v0.1.0 gain): source term = luma x 0 .. 80
+--                (Q14 turns per luma step; 25 % = x20 = v0.1.0), Osc x2.  Applied to the held sample as it is read,
+--                through a 256-entry gain table refilled every field by repeated addition (no multiplier).
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Dial     Faces / Hands
@@ -34,6 +36,7 @@
 --   [B] generated avid  [C] source field and the per-clock hold  [D] wave engine  [E] the clocks
 --   [F] output conditioning.  One latency (C_LAT = 57) in every mode.  Hardware colour convention (u = Cr).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Shape fixed at 450 (C_KFIX_2).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -46,6 +49,7 @@ use work.horologe_pkg.all;
 use work.all;
 
 architecture horologe of program_top is
+    constant C_KFIX_2 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(450, 10));   -- K6 camera pass: fixed knob
     constant C_LAT      : integer := 57;      -- = processing_delay_clks
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
 
@@ -131,6 +135,16 @@ architecture horologe of program_top is
     attribute no_rw_check of sl : signal is true;
     signal sl_ra, sl_wa : unsigned(8 downto 0) := (others => '0');
     signal sl_q, sl_wd  : std_logic_vector(7 downto 0) := (others => '0');
+    -- K6 camera gain: glided knob (Q3), per-field gain (5/16 K6, x2 for Osc), and the gain table
+    -- gt(s) = s x gain / 16, refilled every field by repeated addition (no multiplier)
+    signal s_g6  : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal c_cg  : unsigned(9 downto 0) := to_unsigned(160, 10);
+    type t_gt is array (0 to 255) of std_logic_vector(15 downto 0);
+    signal gt : t_gt := (others => (others => '0'));
+    attribute no_rw_check of gt : signal is true;
+    signal gt_q  : std_logic_vector(15 downto 0) := (others => '0');
+    signal gt_acc : unsigned(17 downto 0) := (others => '0');
+    signal gt_we : std_logic := '0';
     signal sl_we : std_logic := '0';
     -- delay rings (write at rc + d, read at rc, RAM register, fabric register: d + 2 stages)
     type t_r16 is array (0 to 255) of std_logic_vector(15 downto 0);
@@ -205,7 +219,9 @@ architecture horologe of program_top is
     signal z_shn : unsigned(2 downto 0) := (others => '0');
     signal z_sht : std_logic := '0';
     signal z_mt  : unsigned(15 downto 0) := to_unsigned(32768, 16);
-    signal z_lf, z_wf : unsigned(9 downto 0) := to_unsigned(100, 10);
+    -- Shape (K2 in v0.1.0) is fixed at C_KFIX_2 = 450: hand length and half-width as fractions of the pitch (Q10)
+    constant C_LF : unsigned(9 downto 0) := to_unsigned(440 - 450 / 8 - 450 / 32, 10);   -- 370
+    constant C_WF : unsigned(9 downto 0) := to_unsigned(18 + 450 / 16, 10);              -- 46
     signal z_p2, z_ta, z_tb : unsigned(17 downto 0) := (others => '0');
     signal z_loc : signed(18 downto 0) := (others => '0');
     signal z_k   : signed(7 downto 0) := (others => '0');
@@ -288,11 +304,10 @@ architecture horologe of program_top is
     signal q8_w   : unsigned(9 downto 0) := (others => '0');
     signal q9_p0, q9_p1, q9_p2, q9_p3 : unsigned(11 downto 0) := (others => '0');
     signal q10_qa, q10_qb : unsigned(13 downto 0) := (others => '0');
-    signal q10_src : unsigned(7 downto 0) := (others => '0');
     signal q11_aw  : unsigned(14 downto 0) := (others => '0');
-    signal q11_st  : unsigned(13 downto 0) := (others => '0');
-    signal q12_al  : signed(15 downto 0) := (others => '0');
-    signal q13_a   : signed(12 downto 0) := (others => '0');           -- hand 1, Q11 turns
+    signal q11_st  : unsigned(15 downto 0) := (others => '0');
+    signal q12_al  : signed(16 downto 0) := (others => '0');
+    signal q13_a   : signed(13 downto 0) := (others => '0');           -- hand 1, Q11 turns
     signal h14_p0, h14_p1, h14_p2, h14_p3, h15_qa, h15_qb, h16_pr : signed(15 downto 0) := (others => '0');
     signal q14_a1, q15_a1, q16_a1, q17_a1, q17_a2 : unsigned(10 downto 0) := (others => '0');
     signal q17_lx  : signed(10 downto 0) := (others => '0');
@@ -339,8 +354,13 @@ architecture horologe of program_top is
     signal s_y31, s_y32, s_y33 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u31, s_v31, s_u32, s_v32, s_u33, s_v33 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
-    type t_bit_shift is array (0 to C_LAT - 1) of std_logic;
-    signal s_gav_sr   : t_bit_shift := (others => '0');   -- s_gav_sr(k) = generated avid of the stage-(k+2) pixel
+    -- s_gav_sr(k) = generated avid of the stage-(k+2) pixel.  v0.1.1: only taps 0 .. 8 are flip-flops; taps 40 and 47
+    -- ride the cvr delay ring (written as taps 1 and 8, 39 clocks to the fabric copy) and 48 .. 56 follow tap 47
+    -- in flip-flops (37 fewer flip-flops, bit-identical)
+    type t_bit_shift is array (0 to 8) of std_logic;
+    signal s_gav_sr   : t_bit_shift := (others => '0');
+    signal g40, g47   : std_logic := '0';
+    signal g_t        : std_logic_vector(48 to C_LAT - 1) := (others => '0');
 
 begin
 
@@ -379,13 +399,35 @@ begin
         end if;
     end process p_tt;
 
+    -- K6 gain table: filled in the vblank zone while zc = 768 .. 1023 (address = zc's low byte, gt(n) = n x c_cg / 16
+    -- by one add per entry; the sum is held at 0 outside the window).  Read every clock straight from the hold's
+    -- read data (sl_q, stage 9): gt_q at stage 10 takes the place of v0.1.0's fabric copy of the hold.  The fill
+    -- runs early in the vblank, long before the first line's clocks are read, so a fill-time read is never used.
+    gt_we <= '1' when s_zone = '1' and s_zc(10 downto 8) = "011" else '0';
+    p_gt : process(clk)
+    begin
+        if rising_edge(clk) then
+            gt_q <= gt(to_integer(unsigned(sl_q)));
+            if gt_we = '1' then gt(to_integer(s_zc(7 downto 0))) <= "00" & std_logic_vector(gt_acc(17 downto 4)); end if;
+        end if;
+    end process p_gt;
+
+    p_gfill : process(clk)
+    begin
+        if rising_edge(clk) then
+            if gt_we = '1' then gt_acc <= gt_acc + resize(c_cg, 18);
+            else gt_acc <= (others => '0'); end if;
+        end if;
+    end process p_gfill;
+
     p_ring : process(clk)
     begin
         if rising_edge(clk) then
             lxr(to_integer(rc + 13)) <= "00000" & std_logic_vector(q2_lx);
             lxr_q <= lxr(to_integer(rc));
-            cvr(to_integer(rc + 37)) <= x"00" & std_logic_vector(q8_cf) & std_logic_vector(q8_ch);
+            cvr(to_integer(rc + 37)) <= "000000" & s_gav_sr(8) & s_gav_sr(1) & std_logic_vector(q8_cf) & std_logic_vector(q8_ch);
             cvr_q <= cvr(to_integer(rc));
+            g40 <= cvr_q(8); g47 <= cvr_q(9);
             cr(to_integer(rc + 6)) <= std_logic_vector(q50_c(1)) & std_logic_vector(q50_c(2));
             cr_q <= cr(to_integer(rc));
             cr_f <= cr_q;
@@ -408,13 +450,13 @@ begin
         variable v_l  : signed(18 downto 0);
         variable v_b  : unsigned(25 downto 0);
         variable v_a27 : unsigned(26 downto 0);
-        variable v_k2 : unsigned(9 downto 0);
         variable v_e  : unsigned(10 downto 0);
         variable v_w  : unsigned(9 downto 0);
         variable v_wm : unsigned(9 downto 0);
         variable v_r  : unsigned(2 downto 0);
         variable v_y13 : unsigned(12 downto 0);
         variable v_c11 : unsigned(10 downto 0);
+        variable v_cg  : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -472,13 +514,13 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9); s_sd <= '0';
                 end case;
                 -- Colour: 16 palettes with hysteresis
-                v_d := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(s_pal & "100000", 11));
-                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(5)(9 downto 6)); end if;
+                v_d := signed(resize(unsigned(registers_in(1)), 11)) - signed(resize(s_pal & "100000", 11));
+                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(1)(9 downto 6)); end if;
             end if;
             g_wm1 <= s_w - 1;
             s_oys <= f_oys(s_tid);
 
-            -- shared glide for Scale, Spread and Hands (1/8 of the gap per field, +-2 deadband): four clocks each
+            -- shared glide for Scale, Spread, Hands (1/8 of the gap per field, +-2 deadband) and Camera (+-4): four clocks each
             if s_zgo = '1' then
                 z_gp <= "00"; z_gc <= "00"; z_grun <= '1';
             elsif z_grun = '1' then
@@ -487,7 +529,8 @@ begin
                         case z_gc is
                             when "00"   => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when "01"   => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
-                            when others => s_gm <= s_gh; s_gr <= unsigned(registers_in(4));
+                            when "10"   => s_gm <= s_gh; s_gr <= unsigned(registers_in(4));
+                            when others => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
                         end case;
                         z_gp <= "11";
                     when "11" =>
@@ -496,7 +539,7 @@ begin
                     when "01" =>
                         if C_SIM_SNAP then
                             null;
-                        elsif s_gd > 16 or s_gd < -16 then
+                        elsif (z_gc /= 3 and (s_gd > 16 or s_gd < -16)) or s_gd > 32 or s_gd < -32 then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -506,10 +549,11 @@ begin
                         case z_gc is
                             when "00"   => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when "01"   => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when others => s_gh <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when "10"   => s_gh <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when others => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 2 then z_grun <= '0'; end if;
+                        if z_gc = 3 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -531,8 +575,8 @@ begin
                         z_fa(12 downto 3) <= unsigned(registers_in(2)); z_fb(12 downto 3) <= unsigned(registers_in(2));
                     when 2  => z_fa(12 downto 0) <= s_gp;                 z_fb <= resize(s_gp, 24);           -- spread^2
                     when 3  => z_fa(16 downto 0) <= c_p;                  z_fb <= resize(c_p, 24);            -- pitch^2
-                    when 4  => z_fa(16 downto 0) <= c_p;                  z_fb <= resize(z_lf, 24);           -- hand length
-                    when 5  => z_fa(16 downto 0) <= c_p;                  z_fb <= resize(z_wf, 24);           -- hand half-width
+                    when 4  => z_fa(16 downto 0) <= c_p;                  z_fb <= resize(C_LF, 24);           -- hand length
+                    when 5  => z_fa(16 downto 0) <= c_p;                  z_fb <= resize(C_WF, 24);           -- hand half-width
                     when 7  => z_fa(9 downto 0)  <= c_rh;                 z_fb <= resize(c_rh, 24);           -- hub radius^2
                     when 12 => z_fa(8 downto 0)  <= s_vm;                 z_fb <= to_unsigned(900, 24);       -- rate exponent
                     when others => z_fa(15 downto 0) <= z_mt;             z_fb <= to_unsigned(1193046, 24);   -- rate (14)
@@ -607,14 +651,13 @@ begin
                         c_xst <= shift_left(resize(s_xs, 10), 7); c_yst <= s_ys;
                         if s_ys = 256 then c_cls <= "00"; elsif s_ys >= 900 then c_cls <= "10"; else c_cls <= "01"; end if;
                         c_kh <= s_gh(12 downto 6);
+                        -- Camera: gain = 5/16 K6 (K6 256 -> 80 = the v0.1.0 x20), Osc x2
+                        v_cg := resize(s_g6(12 downto 5), 10) + resize(s_g6(12 downto 7), 10);
+                        if s_src = '1' then c_cg <= v_cg(8 downto 0) & '0'; else c_cg <= v_cg; end if;
                     when 81 =>
                         c_xmp  <= signed(resize(c_xst, 19)) - signed(resize(c_p, 19));
                         c_x2mp <= signed(resize(c_xst & '0', 19)) - signed(resize(c_p, 19));
                         c_ymp  <= signed(resize(c_yst, 19)) - signed(resize(c_p, 19));
-                    when 82 =>                       -- Shape: hand length and half-width as fractions of the pitch (Q10)
-                        v_k2 := unsigned(registers_in(1));
-                        z_lf <= to_unsigned(440, 10) - shift_right(v_k2, 3) - shift_right(v_k2, 5);
-                        z_wf <= to_unsigned(18, 10) + shift_right(v_k2, 4);
                     when 83 =>
                         v_e := z_e + 305;
                         c_srf <= to_unsigned(3, 4) + resize(v_e(9 downto 8), 4) + resize(c_cls, 4);
@@ -679,8 +722,12 @@ begin
             end if;
 
             s_gav_sr(0) <= g_avid;
-            for i in 1 to C_LAT - 1 loop
+            for i in 1 to 8 loop
                 s_gav_sr(i) <= s_gav_sr(i - 1);
+            end loop;
+            g_t(48) <= g47;
+            for i in 49 to C_LAT - 1 loop
+                g_t(i) <= g_t(i - 1);
             end loop;
         end if;
     end process p_ctrl;
@@ -880,14 +927,13 @@ begin
     p_wave : process(clk)
         variable v_a   : unsigned(19 downto 0);
         variable v_pos : unsigned(11 downto 0);
-        variable v_al  : signed(15 downto 0);
+        variable v_al  : signed(16 downto 0);
         variable v_p   : unsigned(17 downto 0);
         variable v_k   : unsigned(7 downto 0);
         variable v_bk  : std_logic;
         variable v_sel : unsigned(13 downto 0);
-        variable v_st  : unsigned(13 downto 0);
-        variable v_sn  : signed(15 downto 0);
-        variable v_n   : signed(4 downto 0);
+        variable v_sn  : signed(16 downto 0);
+        variable v_n   : signed(5 downto 0);
         variable v_bo  : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
@@ -932,14 +978,13 @@ begin
             v_p := resize(q10_qa, 18) + shift_left(resize(q10_qb, 18), 4);
             q11_aw <= v_p(17 downto 3);
 
-            -- source hold read: address at 8 (bank = row parity), RAM at 9, fabric at 10
+            -- source hold read: address at 8 (bank = row parity), RAM at 9, gain table (RAM) at 10
             v_k := k8; v_bk := b8;
             if s_gav_sr(5) = '0' then v_k := unsigned(a_k0); v_bk := a_ky0;
             elsif s_nw(7) = '1' then v_k := k8 + 1; end if;
             k8 <= v_k; b8 <= v_bk;
             sl_ra <= v_bk & v_k;
             k9 <= k8; k10 <= k9;
-            q10_src <= unsigned(sl_q);
             -- write: at each clock's last pixel on the row's last line, into the other bank for the row below
             -- (brick: the clock below an odd row's boundary is the next column)
             sl_wd <= std_logic_vector(s_y1(13 downto 6));
@@ -947,18 +992,18 @@ begin
             sl_wa <= l_wbank & v_bo;
             if l_last = '1' and s_gav_sr(8) = '1' and (s_nw(9) = '1' or s_gav_sr(7) = '0') then sl_we <= '1'; else sl_we <= '0'; end if;
 
-            -- 11: source term (Video x20: white = 0.27 turn; Osc x40)
-            v_st := shift_left(resize(q10_src, 14), 4) + shift_left(resize(q10_src, 14), 2);
-            if s_src = '1' then q11_st <= v_st(12 downto 0) & '0'; else q11_st <= v_st; end if;
-            -- 12: hand 1 = +-Depth * wave + source (Q14 turns, signed)
-            v_al := signed(resize(q11_aw, 16));
+            -- 11: source term = 4 x the gain table's word (K6: Video x0 .. x80 per luma step, default x40, white =
+            -- 0.53 turn; Osc x2): gt = sample x c_cg / 16, max 255 x 638 / 16 < 2^14
+            q11_st <= unsigned(gt_q(13 downto 0)) & "00";
+            -- 12: hand 1 = +-Depth * wave + source (Q14 turns, signed; 17 bits: up to 3.6 turns never wraps)
+            v_al := signed(resize(q11_aw, 17));
             if s_neg(11) = '1' then v_al := -v_al; end if;
-            q12_al <= v_al + signed(resize(q11_st, 16));
+            q12_al <= v_al + signed(resize(q11_st, 17));
             -- 13: Snap: tick between the 8 compass points (dwell, a quick move across +-1/64 turn); Q11 turns
             v_sn := q12_al + 256;
-            v_n := v_sn(15 downto 11);
+            v_n := v_sn(16 downto 11);
             if s_snap = '0' then
-                q13_a <= q12_al(15 downto 3);
+                q13_a <= q12_al(16 downto 3);
             elsif v_sn(10 downto 9) /= "00" then
                 q13_a <= (v_n + 1) & "00000000";
             else
@@ -1080,7 +1125,7 @@ begin
                         end if;
                         if j = 0 then p_sal(h) <= v_st; else p_sac(h) <= v_st; end if;
                     end loop;
-                elsif s_gav_sr(40) = '1' then
+                elsif g40 = '1' then
                     p_al(h) <= p_al(h) + signed(resize(p_sal(h), 21));
                     p_ac(h) <= p_ac(h) + signed(resize(p_sac(h), 21));
                 end if;
@@ -1171,13 +1216,13 @@ begin
             end if;
             tt_ra <= v_u & v_t & v_k;
             -- 49: table; 50: fabric copy, the ground colour outside the generated avid
-            if s_gav_sr(47) = '0' then
+            if g47 = '0' then
                 q50_y <= c_cy(0); q50_c(1) <= c_cu(0); q50_c(2) <= c_cv(0);
             else
                 q50_y <= unsigned(tt_q(25 downto 16));
                 q50_c(1) <= unsigned(tt_q(15 downto 8)); q50_c(2) <= unsigned(tt_q(7 downto 0));
             end if;
-            s_bah <= s_bah(6 downto 0) & s_gav_sr(47);
+            s_bah <= s_bah(6 downto 0) & g47;
         end if;
     end process p_look;
 
@@ -1214,7 +1259,7 @@ begin
             s_y32 <= s_y31 - shift_right(v_dl, 3) - shift_right(v_dl, 4);
             s_u32 <= s_u31; s_v32 <= s_v31;
             -- 33: blanking gate
-            if s_gav_sr(C_LAT - 2) = '1' then
+            if g_t(C_LAT - 2) = '1' then
                 s_y33 <= s_y32; s_u33 <= s_u32; s_v33 <= s_v32;
             else
                 s_y33 <= to_unsigned(64, 10); s_u33 <= to_unsigned(512, 10); s_v33 <= to_unsigned(512, 10);
@@ -1228,6 +1273,6 @@ begin
     data_out.hsync_n <= sr_f(2);
     data_out.vsync_n <= sr_f(1);
     data_out.field_n <= sr_f(0);
-    data_out.avid    <= s_gav_sr(C_LAT - 1);
+    data_out.avid    <= g_t(C_LAT - 1);
 
 end architecture horologe;

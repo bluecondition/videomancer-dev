@@ -1,6 +1,6 @@
 # Cogwork (Kinetic)
 
-v0.1.0 built 2026-11-14, all six configs, not flashed.
+v0.1.0 built 2026-11-14, all six configs, not flashed. v0.1.1 (2026-11-15): K6 camera pass, see the end.
 
 ## What it draws
 
@@ -32,8 +32,8 @@ between them, a rim with a darker bevel groove, and trapezoid teeth.
 | K2 | Teeth | 6, 8, 10, 12, 16, 20, 24 or 32 teeth, with hysteresis (tooth depth follows: 0.95 pitch / N) |
 | K3 | Depth | spoke swing 0 .. 1/2 turn and hub swell, square law |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
-| K5 | Spread | phase step per gear 0 .. 1/2 cycle, square law |
-| K6 | Colour | the 16 shared palettes with hysteresis: ground, A / B = gears by parity, accent = hubs |
+| K5 | Colour | the 16 shared palettes with hysteresis (was K6): ground, A / B = gears by parity, accent = hubs |
+| K6 | Camera | camera strength 0 .. 100 %, default 50 %: state += luma x 0 .. 32 (Osc x3 that); 25 % = the v0.1.0 gain (glided, +-4 deadband) |
 | S7 | Wave | Smooth / Snap |
 | S8 | Field | Linear / Radial |
 | S9 | Body | Spoked (windows show the ground) / Disc (windows filled with a darker shade of the gear) |
@@ -50,9 +50,9 @@ Presets: Gear Wall (defaults), Blueprint, Sprockets, Watch Movement, Strobe, Hal
 
 - Source = Video: the luma (>> 2, less 16) is smeared along x by a 1/64 one-pole filter and HELD per gear: on
   the first line of each cell row the smeared value at each cell's centre column goes into a RAM indexed by the
-  column, and is read back for the rest of the cell row. So every gear stays rigid. state += 8 x luma: white
-  turns the spokes about 1/8 turn and swells the hub by about a quarter, so the picture shows as hub sizes (a
-  coarse halftone) and spoke angles.
+  column, and is read back for the rest of the cell row. So every gear stays rigid. state += K6 gain x luma
+  (v0.1.1: x16 at the default; v0.1.0 was a fixed x8: white turned the spokes about 1/8 turn and swelled the hub by
+  about a quarter), so the picture shows as hub sizes (a coarse halftone) and spoke angles.
 - Black input: the offset is zero and the wave alone runs.
 - Source = Osc: a two-axis triangle lattice (640 x 540 virtual px) drifting diagonally replaces the luma at
   three times the camera's gain.
@@ -128,3 +128,30 @@ the wave phase and the train angle. Per line: the row accumulator and Spread x r
 - Only Scale and Drive are glided. The source is sampled on ONE line per gear (the cell row's first line) with
   no filter along y or time, so a noisy camera may make spokes and hubs shimmer; the smear is 64 real pixels.
 - The integer model was written directly at RTL widths (no separate float prototype).
+
+## K6 camera pass (2026-11-15)
+
+v0.1.1. K6 is now Camera: how hard the held camera luma swings the spokes and swells the hubs.
+
+- Gain law (linear): state += luma x K6 / 32 (14 bits per turn), i.e. x0 at 0 %, x8 at 25 % (exactly the v0.1.0
+  fixed gain), x16 at 50 % (default: white swells the hub by 219 of its 420 limit and swings the spokes 0.21 turn)
+  and x32 at 100 % (white reaches the hub limit; spokes swing 0.43 turn). Source = Osc keeps its x3: x48 at the
+  default. 0 % draws exactly what a black input draws.
+- K6 is read once per field through the shared glide (a third slot: 1/8 of the gap per field, +-4 deadband),
+  turned into the gain in the vblank sequencer (zc 24: K6/4, + K6/2 for Osc), and applied by ONE gated-sum multiply
+  (3 stages) on the smeared sample BEFORE it goes into the hold RAM (which was already 16 bits wide: no new block
+  RAM). The read side is a plain x2. The written sample is the smear 2 px before the write point: invisible.
+- Frozen: K5 Spread at 450 (its default: phase step (450/1023)^2 / 2 = 0.097 cycle per gear) - the C_KFIX_5
+  constant. K5 is now Colour (all 16 palettes, unchanged). Spread was the assigned knob and the v0.1.0 sheet agrees
+  it is the weakest: its 0 / default / 100 % panels are almost identical in a still.
+- Presets: Watch Movement's Spread 620 is gone (it draws at 450 now); the colours moved from K6 to K5; Camera is at
+  its 50 % default in all of them.
+- GHDL look (720p60, decimation 2, selfie.jpg, glides bypassed in a sim-only copy): .kinetic_work/rb_cogwork/k6/
+  k6sheet.png (K6 0 / 25 / 50 / 100 %, Osc at 50 %).
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic cogwork`): router1, every config on seed 1. Post-route
+  Fmax HD Analog 81.14, SD Analog 82.69, HD HDMI 83.04, SD HDMI 83.04, HD Dual 82.41, SD Dual 82.27 MHz (worst HD
+  81.14). 7,174 LC at most (93.4 %, +237 over v0.1.0: the 8 x 10 product and the third glide slot), 18 of 32 block
+  RAMs. vmprog: out/rev_b/ron/kinetic/cogwork.vmprog. Not flashed.
+- Unsure on hardware: whether 100 % reads as enough of a climax over 50 %. The hub swell hits its 420 / 4096 limit
+  at white only near 100 % (K6 about 980), so the top of the knob mostly adds spoke swing (up to 0.43 turn) and fills more hubs
+  to the limit; with Osc the hubs plateau at the limit over much of the lattice from 50 % up.
