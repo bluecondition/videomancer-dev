@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-KINEGRAM v0.1.0 (Hardline) - build hook.  Writes kinegram_pkg.vhd next to this file (pure python: the
+KINEGRAM v0.2.0 (Hardline) - build hook.  Writes kinegram_pkg.vhd next to this file (pure python: the
 builder runs it with the system python3).  The integer model (.hardline_work/rb_kinegram/imodel.py) reads
 the same tables.
 
@@ -13,7 +13,6 @@ Package contents (the log-domain polar engine's tables, as in hypnos v1.0, witho
   C_EXM  / C_EXS    256 x 16   2^(i/256), Q14, and its first difference
   C_LARM            17 x 10    64 log2(n / 2 pi)  (angular gradient base for n arms)
   C_KN              8 x 16     round(65536 / N)   (one frame of ring phase), index N - 2 .. (N = 2 .. 8)
-  C_KL              8 x 15     round(2^22 / field lines) by timing class (the lean per line)
 """
 import math
 import os
@@ -37,8 +36,6 @@ def tables():
     t["C_EXS"] = [em[i + 1] - em[i] for i in range(256)]
     t["C_LARM"] = [-512] + [round(64 * math.log2(n / (2 * math.pi))) for n in range(1, 17)]
     t["C_KN"] = [round(65536 / n) for n in range(2, 9)] + [8192]
-    # field lines by timing ID class: 0 1080p, 1 1080i, 2 720p, 3 480i, 4 480p, 5 576i, 6 576p
-    t["C_KL"] = [round(2 ** 22 / n) for n in (1080, 540, 720, 243, 480, 288, 576)] + [3884]
     return t
 
 
@@ -61,13 +58,11 @@ def main():
              "package kinegram_pkg is",
              "    type t_rom256 is array (0 to 255) of std_logic_vector(15 downto 0);",
              "    type t_larm is array (0 to 16) of signed(9 downto 0);",
-             "    type t_kn is array (0 to 7) of unsigned(15 downto 0);",
-             "    type t_kl is array (0 to 7) of unsigned(14 downto 0);"]
+             "    type t_kn is array (0 to 7) of unsigned(15 downto 0);"]
     for n in ("C_LOGV", "C_LOGS", "C_UG", "C_UGS", "C_UA", "C_UAS", "C_EXM", "C_EXS"):
         parts.append(rom(n, t[n]))
     parts.append(arr("C_LARM", "t_larm", "to_signed", 10, t["C_LARM"]))
     parts.append(arr("C_KN", "t_kn", "to_unsigned", 16, t["C_KN"]))
-    parts.append(arr("C_KL", "t_kl", "to_unsigned", 15, t["C_KL"]))
     parts += ["end package kinegram_pkg;", ""]
     with open(os.path.join(HERE, "kinegram_pkg.vhd"), "w") as f:
         f.write("\n".join(parts))

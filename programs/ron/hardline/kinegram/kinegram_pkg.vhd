@@ -7,7 +7,6 @@ package kinegram_pkg is
     type t_rom256 is array (0 to 255) of std_logic_vector(15 downto 0);
     type t_larm is array (0 to 16) of signed(9 downto 0);
     type t_kn is array (0 to 7) of unsigned(15 downto 0);
-    type t_kl is array (0 to 7) of unsigned(14 downto 0);
     constant C_LOGV : t_rom256 := (
         x"0000", x"005C", x"00B8", x"0113", x"016E", x"01C9", x"0224", x"027E", x"02D7", x"0331", x"038A", x"03E2", x"043B", x"0493", x"04EB", x"0542",
         x"0599", x"05F0", x"0646", x"069C", x"06F2", x"0748", x"079D", x"07F2", x"0846", x"089A", x"08EE", x"0942", x"0995", x"09E9", x"0A3B", x"0A8E",
@@ -150,6 +149,4 @@ package kinegram_pkg is
         to_signed(86, 10));
     constant C_KN : t_kn := (
         to_unsigned(32768, 16), to_unsigned(21845, 16), to_unsigned(16384, 16), to_unsigned(13107, 16), to_unsigned(10923, 16), to_unsigned(9362, 16), to_unsigned(8192, 16), to_unsigned(8192, 16));
-    constant C_KL : t_kl := (
-        to_unsigned(3884, 15), to_unsigned(7767, 15), to_unsigned(5825, 15), to_unsigned(17261, 15), to_unsigned(8738, 15), to_unsigned(14564, 15), to_unsigned(7282, 15), to_unsigned(3884, 15));
 end package kinegram_pkg;

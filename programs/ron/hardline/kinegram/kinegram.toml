@@ -1,20 +1,20 @@
-# Kinegram - Hardline (v0.1.0, 2026-11-15).  A barrier-grid animation (Scanimation, kinegrams, "magic
+# Kinegram - Hardline (v0.2.0, 2026-11-16).  A barrier-grid animation (Scanimation, kinegrams, "magic
 # moving pictures"): the picture is N interleaved slivers of N frames of a ring target (or a spoked
-# wheel), seen through a sheet of black bars with clear slits.  The slider slides the sheet: one sliver
-# of travel steps the frame, so the hand cranks the animation.  The camera pushes the sheet locally.
-# Black and white; nothing moves by itself.  See kinegram.vhd, kinegram.py and SUMMARY.md.
+# wheel), seen through a sheet of black bars with clear slits.  The sheet slides by itself at the
+# slider's Speed (up = forward, down = backward, centre = stopped on a clean frame): one sliver of
+# travel steps the frame, so the animation plays.  The camera pushes the sheet locally.  Black and white.  See kinegram.vhd, kinegram.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 39
 program_id = "com.czartroniks.kinegram"
 program_name = "Kinegram"
-program_version = "0.1.0"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Illusion", "Optics", "Pattern"]
 program_type = "processing"
-description = "Barrier-grid animation: rings or spokes in N interleaved frames behind a slit sheet you slide by hand."
+description = "Barrier-grid animation: rings or spokes in N interleaved frames, played by a sliding slit sheet."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -116,11 +116,11 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Slide"
+name_label = "Speed"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 862
 display_min_value = -100
 display_max_value = 100
 display_float_digits = 0
@@ -128,6 +128,10 @@ suffix_label = "%"
 
 [[preset]]
 name = "Target"
+
+[[preset]]
+name = "Still"
+linear_potentiometer_12 = 512
 
 [[preset]]
 name = "Wheel"
@@ -157,8 +161,8 @@ rotary_potentiometer_4 = 80
 rotary_potentiometer_5 = 900
 
 [[preset]]
-name = "Leaning Sheet"
+name = "Rewind"
 rotary_potentiometer_1 = 420
 rotary_potentiometer_3 = 700
 rotary_potentiometer_5 = 380
-linear_potentiometer_12 = 1023
+linear_potentiometer_12 = 120

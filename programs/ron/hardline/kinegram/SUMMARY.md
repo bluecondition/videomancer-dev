@@ -1,6 +1,6 @@
-# KINEGRAM: a barrier-grid animation cranked by hand (Hardline)
+# KINEGRAM: a barrier-grid animation that plays itself (Hardline)
 
-**v0.1.0 built 2026-11-15, not flashed.** Polar chassis (hypnos v1.1.0 engine), `program_type = "processing"`.
+**v0.2.0 built 2026-11-16, not flashed** (v0.1.0 2026-11-15: P12 was a hand Slide). Polar chassis (hypnos v1.1.0 engine), `program_type = "processing"`.
 
 ## What it draws
 
@@ -14,8 +14,9 @@ slivers; sliding the sheet one sliver shows the next frame.
   `frac(arms theta / 2 pi - k / N) < 1/2` (a wheel that turns). Centre on K1 / K2.
 - **Barrier**: period N w, one slit a sliver wide. Output = figure AND slit, so 1 / N of the picture is lit
   (it is dark by nature) and the slits are full white (Y 776).
-- **Slide (P12)** moves the barrier: at rest the slit sits exactly on sliver 0 and the picture is one clean
-  frame; one sliver of travel is the next frame, and between frames two frames share each slit (the shimmer).
+- **Speed (P12)** slides the barrier sheet continuously, as hypnos's Speed moves its rings: one sliver of
+  travel is the next frame, so the frames play forward (rings grow outward, the wheel turns) or backward;
+  between frames two frames share each slit (the shimmer). At the centre it stops, landing on one clean frame.
 - Every slit edge is a one-pixel box filter (the barrier runs in sub-pixel steps), every ring / spoke edge
   is the hypnos analytic one-pixel filter. A pixel half covered by the slit shows the sliver its lit part
   lies in, so the rest frame has no stray lines from the neighbouring frame.
@@ -30,12 +31,12 @@ slivers; sliding the sheet one sliver shows the next frame.
 | K4 | Frames | N = 2 .. 8 (stepped with hysteresis; default 4) |
 | K5 | Pitch | sliver width 4 .. 32 virtual px (exponential; default 8), so the barrier period is N x that |
 | K6 | Camera | how far the picture pushes the barrier: 0 .. about one period at white (default 100 %) |
-| S7 | Glide | On: Period, Pitch, Camera and Slide ease 1/16 of the gap per field, the centre eases (never slower than 1 px per field, lands exactly). Off: no easing, values used the same field |
+| S7 | Glide | On: Period, Pitch and Camera ease 1/16 of the gap per field, the Speed 1/8 (never the position), the centre eases (never slower than 1 px per field, lands exactly). Off: no easing, values used the same field. Glide never stops the motion |
 | S8 | Figure | Rings / Spokes |
 | S9 | Barrier | Slits / Inverse (the sheet inverted: N - 1 of N slivers show, a dense moire that still animates) |
 | S10 | Weight | Bold = slit one sliver wide, Fine = half a sliver (crisper frames, darker). In Inverse it thins the bar |
 | S11 | Source | Video / Osc |
-| P12 | Slide | barrier position, bipolar: centre = rest (+-8 counts of deadband), +-4 barrier periods at the ends (four loops of the animation each way; one frame = 32 counts at N = 4). Past half travel the sheet also LEANS, linearly up to two periods top to bottom at the ends: the frames stack down the screen and the target shears into an egg. 0 % and 100 % lean opposite ways |
+| P12 | Speed | bipolar, as hypnos: centre +-24 counts = stopped (the sheet lands on the nearest clean frame at 1/32 sliver per field); up = forward, down = backward; exponential over 10 octaves, 1/2048 .. 1/2 sliver per field (at 60 fields/s: one frame per 34 s .. 30 frames per second, i.e. 7.5 loops a second at N = 4). Default 862 (68 %) = 0.05 sliver per field, 3 frames per second. The position wraps modulo one barrier period (N slivers), so it runs forever with no seam |
 
 Knob channels hold a change of one count or less (pot jitter), never ease it.
 
@@ -47,17 +48,20 @@ shift = luma x K6, so each region of the picture shows the animation frame its b
 slits bend around the subject. Gain: 25 % = 0.24 of a period at white (a wobble of about one frame at N = 4),
 50 % = 0.48, 100 % = 0.96 of a period (the whole loop from black to white). Black input = no shift = the
 clean figure. S11 Osc substitutes the shell's drifting triangle lattice (640 x 540 virtual px) at 4x the
-camera level; it is the only thing that moves by itself.
+camera level. The camera's shift adds to the moving barrier, so the subject stays a time-displaced zone of
+the playing animation.
 
 ## Engine
 
-- **Per field** (vblank sequencer started on the vsync edge after active video, 34 states, one serial
+- **Per field** (vblank sequencer started on the vsync edge after active video, 35 states, one serial
   shift-right multiplier): six knob channels (Q6, one shared datapath), the centre target and glide,
   log2 frequency -> mantissa, sliver width w = 2^(...) from a second copy of the exp2 table (real pixels,
-  Q10), P = N w, slide = P x frac, lean and lean per line, camera gain, the camera table
+  Q10), P = N w, the Speed (mantissa from the exp2 table, shifted by the octave one bit per clock), the
+  position accumulator (3 whole slivers mod N + a 20-bit fraction; one add, one wrap per field), the slide
+  = w x position, camera gain, the camera table
   t(L) = L x gain mod P (1024 entries, one EBR set, two clocks per entry), and the lattice seed: the two
   pixel DDAs are run from zero for W / 2 clocks in vblank and what they reach is mirrored into pixel 0.
-- **Per line**: the line seed leans one line further (one modular add / wrap on a single adder).
+- **Per line**: nothing (v0.1.0's per-line lean is gone).
 - **Per pixel** (39 clocks, the same in every mode): hypnos's log-domain polar chain (log2 hi / lo ->
   log2 r, theta from interpolated EBR tables; exp2 mantissa x frequency mantissa and one shift = ring phase;
   arms x theta = spoke phase; analytic filter width, half-octave reciprocal) -> minus k / N of a cycle ->
@@ -72,25 +76,40 @@ camera level; it is the only thing that moves by itself.
 
 ## Status
 
-- Router1, seed 1 on all six configs (2026-11-15), post-route Fmax: HD Analog 87.43 MHz, HD HDMI 80.30 MHz,
-  HD Dual 82.36 MHz; SD Analog 84.43, SD HDMI 82.55, SD Dual 74.27 MHz (SD needs 27).
-- 7085 .. 7111 LC of 7680 (92 %), 24 of 32 EBR. No `hd_clock_divisor`. 0 duplicate-input carries (dupin.py).
+- v0.2.0: router1, seed 1 on all six configs (2026-11-16), post-route Fmax: HD Analog 83.84 MHz,
+  HD HDMI 83.70 MHz, HD Dual 84.55 MHz; SD Analog 83.89, SD HDMI 91.96, SD Dual 85.72 MHz (SD needs 27).
+- 6990 .. 7046 LC of 7680 (91-92 %), 24 of 32 EBR (v0.1.0: 7085 .. 7111). No `hd_clock_divisor`.
+  0 duplicate-input carries (dupin.py).
 - Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh hardline kinegram`
   (router2 was not tried). vmprog: `out/rev_b/ron/hardline/kinegram.vmprog`.
-- GHDL render vs the integer model (`.hardline_work/rb_kinegram/imodel.py`), pixel diff after aligning the
-  4-column capture offset: 0 of 918,720 at 720p60 decimation 1 (default frame, black input); 0 at 640 x 360
-  for Spokes + Fine + 6 frames + off-centre, for Inverse + 3 frames + P12 100 % (the lean), for the camera
-  (bear.png, K6 100 %) and for Osc; 0 on an NTSC field (720 x 243, decimation 1: the centre 4:3 of the same
-  picture, rings round). Glide was off in every sim: the eased paths (S7 On) are not simulated.
+- GHDL render vs the integer model (`.hardline_work/rb_kinegram/imodel.py`, now with the Speed
+  accumulator), pixel diff after aligning the 4-column capture offset:
+  - v0.2.0 still (Speed at the centre, 720p60 decimation 1, black input): 0 of 918,720 against the model, and
+    0 pixels different from the v0.1.0 default-frame capture.
+  - v0.2.0 motion (720p60 decimation 2, Glide off): Speed +91 % and -90 % (0.25 sliver per field), each
+    captured after 1 and after 4 fields: all four 0, the model's accumulator at the same field count. Up
+    plays forward (rings move outward), down backward (`motion.png`).
+  - v0.1.0 (same engine): 0 for Spokes + Fine + 6 frames + off-centre, Inverse, the camera (bear.png, K6
+    100 %), Osc, and an NTSC field (the centre 4:3 of the same picture, rings round).
+  - v0.2.0 Glide On at the power-up defaults (S7 On, Speed 68 %): renders clean and moving; the speed
+    glide starts at the TOML default so there is no speed transient; the centre slides in from the
+    top-left corner over the first second (as hypnos and v0.1.0). Not compared to the model.
 - Not flashed. First things to look at on hardware: the vblank lattice-seed run (the pixel DDAs are started
-  from the sequencer in vblank), HD HDMI bars (hard vertical full-swing edges every few pixels; the
-  [1 2 1] and the 776 white are in), and the power-up glide of the centre from the top-left corner (as hypnos).
+  from the sequencer in vblank), HD HDMI bars (hard vertical full-swing edges every few pixels, now moving;
+  the [1 2 1] and the 776 white are in), and the power-up glide of the centre from the top-left corner (as
+  hypnos).
 
 ## Cut / deviations
 
-- **The lean on P12 is an addition to the spec.** A pure +-4.0-period slide is cyclic: 0 %, 50 % and 100 %
-  would be the same picture. The sheet now turns as it nears either end of travel (as a hand-slid sheet
-  does), which gives 100 % a climax and leaves two clean loops each way around the centre.
+- v0.2.0: the v0.1.0 lean is dropped. It existed only because a pure hand slide made the slider's ends
+  look like its centre; with a Speed the ends are the fastest animation, the climax.
+- v0.2.0 top speed is capped at 1/2 sliver per field (30 frames per second at 60 fields/s), two octaves
+  below hypnos's 1/4 cycle: past about one sliver per field the frames strobe or read backwards. The speed
+  is in slivers (frames) per field, so the frame rate does not change with Frames or Pitch.
+- v0.2.0: stopped at the centre, the sheet lands on the nearest clean frame (1/32 sliver per field, at
+  most 16 fields) rather than freezing between two frames. This landing is not affected by Glide.
+- The deadband edge on the down side is one count wider (the magnitude is a one's complement: 487 is the
+  slowest backward setting, 536 the slowest forward one).
 - Pitch is 4 .. 32 virtual px, not 2 .. 32: at 2 px the Fine slit would be 1 virtual px.
 - Ring period 896 .. 56 virtual px: finer rings only alias against the barrier.
 - Output white is 776: the set's `y - (d >> 3) - (d >> 4)` is folded into the luma scale (64 + 712 c)

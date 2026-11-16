@@ -1,10 +1,17 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- kinegram.vhd  (Hardline, v0.1.0 -- a barrier-grid animation cranked by hand)
+-- kinegram.vhd  (Hardline, v0.2.0 -- a barrier-grid animation that plays itself)
+--
+-- v0.2.0 (2026-11-16): P12 is SPEED (Ron: the set may move by itself; hypnos's Speed is
+-- the model).  The barrier sheet travels continuously, so the N frames play forward (up)
+-- or backward (down); centre +-24 counts = stopped, landing on the nearest clean frame.
+-- 1/2048 .. 1/2 sliver per field, exponential; the position wraps modulo one barrier
+-- period (N slivers).  The v0.1.0 lean (the sheet turning near the ends of the slide)
+-- is gone: with a speed the ends are the fastest animation.
 --
 -- Scanimation / kinegram: a picture made of N interleaved slivers of N animation
--- frames, seen through a sheet of black bars with clear slits.  Sliding the sheet
+-- frames, seen through a sheet of black bars with clear slits.  Moving the sheet
 -- one sliver steps the visible frame.
 --
 --   lattice   vertical slivers of width w (K5 Pitch), anchored on the screen centre;
@@ -13,9 +20,8 @@
 --             Spokes: frac(arms theta / 2 pi - k / N) < 1/2 (K3 = arm count 1 .. 16)
 --             centre on K1 / K2 (+-2 screens)
 --   barrier   period N w, slit one sliver wide (S10 Fine: half a sliver), positioned by
---             P12 SLIDE (+-4 periods; past half travel the sheet also leans, up to two
---             periods top to bottom) plus the camera: box-filtered luma * K6 shifts the
---             barrier by up to one period (S11 Osc: a slow triangle lattice at 3x)
+--             the P12 SPEED accumulator plus the camera: box-filtered luma * K6 shifts
+--             the barrier by up to one period (S11 Osc: a slow triangle lattice at 4x)
 --   output    figure AND slit (S9 Inverse: figure AND NOT slit), luma only
 --
 -- The figure comes from the log-domain polar engine of hypnos v1.0.4 (log2 hi / lo
@@ -60,7 +66,7 @@ architecture kinegram of program_top is
     constant C_DEF_K3  : integer := 636;
     constant C_DEF_K5  : integer := 341;
     constant C_DEF_K6  : integer := 1023;
-    constant C_DEF_P12 : integer := 512;
+    constant C_DEF_P12 : integer := 862;
 
     -- An EBR delay line written from stage W and read (straight from the EBR
     -- output register) by the logic building stage C runs its read address
@@ -118,19 +124,21 @@ architecture kinegram of program_top is
     signal s_nm1   : unsigned(2 downto 0) := to_unsigned(3, 3);         -- N - 1
 
     -- slide and lean
-    signal s_v     : signed(16 downto 0) := (others => '0');            -- slide, Q13 periods
-    signal s_neg   : std_logic := '0';
-    signal s_u     : unsigned(13 downto 0) := (others => '0');
+    -- SPEED (P12): the barrier travels s_spd slivers per field; s_an = its position,
+    -- bit 23 carry / borrow, 22 .. 20 whole slivers (mod N), 19 .. 0 the fraction
+    signal s_neg, s_stop : std_logic := '0';
+    signal s_uu    : unsigned(8 downto 0) := (others => '0');           -- counts past the deadband
+    signal s_L     : unsigned(9 downto 0) := (others => '0');           -- log2 speed + 11, Q6 octaves
+    signal s_spd   : unsigned(20 downto 0) := (others => '0');          -- slivers per field, Q20
+    signal s_ssh   : unsigned(3 downto 0) := (others => '0');
+    signal s_an    : unsigned(23 downto 0) := (others => '0');
     signal s_spx   : unsigned(18 downto 0) := (others => '0');          -- W/2 mod P, then the slide, px Q10
-    signal s_leanP : unsigned(19 downto 0) := (others => '0');          -- lean top to bottom, px Q10
-    signal s_dl    : unsigned(17 downto 0) := (others => '0');          -- lean per field line, px Q16
     signal s_G     : unsigned(17 downto 0) := (others => '0');          -- camera shift per luma count, px Q16
     -- line seed (px Q16, mod P) and its small modular unit
     signal s_ls    : signed(26 downto 0) := (others => '0');
     signal mu_op, mu_x : std_logic_vector(1 downto 0) := "00";          -- 01 add, 10 subtract, 11 wrap
     signal mu_y    : unsigned(26 downto 0) := (others => '0');
-    signal mu_sel  : std_logic_vector(1 downto 0) := "00";              -- G, slide, lean / 2, lean per line
-    signal s_lph   : std_logic_vector(1 downto 0) := "00";
+    signal mu_sel  : std_logic := '0';                                  -- 0 G, 1 s_spx
     -- lattice at pixel 0's left edge
     signal z_ld    : std_logic := '0';
     signal s_k0    : unsigned(2 downto 0) := (others => '0');
@@ -162,7 +170,6 @@ architecture kinegram of program_top is
     signal s_H     : unsigned(11 downto 0) := to_unsigned(480, 12);
     signal s_ystp  : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal s_mcls  : std_logic_vector(1 downto 0) := "00";
-    signal s_kli   : unsigned(2 downto 0) := (others => '0');
     signal s_lacc  : unsigned(19 downto 0) := (others => '0');
     signal s_ls14  : unsigned(14 downto 0) := (others => '0');      -- log2(x step), Q14
     signal s_ls6   : unsigned(6 downto 0) := (others => '0');       -- the same, Q6
@@ -420,13 +427,13 @@ begin
             -- the field-line pitch in x-pixel units (Q.8), the mode class
             -- (00 1080 / 01 720p / 10 SD), the Osc line step and the lean class
             case to_integer(unsigned(registers_in(8)(3 downto 0))) is
-                when 0          => s_ystp <= to_unsigned(569, 10); s_mcls <= "10"; s_kli <= "011"; s_oys <= to_unsigned(536, 10);  -- 480i
-                when 4          => s_ystp <= to_unsigned(288, 10); s_mcls <= "10"; s_kli <= "100"; s_oys <= to_unsigned(272, 10);  -- 480p
-                when 8          => s_ystp <= to_unsigned(480, 10); s_mcls <= "10"; s_kli <= "101"; s_oys <= to_unsigned(452, 10);  -- 576i
-                when 12         => s_ystp <= to_unsigned(240, 10); s_mcls <= "10"; s_kli <= "110"; s_oys <= to_unsigned(226, 10);  -- 576p
-                when 5 | 6 | 14 => s_ystp <= to_unsigned(256, 10); s_mcls <= "01"; s_kli <= "010"; s_oys <= to_unsigned(181, 10);  -- 720p
-                when 1 | 2 | 10 => s_ystp <= to_unsigned(512, 10); s_mcls <= "00"; s_kli <= "001"; s_oys <= to_unsigned(242, 10);  -- 1080i
-                when others     => s_ystp <= to_unsigned(256, 10); s_mcls <= "00"; s_kli <= "000"; s_oys <= to_unsigned(121, 10);  -- 1080p
+                when 0          => s_ystp <= to_unsigned(569, 10); s_mcls <= "10"; s_oys <= to_unsigned(536, 10);  -- 480i
+                when 4          => s_ystp <= to_unsigned(288, 10); s_mcls <= "10"; s_oys <= to_unsigned(272, 10);  -- 480p
+                when 8          => s_ystp <= to_unsigned(480, 10); s_mcls <= "10"; s_oys <= to_unsigned(452, 10);  -- 576i
+                when 12         => s_ystp <= to_unsigned(240, 10); s_mcls <= "10"; s_oys <= to_unsigned(226, 10);  -- 576p
+                when 5 | 6 | 14 => s_ystp <= to_unsigned(256, 10); s_mcls <= "01"; s_oys <= to_unsigned(181, 10);  -- 720p
+                when 1 | 2 | 10 => s_ystp <= to_unsigned(512, 10); s_mcls <= "00"; s_oys <= to_unsigned(242, 10);  -- 1080i
+                when others     => s_ystp <= to_unsigned(256, 10); s_mcls <= "00"; s_oys <= to_unsigned(121, 10);  -- 1080p
             end case;
             -- log2(x step): SD 1 octave, 720p log2(1.5)
             case s_mcls is
@@ -500,10 +507,11 @@ begin
         variable v_f7   : unsigned(9 downto 0);
         variable v_k3   : unsigned(9 downto 0);
         variable v_sh   : integer;
-        variable v_av   : unsigned(16 downto 0);
+        variable v_av9  : unsigned(8 downto 0);
         variable v_sub  : std_logic;
         variable v_r    : unsigned(26 downto 0);
         variable v_ga   : unsigned(17 downto 0);
+        variable v_sb   : unsigned(20 downto 0);
         variable v_lw   : unsigned(16 downto 0);
     begin
         if rising_edge(clk) then
@@ -524,28 +532,14 @@ begin
             if mu_op = "11" then
                 mu_y <= resize(s_P & "000000", 27);
             else
-                case mu_sel is
-                    when "00"   => mu_y <= resize(s_G, 27);
-                    when "01"   => mu_y <= resize(s_spx & "000000", 27);
-                    when "10"   => mu_y <= resize(s_leanP & "00000", 27);
-                    when others => mu_y <= resize(s_dl, 27);
-                end case;
+                if mu_sel = '1' then mu_y <= resize(s_spx & "000000", 27);
+                else                 mu_y <= resize(s_G, 27); end if;
             end if;
             if mu_x = "11" then v_sub := not s_ls(26); else v_sub := mu_x(1); end if;
             v_r := f_addsub(unsigned(s_ls), mu_y, v_sub);
             if mu_x = "01" or mu_x = "10" or (mu_x = "11" and (s_ls(26) = '1' or v_r(26) = '0')) then
                 s_ls <= signed(v_r);
             end if;
-
-            -- line engine: at the end of each generated line the seed leans one line further
-            case s_lph is
-                when "01" =>
-                    if s_neg = '1' then mu_op <= "01"; else mu_op <= "10"; end if;
-                    s_lph <= "10";
-                when "10" => mu_op <= "11"; s_lph <= "00";
-                when others => null;
-            end case;
-            if s_gav_p = '1' and g_avid = '0' then s_lph <= "01"; end if;
 
             if data_in.vsync_n = '0' and s_prev_vsync = '1' and s_saw_avid = '1' then
                 s_vs_pulse <= '1';
@@ -592,9 +586,10 @@ begin
                 case to_integer(s_seq) is
 
                     -- knob channels (K1, K2, K3, K5, K6, P12), Q6, one shared datapath, three
-                    -- clocks each.  A gap of one count or less is held (pot jitter).  K3, K5,
-                    -- K6 and P12 ease 1/16 of the gap per field with Glide on; K1 / K2 pass
-                    -- (the centre has its own glide below); Glide off: the knob itself.
+                    -- clocks each.  A gap of one count or less is held (pot jitter).  With Glide
+                    -- on K3, K5 and K6 ease 1/16 of the gap per field and P12 Speed 1/8 (the
+                    -- speed eases, never the position); K1 / K2 pass (the centre has its own
+                    -- glide below).  Glide off: the knob itself.
                     when 1 =>
                         v_adv := false;
                         case z_gp is
@@ -603,7 +598,8 @@ begin
                                 z_gp <= "01";
                             when "01" =>
                                 if s_gdv > 64 or s_gdv < -64 then
-                                    if s_glide = '1' and z_gc(2 downto 1) /= "00" then s_gdv <= shift_right(s_gdv, 4); end if;
+                                    if s_glide = '1' and z_gc = "101" then s_gdv <= shift_right(s_gdv, 3);
+                                    elsif s_glide = '1' and z_gc(2 downto 1) /= "00" then s_gdv <= shift_right(s_gdv, 4); end if;
                                 else
                                     s_gdv <= (others => '0');
                                 end if;
@@ -691,16 +687,18 @@ begin
                     when 20 =>
                         s_P <= sm_acc(18 downto 0);
                         if s_fine = '1' then s_sw <= shift_right(s_wp, 1); else s_sw <= s_wp; end if;
-                        s_v <= signed(resize(s_ap, 17)) - to_signed(32768, 17);
 
-                    -- SLIDE: +-8 counts of deadband at the centre, +-4 periods at the ends.
+                    -- SPEED (hypnos): +-24 counts at the centre = stopped; outside it the speed
+                    -- is 2^(L/64 - 11) slivers per field, L = 1.3125 x the counts past the
+                    -- deadband (0 .. 640): 1/2048 .. 1/2 sliver per field, up = forward.
                     -- Lattice seed: both pixel DDAs are started from zero (as if a line began)
                     -- and run W/2 clocks; what they reach at +W/2 is mirrored into pixel 0.
+                    -- (|P12 - 512| in counts as a one's complement: 511 - P12 below the centre)
                     when 21 =>
-                        s_neg <= s_v(16);
-                        if s_v < 512 and s_v > -512 then s_v <= (others => '0');
-                        elsif s_v(16) = '0' then          s_v <= s_v - 512;
-                        else                              s_v <= s_v + 512; end if;
+                        s_neg <= not s_ap(15);
+                        if s_ap(15) = '1' then v_av9 := s_ap(14 downto 6); else v_av9 := not s_ap(14 downto 6); end if;
+                        if v_av9 < 24 then s_stop <= '1'; s_uu <= (others => '0');
+                        else s_stop <= '0'; s_uu <= v_av9 - 24; end if;
                         s_ls <= (others => '0'); s_lp0 <= (others => '0'); s_k0 <= (others => '0');
                         z_ld <= '1';
                         tf_i <= to_unsigned(2027, 11);            -- -21: the barrier DDA loads at s_pc = 19
@@ -712,10 +710,9 @@ begin
                             s_spx <= s_spos;                                  -- W/2 mod P
                         end if;
                     when 23 =>
-                        -- LEAN: from half travel on, linear, two periods top to bottom at the ends
-                        v_av := unsigned(resize(abs(s_v), 17));
-                        if v_av > 16384 then s_u <= resize(v_av - 16384, 14); else s_u <= (others => '0'); end if;
+                        s_L <= resize(s_uu, 10) + resize(shift_right(s_uu, 2), 10) + resize(shift_right(s_uu, 4), 10);
                     when 24 =>
+                        sq_a <= s_L(5 downto 0) & "00";                       -- speed mantissa
                         s_lp0 <= s_lpos; s_k0 <= s_kcn;                       -- two clocks after the barrier's
                         -- CAMERA gain: px (Q16) per luma count = P * K6 / 910
                         sm_a <= s_P & '0'; sm_b <= s_a6; sm_go <= '1';
@@ -730,7 +727,9 @@ begin
                     when 26 =>
                         if s_src = '1' then s_G <= shift_left(s_G, 2); end if;           -- Osc: 4x
                         tf_i <= (others => '1'); tf_ph <= '0';
-                        mu_sel <= "00";
+                        mu_sel <= '0';
+                        s_spd <= resize(shift_right(unsigned(sq_q), 5), 21);             -- 512 .. 1020
+                        s_ssh <= s_L(9 downto 6);
 
                     -- camera table: t(i) = i * G mod P, two clocks per entry on the unit: an add
                     -- and a wrap are issued in turn and land three clocks later, so the value
@@ -751,34 +750,55 @@ begin
                             mu_op <= "11";
                         end if;
 
-                    -- line seed of the first line: 1 px - (W/2 mod P) - slide +- lean / 2  (mod P)
-                    when 28 => s_ls <= to_signed(65536, 27); mu_sel <= "01";
+                    -- speed = mantissa << octave, one bit per clock
+                    when 28 =>
+                        if s_ssh /= 0 then
+                            v_adv := false;
+                            s_spd <= shift_left(s_spd, 1);
+                            s_ssh <= s_ssh - 1;
+                        end if;
+                    -- POSITION, once per field: +- the speed; stopped, it lands on the nearest
+                    -- whole sliver (a clean frame) at 1/32 sliver per field
                     when 29 =>
-                        mu_op <= "10";
-                        sm_a <= resize(s_P, 20); sm_b <= unsigned(s_v(12 downto 0)) & "000"; sm_go <= '1';
+                        if s_stop = '1' and s_an(19 downto 15) = "00000" then
+                            s_an(19 downto 0) <= (others => '0');
+                        elsif s_stop = '1' and s_an(19 downto 15) = "11111" then
+                            s_an(19 downto 0) <= (others => '0');
+                            s_an(23 downto 20) <= s_an(23 downto 20) + 1;
+                        else
+                            if s_stop = '1' then v_sb := to_unsigned(32768, 21); v_sub := not s_an(19);
+                            else                 v_sb := s_spd;                  v_sub := s_neg; end if;
+                            s_an <= f_addsub('0' & s_an(22 downto 0), resize(v_sb, 24), v_sub);
+                        end if;
+                    -- wrap the whole slivers into 0 .. N - 1 (a carry or borrow: + N mod 8;
+                    -- repeats while they are N or more, as after a Frames change)
                     when 30 =>
+                        if s_an(23) = '1' then
+                            v_adv := false;
+                            s_an(23) <= '0';
+                            s_an(22 downto 20) <= s_an(22 downto 20) + s_nm1 + 1;
+                        elsif s_an(22 downto 20) > s_nm1 then
+                            v_adv := false;
+                            s_an(22 downto 20) <= s_an(22 downto 20) - s_nm1 - 1;
+                        end if;
+
+                    -- line seed: 1 px - (W/2 mod P) - slide  (mod P), slide = w x position
+                    when 31 => s_ls <= to_signed(65536, 27); mu_sel <= '1';
+                    when 32 =>
+                        mu_op <= "10";
+                        sm_a <= resize(s_wp & "000", 20); sm_b <= s_an(22 downto 7); sm_go <= '1';
+                    when 33 =>
                         mu_op <= "11";
                         s_spx <= sm_acc(18 downto 0);
-                        sm_a <= s_P & '0'; sm_b <= s_u & "00"; sm_go <= '1';
-                    when 31 =>
-                        mu_op <= "10";
-                        s_leanP <= sm_acc(19 downto 0);
-                    when 32 =>
+                    when 34 => mu_op <= "10";
+                    when 35 =>
                         mu_op <= "11";
-                        mu_sel <= "10";
-                        sm_a <= s_leanP; sm_b <= resize(C_KL(to_integer(s_kli)), 16); sm_go <= '1';
-                    when 33 =>
-                        s_dl <= sm_acc(17 downto 0);
-                        if s_neg = '1' then mu_op <= "10"; else mu_op <= "01"; end if;
-                    when 34 =>
-                        mu_op <= "11";
-                        mu_sel <= "11";
                         s_cx <= resize(shift_right(s_cxs, 8), 14);
                         s_cy <= resize(shift_right(s_cys, 8), 14);
                     when others => null;
                 end case;
                 if v_adv then
-                    if s_seq = 34 then s_seq <= (others => '0'); else s_seq <= s_seq + 1; end if;
+                    if s_seq = 35 then s_seq <= (others => '0'); else s_seq <= s_seq + 1; end if;
                 end if;
             end if;
         end if;

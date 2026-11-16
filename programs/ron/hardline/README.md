@@ -26,7 +26,7 @@ the ramp (Bold = 4 steps, Fine = smooth).
 | 7 | [fault](fault/) | Concentric rings sliced into strips, alternate strips slipped sideways | Slip: unbroken rings at centre, shear either way | v0.1.0 built 2026-11-15, router1 seed 1 all configs, HD 78.2-81.8 MHz, 93 % LC, 22 EBR; model = RTL; not flashed |
 | 8 | [flute](flute/) | Rings or stripes seen through reeded glass (Shade: glass rods) | Power: flat glass at centre, magnify one way, minify and flip the other | v0.1.0 built 2026-11-15, router1 seed 1 all configs, HD 88.1-92.3 MHz, 87 % LC, 24 EBR; model = RTL; not flashed |
 | 9 | [tangle](tangle/) | Truchet ribbons: concentric quarter-arcs in every tile joining into endless meandering bands (Shade: pipes) | Bend: Greek-key elbows, round arcs, straight diagonals | v0.1.0 built 2026-11-15, router2 seed 1 all configs, HD 89.0-95.6 MHz, 87 % LC, 15 EBR; model = RTL; not flashed |
-| 10 | [kinegram](kinegram/) | Barrier-grid animation: interleaved frames of a ring target or wheel behind sliding black bars | Slide: the hand cranks the animation | v0.1.0 built 2026-11-15, router1 seed 1 all configs, HD 80.3-87.4 MHz, 92 % LC, 24 EBR; model = RTL; not flashed |
+| 10 | [kinegram](kinegram/) | Barrier-grid animation: interleaved frames of a ring target or wheel behind sliding black bars | Slide: the hand cranks the animation | v0.2.0 built 2026-11-16 (P12 Speed: the animation plays itself), router1 seed 1 all configs, HD 83.7-84.6 MHz, 92 % LC, 24 EBR; model = RTL; not flashed |
 
 Each program's own K4, K5, S8, S9 and camera target are in its spec (`.hardline_work/prompts/<name>.txt`)
 until it is built, then in its `SUMMARY.md`.
