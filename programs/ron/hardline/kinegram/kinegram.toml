@@ -1,0 +1,164 @@
+# Kinegram - Hardline (v0.1.0, 2026-11-15).  A barrier-grid animation (Scanimation, kinegrams, "magic
+# moving pictures"): the picture is N interleaved slivers of N frames of a ring target (or a spoked
+# wheel), seen through a sheet of black bars with clear slits.  The slider slides the sheet: one sliver
+# of travel steps the frame, so the hand cranks the animation.  The camera pushes the sheet locally.
+# Black and white; nothing moves by itself.  See kinegram.vhd, kinegram.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 39
+program_id = "com.czartroniks.kinegram"
+program_name = "Kinegram"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Optics", "Pattern"]
+program_type = "processing"
+description = "Barrier-grid animation: rings or spokes in N interleaved frames behind a slit sheet you slide by hand."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Period"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 636
+display_min_value = 0
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Frames"
+value_labels = ["2", "3", "4", "5", "6", "7", "8"]
+initial_value_label = "4"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Pitch"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 341
+display_min_value = 0
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Figure"
+value_labels = ["Rings", "Spokes"]
+initial_value_label = "Rings"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Barrier"
+value_labels = ["Slits", "Inverse"]
+initial_value_label = "Slits"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Slide"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Target"
+
+[[preset]]
+name = "Wheel"
+rotary_potentiometer_3 = 480
+rotary_potentiometer_4 = 660
+rotary_potentiometer_5 = 420
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Pinstripe"
+rotary_potentiometer_3 = 520
+rotary_potentiometer_4 = 950
+rotary_potentiometer_5 = 180
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Shimmer"
+rotary_potentiometer_3 = 760
+rotary_potentiometer_4 = 220
+rotary_potentiometer_5 = 300
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Blocks"
+rotary_potentiometer_3 = 420
+rotary_potentiometer_4 = 80
+rotary_potentiometer_5 = 900
+
+[[preset]]
+name = "Leaning Sheet"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_3 = 700
+rotary_potentiometer_5 = 380
+linear_potentiometer_12 = 1023
