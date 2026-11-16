@@ -1,0 +1,152 @@
+# Tweed - Hardline (v0.1.0, 2026-11-15).  Colour-and-weave effects from a weaving draft: houndstooth, glen
+# plaid, log cabin, herringbone.  pixel = weave(i, j) ? colour(i) : colour(j) on a rotating cloth; the camera
+# drapes the cloth over the picture.  See tweed.vhd, tweed.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 40
+program_id = "com.czartroniks.tweed"
+program_name = "Tweed"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Pattern", "Print"]
+program_type = "processing"
+description = "Black and white woven cloth from a real weave draft: houndstooth, plaid, herringbone. Turn it; video drapes it."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Period"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Weave"
+value_labels = ["Plain", "Basket", "Twill", "Warp", "Broken", "Wide", "Weft", "Satin"]
+initial_value_label = "Twill"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Order"
+value_labels = ["1:1", "2:2", "3:1", "4:4", "Glen", "Cabin", "1:3", "8:8"]
+initial_value_label = "4:4"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Draft"
+value_labels = ["Straight", "Point"]
+initial_value_label = "Straight"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Threads"
+value_labels = ["Flat", "Threads"]
+initial_value_label = "Flat"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Turn"
+control_mode = "linear"
+display_min_value = -90
+display_max_value = 90
+initial_value = 512
+display_float_digits = 0
+suffix_label = "deg"
+
+[[preset]]
+name = "Houndstooth"
+
+[[preset]]
+name = "Log Cabin"
+rotary_potentiometer_3 = 560
+rotary_potentiometer_4 = 64
+rotary_potentiometer_5 = 704
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Glen Plaid"
+rotary_potentiometer_3 = 440
+rotary_potentiometer_4 = 320
+rotary_potentiometer_5 = 576
+toggle_switch_9 = 1
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Herringbone"
+rotary_potentiometer_3 = 480
+rotary_potentiometer_4 = 704
+rotary_potentiometer_5 = 192
+toggle_switch_8 = 1
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Bias Check"
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 192
+rotary_potentiometer_5 = 960
+linear_potentiometer_12 = 768
+
+[[preset]]
+name = "Wire Tweed"
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 576
+rotary_potentiometer_5 = 448
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 420
