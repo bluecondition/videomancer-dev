@@ -2,7 +2,7 @@
 
 A moire instrument: two black-and-white line textures (circles, spokes, grids, hex, brick...) laid over each other and combined by boolean logic, with scale and phase played by hand so interference fringes bloom and sweep.
 
-**P12 (Sweep):** Slides layer B against layer A (counter-rotates it for Spokes), raking the moiré fringes across the screen; glided.
+**P12 (Sweep):** Slides layer B against layer A (counter-rotates it for Spokes), raking the moiré fringes across the screen; glided (S7).
 
 ## Controls
 
@@ -14,11 +14,11 @@ A moire instrument: two black-and-white line textures (circles, spokes, grids, h
 | K4 | Texture B | Circles / Squares / Spokes / Wavy H / Wavy V / Diagonal / Anti-Diag / Grid / Hex / Checker | Pattern shape of layer B |
 | K5 | Scale B | 0–100% | Line spacing of layer B |
 | K6 | Phase B | -100–100% | Slides layer B sideways (rotates it for spokes) |
-| S7 | Meet | Over / Meet | With S8, picks how layers combine: over, meet, fringe, cut |
-| S8 | Fringe | Solid / Fringe | With S7: Fringe on gives pure interference (xor) or cut |
-| S9 | Weight | Bold / Fine | Bold: thick lines; Fine: thin lines, sparse jewels |
-| S10 | Ground | Black / White | Switches ground between black and white (inverts picture) |
-| S11 | Colour | Mono / Colour | Mono: black and white; Colour: each layer its own ink colour |
+| S7 | Glide | Off / On | On: scale, phase and Sweep glide smoothly (~0.8 s); Off: no glide, they follow the knobs (and modulators) exactly |
+| S8 | Meet | Over / Meet | With S9, picks how layers combine: over, meet, fringe, cut |
+| S9 | Fringe | Solid / Fringe | With S8: Fringe on gives pure interference (xor) or cut |
+| S10 | Weight | Bold / Fine | Bold: thick lines; Fine: thin lines, sparse jewels |
+| S11 | Ground | Black / White | Switches ground between black and white (inverts picture) |
 | P12 | Sweep | -100–100% | Slides one pattern against the other, raking the moiré fringes across the screen (glided) |
 
 ## Technical notes

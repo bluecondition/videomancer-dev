@@ -7,15 +7,16 @@
 # bloom across the frame.
 #
 # Nothing animates by itself.  Scale, X phase and the slider's Y phase are
-# smoothed by a subtle one-pole glide (~16 frames); texture select and every
-# switch snap instantly.  All motion is performed.
+# smoothed by a one-pole glide (~16 frames) with S7 Glide on; with it off they
+# follow the knobs exactly, no easing.  Texture select and every switch snap.
+# All motion is performed.
 #
 # Author: czartroniks
 
 [program]
 processing_delay_clks = 16
 program_id = "com.czartroniks.fringe"
-program_version = "1.0.3"
+program_version = "1.1.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Fringe"
 author = "czartroniks"
@@ -104,38 +105,38 @@ suffix_label = "%"
 
 # --- Switches --------------------------------------------------------------
 
-# S7 + S8 together select the blend of the two layer masks:
-#   S7 off, S8 off  Over    A or B        union
-#   S7 on,  S8 off  Meet    A and B       intersection
-#   S7 off, S8 on   Fringe  A xor B       pure interference
-#   S7 on,  S8 on   Cut     A and not B   A carved by B
-
 [[parameter]]
 parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+# S8 + S9 together select the blend of the two layer masks:
+#   S8 off, S9 off  Over    A or B        union
+#   S8 on,  S9 off  Meet    A and B       intersection
+#   S8 off, S9 on   Fringe  A xor B       pure interference
+#   S8 on,  S9 on   Cut     A and not B   A carved by B
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
 name_label = "Meet"
 value_labels = ["Over", "Meet"]
 initial_value_label = "Over"
 
 [[parameter]]
-parameter_id = "toggle_switch_8"
+parameter_id = "toggle_switch_9"
 name_label = "Fringe"
 value_labels = ["Solid", "Fringe"]
 initial_value_label = "Fringe"
 
 [[parameter]]
-parameter_id = "toggle_switch_9"
+parameter_id = "toggle_switch_10"
 name_label = "Weight"
 value_labels = ["Bold", "Fine"]
 initial_value_label = "Bold"
 
 [[parameter]]
-parameter_id = "toggle_switch_10"
+parameter_id = "toggle_switch_11"
 name_label = "Ground"
 value_labels = ["Black", "White"]
 initial_value_label = "Black"
-
-[[parameter]]
-parameter_id = "toggle_switch_11"
-name_label = "Colour"
-value_labels = ["Mono", "Colour"]
-initial_value_label = "Mono"

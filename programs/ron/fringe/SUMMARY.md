@@ -20,22 +20,22 @@ settled, the image is completely static.  Every movement you see was performed.
 | K4 | **Texture B** | 10 textures | snap |
 | K5 | **Scale B** | pattern pitch | **continuous**, glided |
 | K6 | **Phase B** | X phase | **continuous**, glided |
-| S7 | **Meet** | with S8, a 4-way blend of the two masks | |
-| S8 | **Fringe** | | |
-| S9 | **Weight** | Bold (50 % ink) / Fine (half of everything) | |
-| S10 | **Ground** | white / black — inverts the composite | |
-| S11 | **Colour** | mono / ink coloured by which layer made it | |
+| S7 | **Glide** | On: 1/16 per frame (~0.8 s to land) / Off: none, the frame uses this vsync's knob values directly | |
+| S8 | **Meet** | with S9, a 4-way blend of the two masks | |
+| S9 | **Fringe** | | |
+| S10 | **Weight** | Bold (50 % ink) / Fine (half of everything) | |
+| S11 | **Ground** | white / black — inverts the composite | |
 
-### Blend (S7 + S8)
+### Blend (S8 + S9)
 
-| S7 | S8 | mode | mask | what you see |
+| S8 | S9 | mode | mask | what you see |
 |---|---|---|---|---|
 | off | off | **Over** | A ∨ B | union — two transparencies stacked |
 | on | off | **Meet** | A ∧ B | intersection — sparse jewels at the beats |
 | off | on | **Fringe** | A ⊕ B | pure interference — the classic beat field |
 | on | on | **Cut** | A ∧ ¬B | A carved by B |
 
-With S10 polarity on top, that reaches NOR, NAND, XNOR and ¬A ∧ B by De
+With S11 polarity on top, that reaches NOR, NAND, XNOR and ¬A ∧ B by De
 Morgan — ten of the sixteen boolean functions of two masks.
 
 The slider needs no target switch: only the **relative** phase of the two
@@ -46,14 +46,10 @@ whole composite.
 **Textures**, radial → linear → tiled: Circles · Squares · Spokes · Wavy H ·
 Wavy V · Diagonal · Anti-Diag · Grid · Hex · Checker.
 
-**The colouriser (S11)** paints ink by *which layer made it*, so the
-interference itself carries the colour.  On a white ground that is subtractive
-process ink — cyan over magenta going deep blue where they meet, a two-colour
-print rosette.  On a black ground it flips to additive light: red plus green
-going yellow.  It stays orthogonal to the blend: the blend sets the shape, the
-palette sets the hue.  Palettes are authored in standard BT.601 and swapped at
-the output pin for the hardware's convention, so sim previews show swapped
-hues — judge shape in sim, hue on the device.
+**The colouriser (old S11) was removed in v1.1.0** (2026-11-15) to make room
+for the Glide switch.  It painted ink by *which layer made it*: subtractive
+process ink on white (cyan over magenta going deep blue), additive light on
+black (red plus green going yellow).  Output is now mono only, chroma neutral.
 
 **What is deliberately absent: per-layer mask invert.**  For a 50 %-duty
 grating, inverting the mask is mathematically identical to shifting the phase
@@ -63,7 +59,7 @@ a switch; Cut covers the useful negations and Ground covers global inversion.
 That, plus the fact that black ink on a black ground draws nothing, is why the
 original invert/order/background trio felt dead.
 
-Presets: none for now (cleared 2026-09-27; new set to be authored on hardware).  **Power-up** (set 2026-09-27 on hardware) is black ground, mono, Fringe (XOR)
+Presets: none for now (cleared 2026-09-27; new set to be authored on hardware).  **Power-up** (set 2026-09-27 on hardware) is black ground, Glide on, Fringe (XOR)
 blend, Bold weight, two circle fields (Scale A 50 %, Scale B 43 %, Phase A +5 %,
 Phase B +6 %) with Sweep at −37 %.
 
@@ -134,7 +130,7 @@ c10/c11     two partial products -> 10-bit radial phase
 c12         phase windows, sine table, diagonal fold
 c13         stripe phase mux + hex/brick cell space
 c14         all ten ink rules -> one mask per layer
-c15         boolean blend -> source palette -> Y/U/V
+c15         boolean blend -> ink / ground luma (chroma neutral since v1.1.0)
 ```
 
 ## Judgment calls
@@ -143,7 +139,7 @@ c15         boolean blend -> source palette -> Y/U/V
   gratings, and the ratio that beats hardest against a second layer.  The tiled
   ones use line weights instead, tuned so cells read as cells: grid 18.75 % per
   axis, honeycomb ≈16 %, brick mortar 12.5 %.  Checker is a true 50/50 fill.
-  **Weight** (S9) halves every one of those, which is also what turns the
+  **Weight** (S10) halves every one of those, which is also what turns the
   checkerboard into a windowpane — one threshold drives both.
 - **Spokes phase mapping.**  The centre stays put and the phases rotate: X winds
   the fan a full turn, the slider counter-winds it a half turn.  Radial
@@ -163,7 +159,12 @@ c15         boolean blend -> source palette -> Y/U/V
 - **Glide.**  One pole per frame at shift 4 — a ≈16-frame constant, ~0.27 s to
   63 %.  Fast enough to feel connected, slow enough that a flick reads as a
   swing.  Scale, X phase and Y phase glide; texture select and all five
-  switches snap, including the P12 re-target when draw order flips.
+  switches snap.  Since v1.1.0, S7 Glide Off bypasses it entirely: the
+  frame sequence reads the targets latched at this vsync (no easing, and none
+  of the glide path's one-frame lag), so modulators pass at full depth.  A
+  0.2 s ease was rejected (Ron, 2026-11-15): it low-passes modulation above
+  ~3 Hz.  Moire magnifies pot jitter (fringe spacing ~ pA*pB/|pA-pB|); if a
+  resting knob shimmers, the fix is a +/-1-count hold (no delay), not easing.
 - **Nothing trimmed.**  All ten textures shipped.
 - **Switch rework (v1.1).**  The original Invert A / Invert B / Draw Order trio
   was replaced after it proved dead in use: invert is a half-period phase shift
@@ -271,3 +272,24 @@ on the spoke edges (~15 px at the frame edge for 6 iterations).
   SD Dual 71.28 (Fmin 27). All others on seed 1. 6591-6611 / 7680 LC (86 %),
   2 EBR. In standalone yosys it is smaller than v1.0.2 (LUT 4318 -> 4068),
   because the dead interlace muxes went.
+
+## Glide switch, colour removed (v1.1.0, 2026-11-15)
+- Ron's request: drop the S11 colour mode, move S7..S10 up one place, put a
+  Glide on/off switch on S7. Map is now S7 Glide, S8 Meet, S9 Fringe,
+  S10 Weight, S11 Ground.
+- Glide On is unchanged (1/16 per frame on Scale A/B, Phase A/B, Sweep). Off is
+  ZERO easing. Seq states 4 and 3 read `s_gtgt` (latched this vsync) instead of
+  `s_gacc`, so it also drops the serial glide's one-frame lag. The rotation
+  writes acc := target so a later switch to On glides from the knob position.
+  A first draft used a 1/4-per-frame ease; Ron rejected it before it was
+  flashed (it low-passes modulators).
+- Colour removal: the 3-slot palette, the per-pixel source-region mux and the
+  chroma path are gone. Output is `s_ink_y` / `s_gnd_y` with U = V = 512
+  constant. The old mono path rendered exactly this, so the mono look is
+  unchanged.
+- Build: `./build_programs.sh ron fringe` (router2). HD Analog 74.82, HD HDMI
+  75.06, HD Dual 77.86, SD Analog 73.45, SD Dual 79.28, all seed 1.
+  **SD HDMI seed 3** (77.74; seeds 1-2 hit the 360 s router2 timeout).
+  6510-6530 / 7680 LC (85 %, −80 vs v1.0.3), 2 EBR. HD Analog / HD HDMI
+  margins are thin (+0.6 / +0.8 MHz); if a rebuild misses, re-run seeds before
+  restructuring.

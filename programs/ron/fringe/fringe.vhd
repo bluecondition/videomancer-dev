@@ -6,6 +6,16 @@
 --
 -- fringe.vhd
 --
+-- v1.1.0 (2026-11-15): GLIDE switch on S7; the colour mode is gone.  S7 Glide
+-- On keeps the 1/16-per-frame glide on Scale A/B, Phase A/B and Sweep; Off
+-- uses the values latched at this frame's vsync directly -- no easing, and
+-- none of the glide path's extra frame -- so modulators pass at full depth
+-- and phase.  (If pot jitter ever shows at rest, add a +/-1-count hold, not
+-- easing.)  The S11 colouriser (ink coloured by
+-- which layer made it) is removed, the old S7..S10 move up one place
+-- (S8 Meet, S9 Fringe, S10 Weight, S11 Ground), and chroma is now neutral
+-- everywhere.
+--
 -- v1.0.3 (2026-10-17): resolution scaling.  Every coordinate -- the CORDIC's
 -- dx/dy, the phase DDAs and the measured width/height that place the centre
 -- -- runs in virtual 1080-line units, stepped per pixel / per field line from
@@ -33,20 +43,18 @@
 --   P12 SWEEP      Y phase of layer B (reversed) -- the primary gesture: rakes one
 --                  pattern across the other.  Only the RELATIVE phase makes
 --                  fringes, so one layer's Y reaches every interference state.
---   S7  MEET   / S8 FRINGE   together a 4-way BLEND of the two masks:
+--   S7  GLIDE      On: Scale, Phase and Sweep glide 1/16 of the way per frame.
+--                  Off: no easing -- the knob value is used the same frame.
+--   S8  MEET   / S9 FRINGE   together a 4-way BLEND of the two masks:
 --                  00 Over   A or B        union
 --                  01 Meet   A and B       intersection
 --                  10 Fringe A xor B       pure interference
 --                  11 Cut    A and not B   A carved by B
---   S9  WEIGHT     Bold (50 % ink) / Fine (half of everything) -- broad
+--   S10 WEIGHT     Bold (50 % ink) / Fine (half of everything) -- broad
 --                  fringe bands become sparse jewels
---   S10 GROUND     white / black.  Inverts the composite; with a single
+--   S11 GROUND     white / black.  Inverts the composite; with a single
 --                  blended mask there is always contrast, so no setting can
 --                  go blank the way transparent black ink over black could.
---   S11 COLOUR     mono / ink coloured BY WHICH LAYER MADE IT.  On white it
---                  is subtractive process ink (cyan over magenta -> deep blue
---                  where they meet, a two-colour print rosette); on black it
---                  flips to additive light (red + green -> yellow).
 --
 -- NOTE on what is deliberately absent: per-layer mask invert.  For a 50 %
 -- duty grating, inverting the mask is mathematically identical to shifting
@@ -118,7 +126,7 @@ architecture fringe of program_top is
     constant T_HEX    : integer := 8;
     constant T_CHECK  : integer := 9;
 
-    -- ink geometry, in phase units (1024 = one period).  WEIGHT (S9) halves
+    -- ink geometry, in phase units (1024 = one period).  WEIGHT (S10) halves
     -- every one of them: Bold is the classic 50 % grating, Fine turns the
     -- fringes from broad bands into sparse jewels.
     constant C_DUTY  : integer := 512;    -- grating ink duty, 50%
@@ -127,7 +135,7 @@ architecture fringe of program_top is
     constant C_WHEXD : integer := 190;    -- honeycomb slanted edge (grad sqrt5)
     constant C_GSH   : integer := 4;      -- glide one-pole shift (~16 frames)
 
-    -- blend modes (S7 = bit 0 Meet, S8 = bit 1 Fringe)
+    -- blend modes (S8 = bit 0 Meet, S9 = bit 1 Fringe)
     constant B_OVER   : integer := 0;     -- A or B        union
     constant B_MEET   : integer := 1;     -- A and B       intersection
     constant B_FRINGE : integer := 2;     -- A xor B       pure interference
@@ -136,24 +144,6 @@ architecture fringe of program_top is
     constant C_BLACK : unsigned(9 downto 0) := to_unsigned(0, 10);
     constant C_WHITE : unsigned(9 downto 0) := to_unsigned(1023, 10);
     constant C_NEUT  : unsigned(9 downto 0) := to_unsigned(512, 10);
-
-    ----------------------------------------------------------------------
-    -- COLOURISER (S11).  Ink is coloured by WHICH LAYER MADE IT, so the
-    -- interference itself carries the colour.  On a white ground that is
-    -- subtractive process ink -- cyan over magenta going deep blue where
-    -- they meet, exactly a two-colour print rosette.  On a black ground it
-    -- flips to additive light: red plus green going yellow.
-    --
-    -- Authored in standard BT.601 and swapped at the output pin, per the
-    -- hardware's U/V convention -- so sim previews show swapped hues.
-    ----------------------------------------------------------------------
-    type t_pal3 is array(0 to 2) of unsigned(9 downto 0);   -- A only, B only, both
-    constant C_SUB_Y : t_pal3 := (to_unsigned(519, 10), to_unsigned(347, 10), to_unsigned(160, 10));
-    constant C_SUB_U : t_pal3 := (to_unsigned(760, 10), to_unsigned(632, 10), to_unsigned(670, 10));
-    constant C_SUB_V : t_pal3 := (to_unsigned(141, 10), to_unsigned(939, 10), to_unsigned(512, 10));
-    constant C_ADD_Y : t_pal3 := (to_unsigned(414, 10), to_unsigned(569, 10), to_unsigned(889, 10));
-    constant C_ADD_U : t_pal3 := (to_unsigned(346, 10), to_unsigned(326, 10), to_unsigned(100, 10));
-    constant C_ADD_V : t_pal3 := (to_unsigned(946, 10), to_unsigned(106, 10), to_unsigned(607, 10));
 
     ----------------------------------------------------------------------
     -- quarter-wave sine, half-sample offset so no entry needs the peak:
@@ -299,10 +289,10 @@ architecture fringe of program_top is
                              to_unsigned(35840, 16), to_unsigned(32768, 16),
                              to_unsigned(32768, 16));
 
-    signal s_blend  : integer range 0 to 3 := B_OVER;   -- S7 + S8
-    signal s_weight : std_logic := '0';   -- S9  1 = Fine (half ink)
-    signal s_bgw    : std_logic := '1';   -- S10 1 = white ground
-    signal s_colour : std_logic := '0';   -- S11 1 = interference colour
+    signal s_glide  : std_logic := '1';   -- S7  1 = glide (1/16), 0 = none
+    signal s_blend  : integer range 0 to 3 := B_OVER;   -- S8 + S9
+    signal s_weight : std_logic := '0';   -- S10 1 = Fine (half ink)
+    signal s_bgw    : std_logic := '1';   -- S11 1 = white ground
 
     -- weight-scaled ink geometry, resolved once per frame
     signal s_duty  : unsigned(9 downto 0) := to_unsigned(C_DUTY, 10);
@@ -310,10 +300,8 @@ architecture fringe of program_top is
     signal s_whexv : unsigned(9 downto 0) := to_unsigned(C_WHEXV, 10);
     signal s_whexd : unsigned(11 downto 0) := to_unsigned(C_WHEXD, 12);
 
-    -- ink palette, resolved once per frame: index 0 = A only, 1 = B only,
-    -- 2 = both.  In mono every entry is the same ink, so the pixel path has
-    -- exactly one shape whether or not the colouriser is on.
-    signal s_pal_y, s_pal_u, s_pal_v : t_pal3 := (others => (others => '0'));
+    -- ink and ground luma, resolved once per frame (chroma is always neutral)
+    signal s_ink_y : unsigned(9 downto 0) := C_BLACK;
     signal s_gnd_y : unsigned(9 downto 0) := C_WHITE;
 
     ----------------------------------------------------------------------
@@ -415,8 +403,6 @@ architecture fringe of program_top is
     -- output
     ----------------------------------------------------------------------
     signal o_y : unsigned(9 downto 0) := (others => '0');
-    signal o_u : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal o_v : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     signal s_avid_sr    : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
     signal s_hsync_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '1');
@@ -465,6 +451,8 @@ begin
         variable v_ac  : signed(17 downto 0);
         variable v_nx  : signed(17 downto 0);
         variable v_k   : unsigned(9 downto 0);
+        variable v_pk  : unsigned(9 downto 0);
+        variable v_sk  : unsigned(9 downto 0);
         variable v_e   : integer range 0 to 7;
         variable v_m   : unsigned(15 downto 0);
         variable v_tx  : integer range 0 to 9;
@@ -483,11 +471,16 @@ begin
             -- datapath on slot 0 while both arrays rotate one place per
             -- clock (5 steps = back in place).  This is exactly the update
             -- the next vsync used to make, a frame of lag that is nothing
-            -- against a 16-frame time constant.
+            -- against a 16-frame time constant.  S7 Glide off: the
+            -- accumulators just copy the targets (so a later switch back to
+            -- On glides from where the knobs are), and the frame sequence
+            -- reads the targets latched THIS vsync directly -- no easing and
+            -- no extra frame.
             if s_grot > 0 then
                 v_tg := shift_left(signed(resize(s_gtgt(0), 18)), 6);
                 v_ac := signed(resize(s_gacc(0), 18));
-                v_nx := v_ac + shift_right(v_tg - v_ac, C_GSH);
+                if s_glide = '1' then v_nx := v_ac + shift_right(v_tg - v_ac, C_GSH);
+                else                  v_nx := v_tg; end if;   -- off: track exactly
                 for i in 0 to 3 loop
                     s_gacc(i) <= s_gacc(i + 1);
                     s_gtgt(i) <= s_gtgt(i + 1);
@@ -509,11 +502,11 @@ begin
 
                 s_ktexa   <= unsigned(registers_in(0));
                 s_ktexb   <= unsigned(registers_in(3));
-                -- S7 = Meet, S8 = Fringe: together a 4-way blend selector
-                s_blend   <= to_integer(unsigned(registers_in(6)(1 downto 0)));
-                s_weight  <= registers_in(6)(2);      -- S9
-                s_bgw     <= registers_in(6)(3);      -- S10
-                s_colour  <= registers_in(6)(4);      -- S11
+                s_glide   <= registers_in(6)(0);      -- S7
+                -- S8 = Meet, S9 = Fringe: together a 4-way blend selector
+                s_blend   <= to_integer(unsigned(registers_in(6)(2 downto 1)));
+                s_weight  <= registers_in(6)(3);      -- S10
+                s_bgw     <= registers_in(6)(4);      -- S11
 
                 s_cx <= '0' & s_W(11 downto 1);
                 s_cy <= '0' & s_H(11 downto 1);
@@ -541,27 +534,12 @@ begin
                         end if;
 
                     when 7 =>
-                        -- INK PALETTE by source region.  Mono simply loads the
-                        -- same ink into all three slots, so the pixel path
-                        -- never learns whether the colouriser is on.
-                        if s_bgw = '1' then s_gnd_y <= C_WHITE;
-                        else                s_gnd_y <= C_BLACK; end if;
-                        for i in 0 to 2 loop
-                            if s_colour = '0' then
-                                if s_bgw = '1' then s_pal_y(i) <= C_BLACK;
-                                else                s_pal_y(i) <= C_WHITE; end if;
-                                s_pal_u(i) <= C_NEUT;
-                                s_pal_v(i) <= C_NEUT;
-                            elsif s_bgw = '1' then
-                                s_pal_y(i) <= C_SUB_Y(i);   -- process ink
-                                s_pal_u(i) <= C_SUB_U(i);
-                                s_pal_v(i) <= C_SUB_V(i);
-                            else
-                                s_pal_y(i) <= C_ADD_Y(i);   -- light
-                                s_pal_u(i) <= C_ADD_U(i);
-                                s_pal_v(i) <= C_ADD_V(i);
-                            end if;
-                        end loop;
+                        -- GROUND (S11): black ink on white, or white on black
+                        if s_bgw = '1' then
+                            s_gnd_y <= C_WHITE;  s_ink_y <= C_BLACK;
+                        else
+                            s_gnd_y <= C_BLACK;  s_ink_y <= C_WHITE;
+                        end if;
 
                     when 6 =>
                         -- TEXTURE select: an 8-count deadband keeps converter
@@ -591,7 +569,8 @@ begin
                         -- i.e. a period of 1024 px (knob 0) down to 4.0 px
                         -- (knob 1023) -- continuous, monotonic, no dead zone.
                         for L in 0 to 1 loop
-                            v_k := s_gacc(2 * L)(15 downto 6);
+                            if s_glide = '1' then v_k := s_gacc(2 * L)(15 downto 6);
+                            else                  v_k := s_gtgt(2 * L); end if;
                             v_e := to_integer(v_k(9 downto 7));
                             v_m := shift_left(resize(v_k(6 downto 0), 16), 1);
                             s_sb(L) <= shift_left(v_m + to_unsigned(256, 16), v_e);
@@ -612,9 +591,16 @@ begin
                         -- Spokes keep their centre and rotate instead: X winds
                         -- the fan a full turn, the slider counter-winds it.
                         for L in 0 to 1 loop
-                            v_ph := shift_left(signed(resize(s_gacc(2 * L + 1)(15 downto 6), 13))
+                            if s_glide = '1' then
+                                v_pk := s_gacc(2 * L + 1)(15 downto 6);
+                                v_sk := s_gacc(4)(15 downto 6);
+                            else
+                                v_pk := s_gtgt(2 * L + 1);
+                                v_sk := s_gtgt(4);
+                            end if;
+                            v_ph := shift_left(signed(resize(v_pk, 13))
                                                - to_signed(512, 13), 1);
-                            v_sl := shift_left(signed(resize(s_gacc(4)(15 downto 6), 13))
+                            v_sl := shift_left(signed(resize(v_sk, 13))
                                                - to_signed(512, 13), 1);
                             if s_tex(L) = T_SPOKE then
                                 s_offx(L) <= (others => '0');
@@ -1118,14 +1104,9 @@ begin
     -- structural -- no combination of switches can produce a blank frame,
     -- which the old transparent-ink-over-background model could (black ink
     -- on a black ground drew nothing).
-    --
-    -- Ink colour comes from WHICH LAYER made it, so the interference itself
-    -- carries the colour.  In mono all three palette slots hold the same
-    -- ink, so this path is identical in both modes.
     ------------------------------------------------------------------------
     p_comp : process(clk)
         variable v_m   : std_logic;
-        variable v_idx : integer range 0 to 2;
     begin
         if rising_edge(clk) then
             case s_blend is
@@ -1135,29 +1116,13 @@ begin
                 when others   => v_m := s_mask(0) or s_mask(1);
             end case;
 
-            -- source region: 0 = A alone, 1 = B alone, 2 = both.  No blend can
-            -- set the mask where neither layer drew, so that case never shows.
-            if s_mask(0) = '1' and s_mask(1) = '1' then v_idx := 2;
-            elsif s_mask(1) = '1' then                  v_idx := 1;
-            else                                        v_idx := 0; end if;
-
-            if v_m = '1' then
-                o_y <= s_pal_y(v_idx);
-                o_u <= s_pal_u(v_idx);
-                o_v <= s_pal_v(v_idx);
-            else
-                o_y <= s_gnd_y;
-                o_u <= C_NEUT;
-                o_v <= C_NEUT;
-            end if;
+            if v_m = '1' then o_y <= s_ink_y;
+            else              o_y <= s_gnd_y; end if;
         end if;
     end process p_comp;
 
     ------------------------------------------------------------------------
-    -- sync delay + output.  The palettes are authored in standard BT.601 and
-    -- SWAPPED here: the hardware's u wire carries Cr and v carries Cb.  Sim
-    -- previews therefore show swapped hues -- judge shape in sim, hue on the
-    -- device.  Mono is unaffected (both chroma channels sit at neutral).
+    -- sync delay + output.  Chroma is neutral throughout (mono only).
     ------------------------------------------------------------------------
     p_sync : process(clk)
     begin
@@ -1170,8 +1135,8 @@ begin
     end process p_sync;
 
     data_out.y       <= std_logic_vector(o_y);
-    data_out.u       <= std_logic_vector(o_v);
-    data_out.v       <= std_logic_vector(o_u);
+    data_out.u       <= std_logic_vector(C_NEUT);
+    data_out.v       <= std_logic_vector(C_NEUT);
     data_out.avid    <= s_avid_sr(C_LATENCY - 1);
     data_out.hsync_n <= s_hsync_n_sr(C_LATENCY - 1);
     data_out.vsync_n <= s_vsync_n_sr(C_LATENCY - 1);
