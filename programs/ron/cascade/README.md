@@ -13,7 +13,7 @@ Concentric circles that push each other: move the centre and the rings cascade o
 | K3 | Period | 0–100% | Ring spacing, 4 to 2048 px |
 | K4 | Gradient | 0–100% | Ring shading: hard, 4 steps, 8 steps or smooth |
 | K5 | Width | -100–100% | Band balance: thin white lines, classic, thin black lines |
-| S7 | Glide | Off / On | Smooth the centre's movement |
+| S7 | Glide | Off / On | On: the centre glides and Width eases; Off: no glide, everything follows the knobs (and modulators) exactly |
 | S8 | Cascade | Uniform / Cascade | Rings move together, or push each other outward one by one |
 | S9 | Moire | Off / On | XOR with a half-phase copy: doubled rings and moiré arcs |
 | S10 | Catch-Up | Stay / Home | Dragged rings stay offset, or settle back to centre |

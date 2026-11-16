@@ -4,6 +4,19 @@
 HW-captured defaults.** Developed in `programs/ron/cascade_diag/` (separate-program_id
 fork used for every hardware A/B; its SUMMARY.md has the full v1.8–v2.1 log).
 
+## v2.1.6 — S7 Glide Off = no easing anywhere (2026-11-15)
+
+Ron: with Glide off, nothing should glide, knobs or modulators. Off already
+snapped the centre; K5 Width's always-on 1/8 ease (`s_k5f`, slot 18) now also
+takes K5 straight (`k5 << 3`, Q3) when S7 is off, applied the same frame. The
+ring chain's push / Catch-Up settle is the cascade itself and is unchanged.
+Width's ease existed because pot noise shimmered the ring edges, so watch for
+that with Glide off; a ±1-count hold (no delay) is the fix, not easing.
+
+**Build (router1, seed 1, all 6 first try):** HD Analog 84.93 MHz, HD HDMI 81.98,
+HD Dual 80.62, SD Analog 83.15, SD HDMI 76.23, SD Dual 83.10. 6070-6107 LC (79 %),
+19 EBR. HD HDMI Video mode is placement-sensitive: A/B it on hardware.
+
 ## v2.1.5 — resolution scaling (2026-10-17, built, not flashed)
 
 The rings now keep their size relative to the screen HEIGHT at 1080p, 720p and SD
@@ -544,7 +557,7 @@ grep the binary for the new strings before believing it.
 | K1 | **Center X** | bipolar ±2 W, detent = frame centre |
 | K2 | **Center Y** | bipolar ±2 H, detent = frame centre |
 | K3 | **Period** | ring density (exp), spacing 4..2048 px |
-| S7 | **Glide** | one-pole slew on the centre (drives the cascade). Default ON |
+| S7 | **Glide** | one-pole slew on the centre (drives the cascade) + K5 Width ease; Off = none (v2.1.6). Default ON |
 | S8 | **Cascade** | Uniform (classic bullseye) / Cascade (sequential push). Default ON |
 | S9 | **Ramp** | Steps (K4 fineness, classic hard at 0) / Smooth (full-res per-ring ramp, K4 ignored — the soft gradient cascades with the rings). Invert is gone (v0.8) |
 | S10 | **Catch-Up** | Stay (freeze dragged) / Home (glide back concentric). Default ON |

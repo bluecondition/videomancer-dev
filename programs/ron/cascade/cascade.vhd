@@ -9,6 +9,12 @@
 -- cascade.vhd  (v2.1.2 -- 126/48 coupled discs, line-buffer mark render;
 --   finalized 2026-10-10; developed + HW-verified in a diagnostic copy)
 --
+-- v2.1.6 (2026-11-15): S7 GLIDE OFF = NO EASING ANYWHERE.  Off already
+--   snapped the centre; K5 Width's always-on 1/8 ease now goes off with it
+--   too, so knobs and modulators act the same frame.  (The ring chain's
+--   push / Catch-Up settle is the cascade itself, not parameter smoothing,
+--   and is unchanged.)
+--
 -- v2.1.5 (2026-10-17): RESOLUTION SCALING.  The rings keep their size relative
 --   to the screen HEIGHT in every mode (virtual 1080-line canvas; SD is a
 --   1440-wide 4:3 window of it).  The engine stays in REAL pixels on x; per
@@ -1232,11 +1238,16 @@ begin
                         v_lz := s_lfb - signed(resize(s_zm, 16));
                         if s_k3l < resize(s_zm, 10) then v_lz := s_lfmin; end if;  -- spacing <= 2048 (1080p)
                         s_lf <= v_lz;
-                        -- K5 ease (pot noise would shimmer the ring edges)
-                        v_pe   := signed(resize(s_k5f, 14)) + shift_right(
-                                  signed(shift_left(resize(s_k5, 14), 3))
-                                  - signed(resize(s_k5f, 14)), 3);
-                        s_k5f  <= unsigned(v_pe(12 downto 0));
+                        -- K5 ease (pot noise would shimmer the ring edges);
+                        -- v2.1.6: S7 Glide off takes K5 straight (Q3)
+                        if s_glx = '1' then
+                            v_pe   := signed(resize(s_k5f, 14)) + shift_right(
+                                      signed(shift_left(resize(s_k5, 14), 3))
+                                      - signed(resize(s_k5f, 14)), 3);
+                            s_k5f  <= unsigned(v_pe(12 downto 0));
+                        else
+                            s_k5f  <= shift_left(resize(s_k5, 13), 3);
+                        end if;
                       end if;
                     -- the decode is pipelined one step per slot (a single-slot
                     -- negate+ROM+barrel cone was hd_hdmi's critical path)
