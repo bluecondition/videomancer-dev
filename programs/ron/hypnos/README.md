@@ -14,11 +14,11 @@ Razor-sharp 1960s op-art rings (circle, square, hexagon or flower) with an off-s
 | K4 | Warp | -100–100% | Warps the ring spacing: bunched toward the centre or toward the edges; centre = even |
 | K5 | Spiral | -8–8x | Vertigo spiral: number of spiral arms, either direction; 0 = plain rings |
 | K6 | Duty | 5–95% | Duty: how thick the ink bands are versus the gaps |
-| S7 | Form | Round / Angular | Round or angular rings (with S8: circle, square, hexagon, flower) |
-| S8 | Six-fold | Off / On | On: six-fold shapes (hexagon or flower) |
-| S9 | Ink | White / Colour | Ink: white or coloured bands |
-| S10 | Paper | Black / Colour | Paper: black or coloured background |
-| S11 | Invert | Normal / Invert | Invert: swaps ink and paper |
+| S7 | Glide | Off / On | On: centre, period and warp glide smoothly (~1.6 s) and speed changes ease in; Off: no glide, everything follows the knobs (and modulators) exactly |
+| S8 | Form | Round / Angular | Round or angular rings (with S9: circle, square, hexagon, flower) |
+| S9 | Six-fold | Off / On | On: six-fold shapes (hexagon or flower) |
+| S10 | Ink | White / Colour | Ink: white or coloured bands |
+| S11 | Paper | Black / Colour | Paper: black or coloured background |
 | P12 | Speed | -100–100% | Bipolar ring travel: centre stopped, push to flow outward or inward |
 
 ## Presets

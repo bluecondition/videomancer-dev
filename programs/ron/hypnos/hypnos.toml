@@ -8,12 +8,13 @@
 # integer-arm Vertigo spiral, tunnel-to-dome warp, four ink/paper palettes, and
 # the slider is a bipolar ring-travel speed (centre = still).
 #
-# Glide is always on (centre, period and warp ease to their new values).
+# S7 Glide: on, the centre, period and warp ease to new values (~1.6 s) and
+# speed changes ease briefly; off, all of them follow the knobs exactly.
 
 [program]
 processing_delay_clks = 0
 program_id = "com.czartroniks.hypnos"
-program_version = "1.0.4"
+program_version = "1.1.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Hypnos"
 author = "czartroniks"
@@ -87,7 +88,7 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 448            # ink : paper band width
+initial_value = 581            # ink : paper band width (v1.1.0: was 448 + Invert)
 display_min_value = 5
 display_max_value = 95
 name_label = "Duty"
@@ -97,33 +98,33 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
 name_label = "Form"
 value_labels = ["Round", "Angular"]
 initial_value_label = "Angular"
 
 [[parameter]]
-parameter_id = "toggle_switch_8"
+parameter_id = "toggle_switch_9"
 name_label = "Six-fold"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
-parameter_id = "toggle_switch_9"
+parameter_id = "toggle_switch_10"
 name_label = "Ink"
 value_labels = ["White", "Colour"]
 initial_value_label = "Colour"
 
 [[parameter]]
-parameter_id = "toggle_switch_10"
+parameter_id = "toggle_switch_11"
 name_label = "Paper"
 value_labels = ["Black", "Colour"]
 initial_value_label = "Black"
-
-[[parameter]]
-parameter_id = "toggle_switch_11"
-name_label = "Invert"
-value_labels = ["Normal", "Invert"]
-initial_value_label = "Invert"
 
 # --- Linear Potentiometer (Fader 12) ---
 
@@ -148,7 +149,7 @@ rotary_potentiometer_3 = 430
 rotary_potentiometer_4 = 512
 rotary_potentiometer_5 = 512
 rotary_potentiometer_6 = 512
-toggle_switch_7 = 0
+toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
@@ -163,7 +164,7 @@ rotary_potentiometer_3 = 470
 rotary_potentiometer_4 = 300
 rotary_potentiometer_5 = 640
 rotary_potentiometer_6 = 512
-toggle_switch_7 = 0
+toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
@@ -178,7 +179,7 @@ rotary_potentiometer_3 = 330
 rotary_potentiometer_4 = 512
 rotary_potentiometer_5 = 512
 rotary_potentiometer_6 = 512
-toggle_switch_7 = 0
+toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
@@ -193,10 +194,10 @@ rotary_potentiometer_3 = 520
 rotary_potentiometer_4 = 150
 rotary_potentiometer_5 = 512
 rotary_potentiometer_6 = 600
-toggle_switch_7 = 0
+toggle_switch_7 = 1
 toggle_switch_8 = 0
-toggle_switch_9 = 1
-toggle_switch_10 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
 toggle_switch_11 = 0
 linear_potentiometer_12 = 760
 
@@ -209,10 +210,10 @@ rotary_potentiometer_4 = 512
 rotary_potentiometer_5 = 576
 rotary_potentiometer_6 = 512
 toggle_switch_7 = 1
-toggle_switch_8 = 0
+toggle_switch_8 = 1
 toggle_switch_9 = 0
-toggle_switch_10 = 1
-toggle_switch_11 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
 linear_potentiometer_12 = 600
 
 [[preset]]
@@ -227,7 +228,7 @@ toggle_switch_7 = 1
 toggle_switch_8 = 1
 toggle_switch_9 = 1
 toggle_switch_10 = 1
-toggle_switch_11 = 0
+toggle_switch_11 = 1
 linear_potentiometer_12 = 440
 
 [[preset]]
@@ -238,10 +239,10 @@ rotary_potentiometer_3 = 450
 rotary_potentiometer_4 = 700
 rotary_potentiometer_5 = 512
 rotary_potentiometer_6 = 512
-toggle_switch_7 = 0
-toggle_switch_8 = 1
+toggle_switch_7 = 1
+toggle_switch_8 = 0
 toggle_switch_9 = 1
-toggle_switch_10 = 0
+toggle_switch_10 = 1
 toggle_switch_11 = 0
 linear_potentiometer_12 = 600
 
@@ -253,7 +254,7 @@ rotary_potentiometer_3 = 560
 rotary_potentiometer_4 = 60
 rotary_potentiometer_5 = 352
 rotary_potentiometer_6 = 512
-toggle_switch_7 = 0
+toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0

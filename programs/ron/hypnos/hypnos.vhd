@@ -6,6 +6,15 @@
 --
 -- hypnos.vhd  (v1.0 -- razor-sharp op-art rings: circle / square / hexagon / flower)
 --
+-- v1.1.0 (2026-11-15): GLIDE switch on S7; Invert is gone.  S7 Glide On keeps
+-- the 1/32-per-frame glide on Center X/Y, Period and Warp and the 1/8 ease on
+-- Speed; Off snaps all five to the values latched at this frame's vsync (the
+-- vblank sequence applies them before the first active line), so knobs and
+-- modulators act with no easing and no extra frame.  S11 Invert
+-- (coverage 256 - c) is removed: it equalled K6 Duty mirrored plus a half
+-- ring of phase.  The old S7..S10 move up one place (S8 Form, S9 Six-fold,
+-- S10 Ink, S11 Paper).
+--
 -- v1.0.4 (2026-10-17): resolution scaling.  The engine keeps working in real
 -- pixels across a line (so the 1-px box-filter AA stays exactly one pixel),
 -- and the per-mode scale is folded into per-mode constants from the video
@@ -39,8 +48,8 @@
 --              LREF) [+ flower slope], angular log2(arms/(2 pi r)), combined in
 --              log2.  Every edge is a 1-px anti-aliased line at any period /
 --              warp / spiral; rings finer than ~3 px fade to the duty grey.
---   colour   = ink over paper: S9 Ink (white / colour), S10 Paper (black /
---              colour): B/W, Rainbow, Duo, Complementary.  S11 Invert.
+--   colour   = ink over paper: S10 Ink (white / colour), S11 Paper (black /
+--              colour): B/W, Rainbow, Duo, Complementary.  S7 Glide.
 --
 -- Long-carried values ride in EBR delay lines.  The program makes its own avid
 -- (parity-locked to hsync, fixed length) so coloured output never U/V-swaps a
@@ -605,9 +614,9 @@ architecture hypnos of program_top is
     signal s_duty_k : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_spd_k  : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_flat_t : std_logic := '1';
-    signal s_shape  : std_logic_vector(1 downto 0) := "00";   -- S8 & S7: 00 circle 01 square 10 flower 11 hexagon
-    signal s_pal    : std_logic_vector(1 downto 0) := "00";   -- S10 & S9
-    signal s_inv    : std_logic := '0';
+    signal s_shape  : std_logic_vector(1 downto 0) := "00";   -- S9 & S8: 00 circle 01 square 10 flower 11 hexagon
+    signal s_pal    : std_logic_vector(1 downto 0) := "00";   -- S11 & S10
+    signal s_glide  : std_logic := '1';                       -- S7: 1 = glide, 0 = none
 
     signal s_cx, s_cy   : signed(13 downto 0) := (others => '0');
     signal s_cxs, s_cys : signed(21 downto 0) := (others => '0');   -- glide accum Q8
@@ -1026,9 +1035,9 @@ begin
                 s_arm_k  <= unsigned(registers_in(4));
                 s_duty_k <= unsigned(registers_in(5));
                 s_spd_k  <= unsigned(registers_in(7));
-                s_shape  <= registers_in(6)(1 downto 0);   -- S8 Six-fold, S7 Form
-                s_pal    <= registers_in(6)(3 downto 2);   -- S10 Paper, S9 Ink
-                s_inv    <= registers_in(6)(4);            -- S11 Invert
+                s_glide  <= registers_in(6)(0);            -- S7 Glide
+                s_shape  <= registers_in(6)(2 downto 1);   -- S9 Six-fold, S8 Form
+                s_pal    <= registers_in(6)(4 downto 3);   -- S11 Paper, S10 Ink
                 s_Wl     <= s_W;
 
                 s_seq <= to_unsigned(52, 6);
@@ -1054,7 +1063,8 @@ begin
                     -- (snapping to the target is c + (tg - c) = tg exactly)
                     when 37 | 21 => s_gd <= s_tg - v_gc;
                     when 36 | 20 =>
-                        if s_gd <= 256 and s_gd >= -256 then s_gs <= '1'; else s_gs <= '0'; end if;
+                        -- S7 Glide off: always snap (c + (tg - c) = tg)
+                        if s_glide = '0' or (s_gd <= 256 and s_gd >= -256) then s_gs <= '1'; else s_gs <= '0'; end if;
                         if s_gd < 8192 and s_gd > -8192 then s_gm <= '1'; else s_gm <= '0'; end if;
                         s_gdd <= shift_right(s_gd, C_GL);
                     when 35 | 19 =>
@@ -1068,16 +1078,22 @@ begin
 
                     -- PERIOD: log2 cycles/px = -11 + K3*9/1024 octaves (Q12 glide)
                     when 34 => s_lt <= to_signed(-45056, 18) + signed(resize(s_per_k * to_unsigned(36, 6), 18));
-                    when 33 => s_lfs <= s_lfs + shift_right(s_lt - s_lfs, C_GL);
+                    when 33 =>
+                        if s_glide = '1' then s_lfs <= s_lfs + shift_right(s_lt - s_lfs, C_GL);
+                        else                  s_lfs <= s_lt; end if;
                     -- WARP exponent p = K4/512 (Q6), glided; detent = exactly flat
                     when 32 =>
                         if s_flat_t = '1' then s_ptg <= to_unsigned(64 * 64, 15);
                         elsif s_warp_k < 8 then s_ptg <= to_unsigned(64, 15);
                         else s_ptg <= shift_left(resize(shift_right(s_warp_k, 3), 15), 6); end if;
-                    when 31 => s_pgs <= unsigned(signed(s_pgs) + shift_right(signed(s_ptg) - signed(s_pgs), C_GL));
+                    when 31 =>
+                        if s_glide = '1' then s_pgs <= unsigned(signed(s_pgs) + shift_right(signed(s_ptg) - signed(s_pgs), C_GL));
+                        else                  s_pgs <= s_ptg; end if;
                     -- SPEED (P12, bipolar) glide, Q6
                     when 30 => s_vtg <= shift_left(resize(signed('0' & s_spd_k) - 512, 17), 6);
-                    when 29 => s_vgs <= s_vgs + shift_right(s_vtg - s_vgs, 3);
+                    when 29 =>
+                        if s_glide = '1' then s_vgs <= s_vgs + shift_right(s_vtg - s_vgs, 3);
+                        else                  s_vgs <= s_vtg; end if;
 
                     when 14 =>
                         s_lf <= resize(shift_right(s_lfs, 6), 12);
@@ -1586,11 +1602,10 @@ begin
                 s40_cp <= resize(shift_right(s39_nsh, 1), 11);
             end if;
             s40_full <= s39_full;
-            -- S41: coverage 0..256 ; INVERT swaps ink and paper
+            -- S41: coverage 0..256
             vc := resize(s40_cp, 10);
             if vc > 256 or s40_full = '1' then vc := to_unsigned(256, 10); end if;
-            if s_inv = '1' then s41_cov <= resize(256 - vc, 9);
-            else                s41_cov <= resize(vc, 9); end if;
+            s41_cov <= resize(vc, 9);
         end if;
     end process p_cov;
 

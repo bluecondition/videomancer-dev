@@ -4,7 +4,7 @@
 video. v1.0 is a ground-up rewrite of the renderer for **extreme clarity**:
 every ring and spiral edge is a one-pixel anti-aliased line at any ring size,
 warp or spiral, and rings finer than ~3 px fade to an even grey instead of
-moiré. Four shapes, four palettes, a bipolar speed slider, glide always on.
+moiré. Four shapes, four palettes, a bipolar speed slider, a Glide switch (v1.1.0).
 
 ## Control map
 
@@ -16,15 +16,20 @@ moiré. Four shapes, four palettes, a bipolar speed slider, glide always on.
 | K4 | **Warp** | detent = flat; CCW tunnel, CW dome (`p = K4/512` gamma, glided) |
 | K5 | **Spiral** | whole arms −8…+8, ~64 knob units per arm, centre = plain rings |
 | K6 | **Duty** | ink : paper band width 5–95 % |
-| S7 | **Form** | Round / Angular |
-| S8 | **Six-fold** | Off / On  → Round+Off **circle**, Round+On **flower** (6 petals), Angular+Off **square**, Angular+On **hexagon** |
-| S9 | **Ink** | White / Colour |
-| S10 | **Paper** | Black / Colour → **B/W**, **Rainbow** (colour ink on black: hue travels outward with the rings), **Duo** (white on blue), **Complementary** (red on turquoise) |
-| S11 | **Invert** | swaps ink and paper |
+| S7 | **Glide** | On: centre / period / warp ease 1/32 per frame (~1.6 s), Speed 1/8 / Off: all five snap to this vsync's values, applied the same frame (no easing; Ron 2026-11-15 wants modulators unfiltered) |
+| S8 | **Form** | Round / Angular |
+| S9 | **Six-fold** | Off / On  → Round+Off **circle**, Round+On **flower** (6 petals), Angular+Off **square**, Angular+On **hexagon** |
+| S10 | **Ink** | White / Colour |
+| S11 | **Paper** | Black / Colour → **B/W**, **Rainbow** (colour ink on black: hue travels outward with the rings), **Duo** (white on blue), **Complementary** (red on turquoise) |
 | P12 | **Speed** | bipolar: centre = still, up = rings stream outward, down = inward; exponential, 1 cycle / ~68 s → ¼ cycle per frame (“warp speed” at the top) |
 
-Removed from v0.x: Catch-Up (lives on in Cascade), the Glide switch (always on),
-Zoom (K3 Period covers ring scale), Key/Gradient output (sharpness is the point).
+Removed from v0.x: Catch-Up (lives on in Cascade), Zoom (K3 Period covers ring
+scale), Key/Gradient output (sharpness is the point).  v1.1.0 (2026-11-15)
+brought the Glide switch back on S7 and removed S11 Invert: inverting the
+coverage equals K6 Duty mirrored plus half a ring of phase, which Speed scrolls
+through anyway.  The power-up Duty moved 448 → 581 to keep the old Invert-on
+ink fraction (143/256); no preset used Invert, and the presets' switches were
+shifted up one place.
 
 ## Renderer (streaming, no frame buffer, 22 EBR)
 
