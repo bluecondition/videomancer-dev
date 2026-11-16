@@ -1,0 +1,152 @@
+# Blaze - Hardline set (v0.1.0, 2026-11-15).  After Bridget Riley's "Blaze 1" (1962): a black-and-white
+# sunburst whose rays zigzag from ring to ring, self-similar to the centre.  The slider is the Twist:
+# straight rays at its centre, a deeper zigzag either way.  The camera never shows; its luma bends the rays.
+# See blaze.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 40
+program_id = "com.czartroniks.blaze"
+program_name = "Blaze"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Optics", "Pattern"]
+program_type = "processing"
+description = "Riley's Blaze: a black-and-white sunburst whose rays zigzag ring by ring. Twist it; video bends the rays."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Period"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 401
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rays"
+value_labels = ["4", "5", "6", "7", "8", "10", "12", "14", "16", "20", "24", "28", "32", "40", "48", "64"]
+initial_value_label = "24"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Skew"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Form"
+value_labels = ["Zigzag", "Checker"]
+initial_value_label = "Zigzag"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Shade"
+value_labels = ["Flat", "Shade"]
+initial_value_label = "Flat"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Twist"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 840
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Blaze"
+
+[[preset]]
+name = "Siemens Star"
+rotary_potentiometer_4 = 800
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Saw Blades"
+rotary_potentiometer_3 = 350
+rotary_potentiometer_4 = 736
+rotary_potentiometer_5 = 0
+linear_potentiometer_12 = 180
+
+[[preset]]
+name = "Spiral Checker"
+rotary_potentiometer_3 = 450
+rotary_potentiometer_4 = 544
+toggle_switch_8 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Paper Pleats"
+rotary_potentiometer_3 = 380
+rotary_potentiometer_4 = 608
+rotary_potentiometer_5 = 380
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 250
+
+[[preset]]
+name = "Pinstripe"
+rotary_potentiometer_3 = 520
+rotary_potentiometer_4 = 864
+toggle_switch_10 = 1
+linear_potentiometer_12 = 1023
