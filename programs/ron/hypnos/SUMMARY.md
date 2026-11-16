@@ -29,7 +29,8 @@ brought the Glide switch back on S7 and removed S11 Invert: inverting the
 coverage equals K6 Duty mirrored plus half a ring of phase, which Speed scrolls
 through anyway.  The power-up Duty moved 448 → 581 to keep the old Invert-on
 ink fraction (143/256); no preset used Invert, and the presets' switches were
-shifted up one place.
+shifted up one place.  **HW-validated 2026-11-15** (Ron: "looks and works right"),
+router1 seed 1 on all 6 configs.
 
 ## Renderer (streaming, no frame buffer, 22 EBR)
 
