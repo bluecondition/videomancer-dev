@@ -1,0 +1,154 @@
+# Rosette - Vellum (v0.1.0, 2026-11-16).  Offset-printing halftone screens and their rosettes: three
+# translucent square screens of round dots at 45 - s, 45, 45 + s degrees, sliding along their own axes; the
+# camera swells the dots (a halftone).  See rosette.vhd, rosette.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 32
+program_id = "com.czartroniks.rosette"
+program_name = "Rosette"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Print", "Illusion", "Pattern"]
+program_type = "processing"
+description = "Three translucent halftone dot screens at printer's angles form rosettes and slow moire; video sets the dot size."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 800
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Dot"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 680
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Screens"
+value_labels = ["Three", "Two"]
+initial_value_label = "Three"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Tone"
+value_labels = ["Grey", "Ink"]
+initial_value_label = "Grey"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Angle"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Rosette"
+
+[[preset]]
+name = "Slow Moire"
+rotary_potentiometer_3 = 760
+rotary_potentiometer_4 = 330
+rotary_potentiometer_5 = 640
+linear_potentiometer_12 = 150
+
+[[preset]]
+name = "Ben-Day"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_2 = 420
+rotary_potentiometer_4 = 520
+rotary_potentiometer_5 = 600
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Octagon"
+rotary_potentiometer_3 = 720
+rotary_potentiometer_4 = 380
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Rings"
+rotary_potentiometer_4 = 560
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Lace"
+rotary_potentiometer_3 = 860
+rotary_potentiometer_4 = 950
+toggle_switch_9 = 1
+linear_potentiometer_12 = 600
