@@ -25,7 +25,7 @@ the ramp (Bold = 4 steps, Fine = smooth).
 | 6 | multipole | Stripes of z^n: flowers of circles touching at the pole (magnet field lines), or hyperbola saddles; also as a curved checkerboard | Flow: lines pump out of the pole | launched 2026-11-15 |
 | 7 | fault | Concentric rings sliced into strips, alternate strips slipped sideways | Slip: unbroken rings at centre, shear either way | launched 2026-11-15 |
 | 8 | flute | Rings or stripes seen through reeded glass (Shade: glass rods) | Power: flat glass at centre, magnify one way, minify and flip the other | launched 2026-11-15 |
-| 9 | tangle | Truchet ribbons: concentric quarter-arcs in every tile joining into endless meandering bands (Shade: pipes) | Bend: Greek-key elbows, round arcs, straight diagonals | launched 2026-11-15 |
+| 9 | [tangle](tangle/) | Truchet ribbons: concentric quarter-arcs in every tile joining into endless meandering bands (Shade: pipes) | Bend: Greek-key elbows, round arcs, straight diagonals | v0.1.0 built 2026-11-15, router2 seed 1 all configs, HD 89.0-95.6 MHz, 87 % LC, 15 EBR; model = RTL; not flashed |
 | 10 | kinegram | Barrier-grid animation: interleaved frames of a ring target or wheel behind sliding black bars | Slide: the hand cranks the animation | launched 2026-11-15 |
 
 Each program's own K4, K5, S8, S9 and camera target are in its spec (`.hardline_work/prompts/<name>.txt`)
