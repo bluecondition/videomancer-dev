@@ -17,7 +17,7 @@ the ramp (Bold = 4 steps, Fine = smooth).
 
 | # | Program | Picture | P12 headline | Status |
 |---|---------|---------|--------------|--------|
-| 1 | fresnel | Zone plates: rings that tighten with distance; two crossed plates beat into straight stripes that turn and tighten as X / Y moves | Pump: ring phase, rings breathe in and out | launched 2026-11-15 |
+| 1 | [fresnel](fresnel/) | Zone plates: rings that tighten with distance; two crossed plates beat into straight stripes that turn and tighten as X / Y moves | Pump: ring phase, rings breathe in and out | v0.2.0 built 2026-11-16 (P12 Speed: rings stream; Pair = plates opposite), router1 seed 1 all configs, HD 84.5-88.4 MHz, 83 % LC, 16 EBR; model = RTL; not flashed |
 | 2 | [dazzle](dazzle/) | Dazzle camouflage: the screen cut into shards, each filled with stripes in a conflicting direction | Scatter: a pinwheel of wedges out to scattered shards | v0.1.0 built 2026-11-15, router2 seed 1 all configs, HD 78.5-82.7 MHz, 91.5 % LC, 21 EBR; model = RTL; not flashed |
 | 3 | [tweed](tweed/) | Woven cloth from a real weave draft: houndstooth, shepherd's check, herringbone, pinwheel, log cabin | Turn: rotates the cloth | v0.1.0 built 2026-11-15, router1 seed 1 all configs, HD 84.6-89.9 MHz, 91 % LC, 10 EBR; model = RTL; not flashed |
 | 4 | [scallop](scallop/) | Seigaiha: overlapping fans of concentric arcs, like fish scales (Shade: shells) | Fan: every scale opens from a bud to a full fan | v0.1.0 built 2026-11-15, router1 seed 1 all configs, HD 82.2-84.6 MHz, 91 % LC, 14 EBR; model = RTL; not flashed |
