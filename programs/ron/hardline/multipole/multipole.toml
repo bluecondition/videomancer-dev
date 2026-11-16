@@ -1,0 +1,209 @@
+# Multipole - Hardline (v0.1.0, 2026-11-15).  The field lines of a magnetic multipole and its conformal
+# checkerboard: stripes of Re z^n and Im z^n about one pole, n = -4 .. 4, crisp black and white.
+# See multipole.vhd, multipole.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 48
+program_id = "com.czartroniks.multipole"
+program_name = "Multipole"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Optics", "Pattern"]
+program_type = "processing"
+description = "Multipole field lines and conformal checkerboards in black and white; video bends the lines, Flow pumps them."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 448
+display_min_value = -100
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 558
+display_min_value = -100
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Period"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 435
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Order"
+value_labels = ["-4", "-3", "-2", "-1", "1", "2", "3", "4"]
+initial_value_label = "-1"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Turn"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 470
+display_min_value = -180
+display_max_value = 180
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Weave"
+value_labels = ["Lines", "Checker"]
+initial_value_label = "Checker"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Space"
+value_labels = ["Even", "Log"]
+initial_value_label = "Even"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Flow"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+suffix_label = "%"
+
+[[preset]]
+name = "Dipole Checker"
+rotary_potentiometer_1 = 448
+rotary_potentiometer_2 = 558
+rotary_potentiometer_3 = 435
+rotary_potentiometer_4 = 448
+rotary_potentiometer_5 = 470
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Field Lines"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 340
+rotary_potentiometer_4 = 448
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Quadrupole Net"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 380
+rotary_potentiometer_4 = 320
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Hyperbolas"
+rotary_potentiometer_1 = 540
+rotary_potentiometer_2 = 500
+rotary_potentiometer_3 = 470
+rotary_potentiometer_4 = 704
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Log Flower"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 420
+rotary_potentiometer_4 = 192
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Octupole Osc"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 430
+rotary_potentiometer_4 = 960
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 600
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 512
