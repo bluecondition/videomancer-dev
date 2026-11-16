@@ -16,7 +16,7 @@ S7 Glide, S9 Tone (Grey / Ink), S10 Weight (Bold / Fine), S11 Source (Video / Os
 
 | # | Program | Picture | P12 headline | Status |
 |---|---------|---------|--------------|--------|
-| 1 | eclipse | Large translucent discs of light gliding past each other; overlaps make new greys (Rings: moire targets) | Spread: one disc, a Venn, discs apart | launched 2026-11-16 |
+| 1 | [eclipse](eclipse/) | Large translucent discs of light gliding past each other; overlaps make new greys (Rings: moire targets) | Spread: one disc, a Venn, discs apart | v0.1.0 built 2026-11-16, router1 seed 1 all configs, HD 91.6-93.9 MHz, 93 % LC, 16 EBR; model = RTL; not flashed |
 | 2 | [cartouche](cartouche/) | Nested bands round a core rectangle: sharp rectangles inside, rounded rectangles outward, near-circles far out | Round: square-cornered to round | v0.1.0 built 2026-11-16, router2 seed 1 all configs, HD 77.6-87.9 MHz, 91 % LC, 6 EBR; model = RTL; not flashed |
 | 3 | trine | Triangles within triangles: a triangular lattice of nested triangles, or an endless zoom into the Sierpinski gasket | Turn: every nest turns about its own centre | launched 2026-11-16 |
 | 4 | [whorl](whorl/) | Nested polygons whose shape evolves going out (sharp polygon, circle, soft flower), twisting into a whirlpool | Evolve: one shape everywhere to a full metamorphosis | v0.1.0 built 2026-11-16, router1 seed 1 all configs, HD 79.4-88.3 MHz, 92 % LC, 26 EBR; model = RTL; not flashed |
