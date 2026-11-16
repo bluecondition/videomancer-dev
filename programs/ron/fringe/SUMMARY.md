@@ -293,3 +293,4 @@ on the spoke edges (~15 px at the frame edge for 6 iterations).
   6510-6530 / 7680 LC (85 %, −80 vs v1.0.3), 2 EBR. HD Analog / HD HDMI
   margins are thin (+0.6 / +0.8 MHz); if a rebuild misses, re-run seeds before
   restructuring.
+- **HW-validated 2026-11-15** (Ron flashed v1.1.0: "look good").
