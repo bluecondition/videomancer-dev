@@ -1,0 +1,169 @@
+# Flute - Hardline (v0.1.0, 2026-11-15).  Reeded (fluted) glass in front of a ringed or striped scene: every
+# flute is a lens that shows a squeezed, flat or flipped slice of the scene behind it.  Black and white.
+# See flute.vhd, flute.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 44
+program_id = "com.czartroniks.flute"
+program_name = "Flute"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Optics", "Pattern"]
+program_type = "processing"
+description = "Rings or stripes seen through reeded glass: each flute is a lens. Power squeezes, flattens or flips the copies."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Period"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 784
+display_min_value = 0
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Flutes"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 661
+display_min_value = 0
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Angle"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -90
+display_max_value = 90
+display_float_digits = 0
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Scene"
+value_labels = ["Rings", "Stripes"]
+initial_value_label = "Rings"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Shade"
+value_labels = ["Flat", "Shade"]
+initial_value_label = "Flat"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Power"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 802
+display_min_value = -100
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Reeded"
+
+[[preset]]
+name = "Flat Glass"
+linear_potentiometer_12 = 512
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Sawtooth"
+toggle_switch_8 = 1
+rotary_potentiometer_3 = 720
+rotary_potentiometer_4 = 620
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Glass Rods"
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+rotary_potentiometer_4 = 780
+rotary_potentiometer_5 = 400
+linear_potentiometer_12 = 860
+
+[[preset]]
+name = "Miniatures"
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 820
+rotary_potentiometer_1 = 470
+linear_potentiometer_12 = 90
+
+[[preset]]
+name = "Bars"
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 560
+rotary_potentiometer_5 = 640
+toggle_switch_10 = 1
+linear_potentiometer_12 = 410
