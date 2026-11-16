@@ -4,7 +4,14 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- blaze.vhd  (Hardline set, v0.1.0 -- Bridget Riley's "Blaze": a sunburst whose rays zigzag ring by ring)
+-- blaze.vhd  (Hardline set, v0.2.0 -- Bridget Riley's "Blaze": a sunburst whose rays zigzag ring by ring)
+--
+-- v0.2.0 (2026-11-16): self-motion, Hypnos-style.  K5 is SPEED (Skew is retired, fixed at 1/2 = even
+-- chevrons): bipolar, +-24 counts of dead centre = still, up = the rings stream OUT of the centre, down = in;
+-- exponential, 2^-12 .. 2^-2 ring per field.  A per-field ring-phase accumulator (20 bits = one ring, wraps
+-- seamlessly) is divided by m once per field and folded into the log2-radius reference used by the ring
+-- coordinate, so the pixel path gains one subtract and no depth.  The spiral of the Checker keeps the
+-- unshifted coordinate (a whole ring of travel would otherwise turn it by Twist periods: a seam).
 --
 -- Black and white only (U = V = 512 on every pixel).  Polar chassis = Hypnos v1.1.0: timing, generated
 -- avid, centre glide, the log-domain polar engine (S1 .. S15) and the analytic one-pixel box-filter
@@ -13,10 +20,11 @@
 --   v    = m * log2(r / 512)                  m = rings per octave (K3 Period, 0.5 .. 4)
 --   PHI  = Rays * theta / 2pi + Twist * (zig(v) - 1/2) + camera          S8 Form = Zigzag
 --        = Rays * theta / 2pi + Twist * v + camera                        S8 Form = Checker (a log spiral)
---   zig  = triangle in 0 .. 1 over each ring, apex at Skew (K5): t / s below it, (1 - t) / (1 - s) above
+--   zig  = triangle in 0 .. 1 over each ring, apex at 1/2 (v0.1.0: Skew on K5)
+--   v    also carries the travel: v = m * log2(r / 512) - anim (K5 Speed)
 --   ink  = frac(PHI) < duty   (S10 Weight: 1/2 or a thin line)            S9 Shade = Flat
 --        = frac(PHI) as a sawtooth ramp (S10: 4 flat steps / smooth)      S9 Shade = Shade
---   Checker: ink XOR (frac(v) < Skew), the rings counterchange the rays.
+--   Checker: ink XOR (frac(v) < 1/2), the rings counterchange the rays.
 --   camera = box-filtered luma (or the Osc lattice) * K6, added to PHI (up to 2 periods at 100 %).
 --
 -- Both gradient terms fall as 1 / r, so the filter width is log2 w = LG(segment) - log2 r with one
@@ -317,27 +325,37 @@ architecture blaze of program_top is
     ----------------------------------------------------------------------
     type t_gl   is array(0 to 5) of unsigned(13 downto 0);      -- K1 K2 K3 K5 K6 P12, Q4
     signal s_gl   : t_gl := (to_unsigned(512 * 16, 14), to_unsigned(512 * 16, 14), to_unsigned(401 * 16, 14),
-                             to_unsigned(512 * 16, 14), to_unsigned(1023 * 16, 14), to_unsigned(840 * 16, 14));
+                             to_unsigned(844 * 16, 14), to_unsigned(1023 * 16, 14), to_unsigned(840 * 16, 14));
     signal s_gd, s_gs : signed(14 downto 0) := (others => '0');
     signal s_glide : std_logic := '1';                          -- S7
     signal s_chk, s_shade, s_fine, s_src : std_logic := '0';    -- S8 S9 S10 S11
     signal s_ri    : unsigned(3 downto 0) := to_unsigned(10, 4);   -- K4 ray-table index
 
-    signal s_cxs, s_cys : signed(21 downto 0) := (others => '0');   -- centre (glided), Q8
+    signal s_cxs   : signed(21 downto 0) := to_signed(960 * 256, 22);   -- centre (glided), Q8; power-up = 1080 centre
+    signal s_cys   : signed(21 downto 0) := to_signed(540 * 256, 22);
     signal c_gd    : signed(21 downto 0) := (others => '0');
     signal c_gs, c_gm : std_logic := '0';
 
     signal s_sq    : unsigned(6 downto 0) := (others => '0');
     signal s_tneg  : std_logic := '0';                              -- Twist < 0
     signal s_tw14  : unsigned(15 downto 0) := (others => '0');      -- |Twist|, Q14 periods
-    signal s_s12   : unsigned(11 downto 0) := to_unsigned(2048, 12);   -- apex s, Q12
+    constant s_s12 : unsigned(11 downto 0) := to_unsigned(2048, 12);   -- apex s, Q12 (fixed: even chevrons)
+    -- SPEED (K5): ring travel per field and the accumulated ring phase (Q20 = one ring)
+    signal s_vneg, s_vzero : std_logic := '1';
+    signal s_av    : unsigned(9 downto 0) := (others => '0');
+    signal s_u     : unsigned(9 downto 0) := (others => '0');
+    signal s_ls    : unsigned(9 downto 0) := (others => '0');
+    signal s_ssh   : unsigned(3 downto 0) := (others => '0');
+    signal s_spd   : unsigned(19 downto 0) := (others => '0');
+    signal s_anim  : unsigned(19 downto 0) := (others => '0');
+    signal s_lref2 : signed(19 downto 0) := to_signed(C_LREF, 20);   -- s_lref + anim / m (Q14 octaves)
     signal s_m     : unsigned(10 downto 0) := to_unsigned(379, 11);    -- rings per octave, Q8
     signal s_m9    : unsigned(8 downto 0) := to_unsigned(379, 9);      -- its mantissa: m = m9 << (K3 octave) >> 1
     signal s_la    : signed(9 downto 0) := to_signed(140, 10);
     signal s_lc    : signed(11 downto 0) := (others => '0');
     signal s_lgz   : signed(11 downto 0) := (others => '0');
-    signal s_Yr, s_Yf : unsigned(12 downto 0) := (others => '0');   -- |slope| of the rising / falling segment, Q8
-    signal s_LG1, s_LG0 : signed(11 downto 0) := to_signed(140, 12);
+    signal s_Yr    : unsigned(12 downto 0) := (others => '0');   -- |slope| of both zigzag segments (apex 1/2), Q8
+    signal s_LG1   : signed(11 downto 0) := to_signed(140, 12);
     signal s_dh    : signed(7 downto 0) := (others => '0');         -- ring filter width - ray filter width, half octaves
     signal s_g7    : unsigned(6 downto 0) := (others => '0');
 
@@ -350,11 +368,11 @@ architecture blaze of program_top is
     signal sm_b    : unsigned(11 downto 0) := (others => '0');
     signal sm_acc  : signed(27 downto 0) := (others => '0');
     signal sm_n    : unsigned(3 downto 0) := (others => '0');
-    -- serial divider (22 / 12 -> 13, 22 clocks)
-    signal dv_d    : unsigned(11 downto 0) := to_unsigned(2048, 12);
-    signal dv_n    : unsigned(15 downto 0) := (others => '0');
-    signal dv_r    : unsigned(11 downto 0) := (others => '0');
-    signal dv_q    : unsigned(12 downto 0) := (others => '0');
+    -- serial divider ((anim << 7) / m9 -> 16 bits, 23 clocks)
+    signal dv_d    : unsigned(8 downto 0) := to_unsigned(379, 9);
+    signal dv_n    : unsigned(22 downto 0) := (others => '0');
+    signal dv_r    : unsigned(8 downto 0) := (others => '0');
+    signal dv_q    : unsigned(15 downto 0) := (others => '0');
     signal dv_c    : unsigned(4 downto 0) := (others => '0');
     -- serial normaliser for log2 (16 bit, up to 15 clocks)
     signal lz_x    : unsigned(15 downto 0) := (others => '0');
@@ -366,8 +384,8 @@ architecture blaze of program_top is
     signal w_mi    : unsigned(1 downto 0);
     signal w_nk    : unsigned(2 downto 0);                           -- rays = (4 + nm) << nk
     signal w_nm    : unsigned(1 downto 0);
-    signal w_yrh, w_yfh : signed(6 downto 0);
-    signal w_yrl, w_yfl : signed(7 downto 0);
+    signal w_yrh   : signed(6 downto 0);
+    signal w_yrl   : signed(7 downto 0);
     signal w_Dr    : unsigned(15 downto 0);
     signal w_steps : std_logic;
 
@@ -466,7 +484,8 @@ architecture blaze of program_top is
     signal s15_th19 : signed(18 downto 0) := (others => '0');
 
     -- S16..S22: the field
-    signal s16_L   : signed(17 downto 0) := (others => '0');     -- log2(r / 512 virtual px), Q12
+    signal s16_L   : signed(17 downto 0) := (others => '0');     -- log2(r / 512 virtual px) - anim / m, Q12
+    signal s16_L0  : signed(17 downto 0) := (others => '0');     -- log2(r / 512 virtual px), Q12 (the spiral)
     signal s16_thk : unsigned(15 downto 0) := (others => '0');   -- theta << nk
     signal s16_lrq : unsigned(9 downto 0) := (others => '0');    -- log2 r, Q6
     signal s17_ph  : signed(22 downto 0) := (others => '0');
@@ -474,9 +493,6 @@ architecture blaze of program_top is
     signal s17_nt  : unsigned(15 downto 0) := (others => '0');   -- Rays * theta, Q16 cycles
     signal s18_v   : unsigned(15 downto 0) := (others => '0');   -- frac(m * L), Q16
     signal s19_x   : signed(17 downto 0) := (others => '0');
-    signal s19_yh  : signed(6 downto 0) := (others => '0');
-    signal s19_yl  : signed(7 downto 0) := (others => '0');
-    signal s19_rise : std_logic := '0';
     signal s19_lrq : unsigned(9 downto 0) := (others => '0');
     signal s20_qh  : signed(24 downto 0) := (others => '0');
     signal s20_ql  : signed(25 downto 0) := (others => '0');
@@ -724,8 +740,8 @@ begin
     --             is 2 counts or more away (pot jitter: a hold, not an ease), then by
     --             1/16 of the gap per field (S7 On; K1 / K2 glide in pixels below) or
     --             to the knob itself (S7 Off: no easing, used this field)
-    --   32 ..     rays, period, skew, twist, centre, the slopes A = Tw / s and
-    --             B = Tw / (1 - s), Tm = Tw * m, and the filter-width logs
+    --   32 ..     rays, period, speed and the ring phase (/ m by the serial divider), twist,
+    --             centre, the slopes A = B = 2 Tw (apex 1/2), Tm = Tw * m, and the filter-width logs
     ------------------------------------------------------------------------
     p_frame : process(clk)
         variable v_ch   : integer range 0 to 7;
@@ -744,8 +760,9 @@ begin
         variable v_g8   : unsigned(6 downto 0);
         variable v_lg   : signed(11 downto 0);
         variable v_mx   : signed(11 downto 0);
-        variable v_r    : unsigned(12 downto 0);
+        variable v_r    : unsigned(9 downto 0);
         variable v_dh   : signed(11 downto 0);
+        variable v_v    : signed(10 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_vsync <= data_in.vsync_n;
@@ -760,16 +777,20 @@ begin
                 sm_n <= sm_n - 1;
             end if;
             if dv_c /= 0 then                                     -- divider: restoring, MSB first
-                v_r := dv_r & dv_n(15);
-                dv_n <= dv_n(14 downto 0) & '0';
-                if v_r >= resize(dv_d, 13) then
-                    dv_r <= resize(v_r - resize(dv_d, 13), 12);
-                    dv_q <= dv_q(11 downto 0) & '1';
+                v_r := dv_r & dv_n(22);
+                dv_n <= dv_n(21 downto 0) & '0';
+                if v_r >= resize(dv_d, 10) then
+                    dv_r <= resize(v_r - resize(dv_d, 10), 9);
+                    dv_q <= dv_q(14 downto 0) & '1';
                 else
-                    dv_r <= v_r(11 downto 0);
-                    dv_q <= dv_q(11 downto 0) & '0';
+                    dv_r <= v_r(8 downto 0);
+                    dv_q <= dv_q(14 downto 0) & '0';
                 end if;
                 dv_c <= dv_c - 1;
+            end if;
+            if s_ssh /= 0 then                                    -- speed: mantissa << octave, 1 bit per clock
+                s_spd <= shift_left(s_spd, 1);
+                s_ssh <= s_ssh - 1;
             end if;
             if lz_x(15) = '0' and lz_n /= 15 then                 -- normaliser: 15 - lz_n = the msb position
                 lz_x <= lz_x(14 downto 0) & '0';
@@ -852,12 +873,11 @@ begin
                             if v_t(14) = '1' then v_tm := (others => '0'); else v_tm := unsigned(v_t(12 downto 0)); end if;
                             s_tw14 <= shift_left(resize(v_tm, 16), 2) + resize(v_tm, 16);
                         when 33 =>
-                            -- SKEW (K5): apex s = 1/8 .. 7/8 (Q12)
-                            s_s12 <= to_unsigned(512, 12) + resize(shift_right(s_gl(3), 3), 12) + resize(shift_right(s_gl(3), 4), 12);
+                            -- SPEED (K5, glided like the other knobs): bipolar about 512
+                            v_v := signed(resize(s_gl(3)(13 downto 4), 11)) - to_signed(512, 11);
+                            s_vneg <= v_v(10);
+                            s_av <= unsigned(resize(abs(v_v), 10));
                         when 34 =>
-                            -- A = (Twist << 6) / s
-                            dv_n <= s_tw14; dv_d <= s_s12;
-                            dv_r <= (others => '0'); dv_q <= (others => '0'); dv_c <= to_unsigned(22, 5);
                             -- centre x = W / 2 + (K1 - 512) * W / 256 (detent +-14 counts)
                             sm_a <= resize(v_k, 28); sm_b <= s_W; sm_acc <= (others => '0'); sm_n <= to_unsigned(12, 4);
                         when 35 =>
@@ -871,6 +891,29 @@ begin
                             s_la <= C_LA(to_integer(s_ri));
                             -- log2 m + log2(1 / ln 2) + 1/4 octave - 8 octaves (the slopes are Q8), Q6
                             s_lc <= signed(resize(s_gl(2)(13 downto 6), 12)) - to_signed(526, 12);
+                        -- SPEED decode (Hypnos): |v| < 24 still; else 2^-12 .. 2^-2 ring per field, exponential
+                        when 36 =>
+                            if s_av < 24 then s_vzero <= '1'; s_u <= (others => '0');
+                            else              s_vzero <= '0'; s_u <= s_av - 24; end if;
+                        when 37 =>
+                            s_ls <= s_u + shift_right(s_u, 2) + shift_right(s_u, 4);      -- Q6 octaves, 0 .. 640
+                        when 38 =>
+                            s_ra <= s_ls(5 downto 0) & "00";
+                        when 41 =>
+                            if s_vzero = '1' then s_spd <= (others => '0');
+                            else                  s_spd <= resize(unsigned(s_rqf(14 downto 6)), 20); end if;   -- 2^-12 .. 2^-11 ring
+                            s_ssh <= s_ls(9 downto 6);
+                        when 56 =>
+                            -- the ring phase: up = outward (the reference radius grows)
+                            if s_vneg = '1' then s_anim <= s_anim - s_spd;
+                            else                 s_anim <= s_anim + s_spd; end if;
+                        when 57 =>
+                            -- anim / m in Q14 octaves = ((anim16 << 7) / m9) >> I
+                            dv_n <= s_anim(19 downto 4) & "0000000";
+                            dv_d <= s_m9;
+                            dv_r <= (others => '0'); dv_q <= (others => '0'); dv_c <= to_unsigned(23, 5);
+                        when 90 =>
+                            s_lref2 <= s_lref + signed(resize(shift_right(dv_q, to_integer(s_gl(2)(13 downto 12))), 20));
                         -- centre: target = W / 2 + product; the glides share one datapath, x at 48..50,
                         -- y at 61..63 (ease, never slower than 1 px / field, land exactly; S7 Off: snap)
                         when 48 | 61 =>
@@ -892,28 +935,22 @@ begin
                             if s_sq(3) = '0' then s_cxs <= v_gc + v_gdl;
                             else                  s_cys <= v_gc + v_gdl; end if;
                         when 58 =>
-                            -- A ; start B = (Twist << 6) / (1 - s) and log2 A
-                            s_Yr <= dv_q;
-                            lz_x <= resize(dv_q, 16); lz_n <= (others => '0');
-                            dv_n <= s_tw14; dv_d <= to_unsigned(0, 12) - s_s12;
-                            dv_r <= (others => '0'); dv_q <= (others => '0'); dv_c <= to_unsigned(22, 5);
-                        when 82 =>
-                            s_Yf <= dv_q;
-                            lz_x <= resize(dv_q, 16); lz_n <= (others => '0');
+                            -- slopes A = Twist / s = B = Twist / (1 - s) = 2 Twist (s = 1/2), Q8; log2 A
+                            s_Yr <= resize(s_tw14(15 downto 5), 13);
+                            lz_x <= resize(s_tw14(15 downto 5), 16); lz_n <= (others => '0');
                         when 102 =>
                             lz_x <= resize(unsigned(sm_acc(26 downto 14)), 16); lz_n <= (others => '0');
                         -- log2 of (the radial gradient * r), 1/4 octave up; LG = the larger of it and the angular one
-                        when 76 | 100 =>
+                        when 76 =>
                             if lz_x(15) = '0' then s_lgz <= v_lg; else s_lgz <= v_lg + s_lc; end if;
                         when 119 =>
                             if lz_x(15) = '0' then s_lgz <= v_lg; else s_lgz <= v_lg - to_signed(462, 12); end if;
                         when 77 => s_LG1 <= v_mx;
-                        when 101 => s_LG0 <= v_mx;
                         when 120 =>
                             -- Checker: both segments are the spiral's
                             if s_chk = '1' then
-                                s_LG1 <= v_mx; s_LG0 <= v_mx;
-                                s_Yr <= unsigned(sm_acc(26 downto 14)); s_Yf <= unsigned(sm_acc(26 downto 14));
+                                s_LG1 <= v_mx;
+                                s_Yr <= unsigned(sm_acc(26 downto 14));
                             end if;
                             -- CAMERA (K6): 0 .. 2 periods at white (Q5); Osc is fed at 1.5 x
                             v_g8 := resize(s_gl(4)(13 downto 8), 7);
@@ -938,8 +975,6 @@ begin
     w_nm <= "00" when s_ri = 15 else s_ri(1 downto 0);
     w_yrh <= signed('0' & s_Yr(12 downto 7));
     w_yrl <= signed('0' & s_Yr(6 downto 0));
-    w_yfh <= signed('0' & s_Yf(12 downto 7));
-    w_yfl <= signed('0' & s_Yf(6 downto 0));
     w_Dr  <= s_s12 & "0000";
     w_steps <= s_shade and not s_fine;
 
@@ -982,7 +1017,7 @@ begin
             s_wa <= s_wa + 1;
             dlh(to_integer(s_wa)) <= "0000000000" & qsr(8) & std_logic_vector(s8_lh);
             dlh_q  <= dlh(to_integer(s_wa - C_XH));
-            dla(to_integer(s_wa)) <= "0000" & std_logic_vector(s16_L) & std_logic_vector(s16_lrq);
+            dla(to_integer(s_wa)) <= "0000" & std_logic_vector(s16_L0) & std_logic_vector(s16_lrq);
             dla_q  <= dla(to_integer(s_wa - C_XA));
             dln(to_integer(s_wa)) <= std_logic_vector(s17_nt);
             dln_q  <= dln(to_integer(s_wa - C_XN));
@@ -1137,8 +1172,10 @@ begin
     begin
         if rising_edge(clk) then
             -- S16: L (Q12) ; theta << nk
-            vl := signed(resize(s15_lr, 20)) - s_lref;
+            vl := signed(resize(s15_lr, 20)) - s_lref2;
             s16_L   <= vl(19 downto 2);
+            vl := signed(resize(s15_lr, 20)) - s_lref;
+            s16_L0  <= vl(19 downto 2);
             s16_thk <= shift_left(s15_th(17 downto 2), to_integer(w_nk));
             s16_lrq <= s15_lr(17 downto 8);
             -- S17: m * L, split on m ; Rays * theta = (4 + nm) * (theta << nk): whole rays, so mod one
@@ -1156,23 +1193,16 @@ begin
                 when "10"   => s18_v <= vp(18 downto 3);
                 when others => s18_v <= vp(17 downto 2);
             end case;
-            -- S19: ring fraction t (Q12) against the apex ; operands of the twist multiply
+            -- S19: ring fraction t (Q12) folded at the apex (1/2) ; the X operand of the twist multiply
             vt := s18_v(15 downto 4);
-            if vt < s_s12 then
-                s19_rise <= '1';
-                vx := resize(vt, 13);
-                s19_yh <= w_yrh; s19_yl <= w_yrl;
-            else
-                s19_rise <= '0';
-                vx := to_unsigned(4096, 13) - resize(vt, 13);
-                s19_yh <= w_yfh; s19_yl <= w_yfl;
-            end if;
+            if vt < s_s12 then vx := resize(vt, 13);
+            else               vx := to_unsigned(4096, 13) - resize(vt, 13); end if;
             if s_chk = '1' then s19_x <= signed(dla_q(27 downto 10));
             else                s19_x <= signed(resize(vx, 18)); end if;
             s19_lrq <= unsigned(dla_q(9 downto 0));
             -- S20: X * Y, split on Y
-            s20_qh <= bmul(s19_x, s19_yh);
-            s20_ql <= bmul(s19_x, s19_yl);
+            s20_qh <= bmul(s19_x, w_yrh);
+            s20_ql <= bmul(s19_x, w_yrl);
             -- S21: Q20 cycles -> Q16
             vz := shift_left(resize(unsigned(s20_qh(12 downto 0)), 20), 7) + unsigned(s20_ql(19 downto 0));
             s21_z <= vz(19 downto 4);
@@ -1200,8 +1230,7 @@ begin
     begin
         if rising_edge(clk) then
             -- S20
-            if s19_rise = '1' then s20_lg <= s_LG1 - signed(resize(s19_lrq, 12));
-            else                   s20_lg <= s_LG0 - signed(resize(s19_lrq, 12)); end if;
+            s20_lg <= s_LG1 - signed(resize(s19_lrq, 12));
             -- S21
             vlg := s20_lg;
             if vlg > 255 then vlg := to_signed(255, 12); end if;
@@ -1264,7 +1293,7 @@ begin
 
     ------------------------------------------------------------------------
     -- S28..S31: unit B, the rings of the Checker.  Signed distance (in cycles) to
-    -- the nearer edge of the band frac(v) in [0, Skew), times 1 / w = a one-pixel
+    -- the nearer edge of the band frac(v) in [0, 1/2), times 1 / w = a one-pixel
     -- ramp, 17 levels.  Its w is unit A's times a per-field ratio (both gradients
     -- fall as 1 / r), in half octaves rounded to the sharper whole octave.  Rings
     -- finer than about 3 px: the flat duty grey.
@@ -1283,10 +1312,10 @@ begin
             if vh < 0 then s28b_h <= (others => '0');
             elsif vh > 24 then s28b_h <= to_unsigned(24, 5);
             else s28b_h <= unsigned(vh(4 downto 0)); end if;
-            -- S29: offset from the band's middle (Skew / 2), wrapping
+            -- S29: offset from the band's middle (1/4 ring), wrapping
             s29b_e <= signed(unsigned(dlr_q) - resize(w_Dr(15 downto 1), 16));
             s29b_h <= s28b_h; s29b_flat <= s28b_flat;
-            -- S30: distance inside the band = Skew / 2 - |offset|
+            -- S30: distance inside the band = 1/4 - |offset|
             if s29b_e(15) = '1' then ve := unsigned(s29b_e); else ve := unsigned(not s29b_e) + 1; end if;
             s30b_d <= signed(resize(w_Dr(15 downto 1), 17)) + resize(signed(ve), 17);
             vr := resize(s29b_h, 6) + 1;                                -- round the half octave to the sharper side

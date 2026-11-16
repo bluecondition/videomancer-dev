@@ -1,19 +1,20 @@
-# Blaze - Hardline set (v0.1.0, 2026-11-15).  After Bridget Riley's "Blaze 1" (1962): a black-and-white
+# Blaze - Hardline set (v0.2.0, 2026-11-16).  After Bridget Riley's "Blaze 1" (1962): a black-and-white
 # sunburst whose rays zigzag from ring to ring, self-similar to the centre.  The slider is the Twist:
-# straight rays at its centre, a deeper zigzag either way.  The camera never shows; its luma bends the rays.
+# straight rays at its centre, a deeper zigzag either way.  K5 Speed streams the rings out of (or into) the
+# centre (v0.2.0; it replaced Skew).  The camera never shows; its luma bends the rays.
 # See blaze.vhd and SUMMARY.md.
 
 [program]
 processing_delay_clks = 40
 program_id = "com.czartroniks.blaze"
 program_name = "Blaze"
-program_version = "0.1.0"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Illusion", "Optics", "Pattern"]
 program_type = "processing"
-description = "Riley's Blaze: a black-and-white sunburst whose rays zigzag ring by ring. Twist it; video bends the rays."
+description = "Riley's Blaze: a black-and-white sunburst whose zigzag rings stream from the centre. Twist it; video bends the rays."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -55,11 +56,11 @@ initial_value_label = "24"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Skew"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 844
 display_float_digits = 0
 suffix_label = "%"
 
@@ -122,16 +123,17 @@ rotary_potentiometer_4 = 800
 linear_potentiometer_12 = 512
 
 [[preset]]
-name = "Saw Blades"
+name = "Warp Out"
 rotary_potentiometer_3 = 350
 rotary_potentiometer_4 = 736
-rotary_potentiometer_5 = 0
+rotary_potentiometer_5 = 1000
 linear_potentiometer_12 = 180
 
 [[preset]]
 name = "Spiral Checker"
 rotary_potentiometer_3 = 450
 rotary_potentiometer_4 = 544
+rotary_potentiometer_5 = 230
 toggle_switch_8 = 1
 linear_potentiometer_12 = 700
 
@@ -139,7 +141,7 @@ linear_potentiometer_12 = 700
 name = "Paper Pleats"
 rotary_potentiometer_3 = 380
 rotary_potentiometer_4 = 608
-rotary_potentiometer_5 = 380
+rotary_potentiometer_5 = 640
 toggle_switch_9 = 1
 toggle_switch_10 = 1
 linear_potentiometer_12 = 250

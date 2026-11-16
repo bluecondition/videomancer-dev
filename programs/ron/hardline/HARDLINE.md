@@ -21,9 +21,10 @@ So a Hardline program is:
 1. **One geometric idea**, filling the screen, with no layers, overlays or textures on top of it.
 2. **Black and white.** Chroma is a constant 512 on every pixel. Grey appears only as edge anti-aliasing, as a
    flat mid-grey where detail is finer than a pixel, and in the Shade option on some programs (below).
-3. **Performed, not animated.** A picture with no hands on it and no camera is still. Every movement comes
-   from a knob, the slider, a modulator or the camera. Where a program wants travel, it is a bipolar control
-   with a dead centre, as Hypnos Speed is.
+3. **Motion is allowed.** Hypnos travels by itself on a bipolar Speed slider (centre = stopped). The v0.1.0
+   builds (2026-11-15) all came out still because of a wrong rule in this brief ("nothing moves by itself",
+   generalised from Cascade's own no-animation rule, which is Cascade's alone). Which programs get self-motion,
+   and on which control, is being decided with Ron (2026-11-16).
 4. **Razor edges at any scale**: every edge anti-aliased over one pixel, nothing stair-stepped, no sparkle.
 
 ## The control scheme (same on all ten)
