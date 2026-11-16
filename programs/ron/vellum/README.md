@@ -25,7 +25,7 @@ S7 Glide, S9 Tone (Grey / Ink), S10 Weight (Bold / Fine), S11 Source (Video / Os
 | 7 | [cassini](cassini/) | Cassini ovals round two points: two ovals, figure eight, peanut, oval, circle (Confocal: ellipses and hyperbolas) | Spread: one point to two far foci | v0.1.0 built 2026-11-16, router2 seed 1 all configs, HD 78.5-85.3 MHz, 81 % LC, 20 EBR; model = RTL; not flashed |
 | 8 | phyllo | Sunflower: dots on exponential spirals, growing outward | Angle: the divergence angle, spokes to golden spiral | launched 2026-11-16 |
 | 9 | nautilus | Whirling golden rectangles with quarter arcs, an endless zoom into the eye | Ratio: root-2 whirl, golden, double square | launched 2026-11-16 |
-| 10 | aqueduct | Tiers of arches at three depths, flat greys sliding at parallax speeds | Depth: one flat tier to deep perspective | launched 2026-11-16 |
+| 10 | [aqueduct](aqueduct/) | Tiers of arches at three depths, flat greys sliding at parallax speeds | Depth: one flat tier to deep perspective | v0.1.0 built 2026-11-16, router1 seed 1 all configs, HD 87.8-92.3 MHz, 89 % LC, 19 EBR; model = RTL; not flashed |
 
 Each program's K4, S8, camera target and P12 are in its spec (`.vellum_work/prompts/<name>.txt`) until it is
 built, then in its `SUMMARY.md`.
