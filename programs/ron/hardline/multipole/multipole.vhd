@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- multipole.vhd  (Hardline, v0.1.0) -- field lines of a magnetic multipole / a conformal checkerboard
+-- multipole.vhd  (Hardline, v0.2.0) -- field lines of a magnetic multipole / a conformal checkerboard
 --
 -- Art reference: field-line drawings of magnetic multipoles and conformal-map checkerboards (the
 -- stripes of Re z^n and Im z^n).  One pole, black and white, played by hand.
@@ -32,18 +32,27 @@
 --   K6  Camera   how far the box-filtered luma bends the linework: it is added to L (a local zoom
 --                about the pole, and exactly a phase shift in Log space), 1.28 octaves at white at
 --                100 %; 0 = the clean figure
---   S7  Glide    On: X, Y, Period, Turn, Camera and Flow ease 1/16 per field, never slower than half
---                a knob count (about 1 px of pole travel), landing exactly / Off: no easing at all
+--   S7  Glide    On: X, Y, Period, Turn, Camera and Speed ease 1/16 per field, never slower than half
+--                a knob count (about 1 px of pole travel), landing exactly / Off: no easing at all.
+--                Glide eases the SPEED, never the travelling phase: nothing stops the motion but speed 0
 --   S8  Weave    Lines (Re only) / Checker
 --   S9  Space    Even / Log
 --   S10 Weight   Bold (equal bands) / Fine (1/6 lines on the half-integer levels)
 --   S11 Source   Video / Osc (a slow triangle lattice in the camera's place, at 1.5 x its level)
---   P12 FLOW     bipolar, detent at the centre = rest: the Re phase travels +-4 cycles (the lines pump
---                out of or into the pole) and the band duty swells with it (Bold 0.25 .. 0.75)
+--   P12 SPEED    bipolar (Hypnos v1.1.0): centre (+-24 counts) = still, up = the lines stream out of
+--                the pole, down = into it; exponential, 2^-12 .. 2^-2 cycle per field.  A per-field
+--                accumulator (one cycle = 2^20, wraps without a seam) moves the Re phase.  Bold: added to
+--                the signed PHI, so the lines flow through the pole (out of the cos >= 0 lobes, into the
+--                others) with every edge anti-aliased; Fine: added to |PHI|, every lobe streams outward;
+--                Log: both families shift log2|PHI| together, a zoom flow out of the pole.  n > 0 is
+--                reversed so up is outward
 --
 -- Chassis: timing / generated avid / log-polar engine / box-filter AA from hypnos.vhd v1.1.0
 -- (hardware-validated); the source field (lattice, 32-px box, vertical IIR) from kinetic riley.
 -- Luma only: U = V = 512 on every pixel.  One latency (48) in every mode.  25 EBR.
+--
+-- v0.2.0 (2026-11-16): P12 Flow (a static offset + duty swell) became Speed (Ron: the set may move by
+-- itself, as Hypnos does); the band duty is now constant.
 --
 -- Stage numbering: stage N = N registers after s_dx.  o_y is stage 47.
 
@@ -118,7 +127,13 @@ architecture multipole of program_top is
     signal s_turn   : unsigned(17 downto 0) := (others => '0');
     signal s_gain   : unsigned(7 downto 0) := to_unsigned(191, 8);
     signal s_D16    : unsigned(15 downto 0) := to_unsigned(32768, 16); -- band duty, Q16
-    signal s_offre, s_offim : unsigned(15 downto 0) := (others => '0');
+    signal s_offre, s_offrn, s_offim : unsigned(15 downto 0) := (others => '0');   -- Re (cos >= 0 / < 0), Im
+    -- SPEED: decode, serial shifter, the Re phase accumulator (Q20 cycles)
+    signal s_vneg, s_vzero : std_logic := '0';
+    signal s_av, s_u, s_ls : unsigned(9 downto 0) := (others => '0');
+    signal s_spd    : unsigned(19 downto 0) := (others => '0');
+    signal s_ssh    : unsigned(3 downto 0) := (others => '0');
+    signal s_anim   : unsigned(19 downto 0) := (others => '0');
     signal s_na     : unsigned(1 downto 0) := "00";                    -- |n| - 1
     signal s_nneg   : std_logic := '1';
     signal s_cA     : signed(15 downto 0) := to_signed(16384, 16);     -- log2(2 / |n|), Q14
@@ -312,6 +327,7 @@ architecture multipole of program_top is
     signal s32_y1  : t_u19x2 := (others => (others => '0'));
     signal s32_f   : t_u2x2 := (others => (others => '0'));
     signal s31_sg, s32_sg : std_logic_vector(1 downto 0) := "00";
+    signal s33_ng  : std_logic := '0';
     signal s33_p, s34_phi : t_u16x2 := (others => (others => '0'));
 
     -- S27..S34: the anti-aliasing width
@@ -338,6 +354,16 @@ architecture multipole of program_top is
     signal s42_c   : unsigned(8 downto 0) := (others => '0');
     signal s43_y, s44_y, s45_y, s45_f, s46_y : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal o_y     : unsigned(9 downto 0) := to_unsigned(64, 10);
+
+    -- a + b or a - b on ONE carry chain (riley; the low column makes the carry-in)
+    function f_addsub(a, b : unsigned; sub : std_logic) return unsigned is
+        variable v_a, v_b, v_r : unsigned(a'length + 1 downto 0);
+    begin
+        v_a := '0' & a & '1';
+        if sub = '1' then v_b := '0' & (not b) & '1'; else v_b := '0' & b & '0'; end if;
+        v_r := v_a + v_b;
+        return v_r(a'length downto 1);
+    end function;
 
     -- Exact signed product a * m, radix-4 Booth on m (hypnos): ceil(len(m)/2) partials of
     -- {0, +-a, +-2a}, negatives as one's complement with the +1s gathered in one correction word.
@@ -476,6 +502,9 @@ begin
         variable v_off  : signed(5 downto 0);
         variable v_g3k  : unsigned(11 downto 0);
         variable v_q5   : signed(4 downto 0);
+        variable v_u11  : unsigned(10 downto 0);
+        variable v_os   : unsigned(15 downto 0);
+        variable v_m7   : unsigned(6 downto 0);
         variable v_u27  : unsigned(26 downto 0);
     begin
         if rising_edge(clk) then
@@ -484,6 +513,22 @@ begin
             s_vs_d       <= s_vs_pulse;
             sm_go <= '0';
             if data_in.avid = '1' then s_saw_avid <= '1'; end if;
+
+            -- SPEED mantissa << (octave + 2), one bit per clock (Hypnos); loaded at sequencer state 39
+            -- (a negative speed loads the one's complement and shifts in ones: -(m << k) - 1)
+            if s_ssh /= 0 then
+                s_spd <= s_spd(18 downto 0) & s_vneg;
+                s_ssh <= s_ssh - 1;
+            end if;
+            if s_seq = 39 and data_in.avid = '0' then
+                if s_vzero = '1' then s_spd <= (others => '0'); s_ssh <= (others => '0');
+                else
+                    v_m7 := '1' & s_ls(5 downto 0);                  -- 64 + f
+                    if s_vneg = '1' then v_m7 := not v_m7; end if;
+                    s_spd <= (19 downto 9 => s_vneg) & v_m7 & s_vneg & s_vneg;   -- (64 + f) << 2, signed
+                    s_ssh <= s_ls(9 downto 6);
+                end if;
+            end if;
 
             if data_in.vsync_n = '0' and s_prev_vsync = '1' and s_saw_avid = '1' then
                 s_vs_pulse <= '1';
@@ -526,7 +571,7 @@ begin
                             if s_init = '1' or (v_e /= 0 and v_e /= 1 and v_e /= -1) then s_rh <= v_raw; else s_rh <= r_h(0); end if;
                             s_rp <= "01";
                         when "01" =>
-                            -- X, Y and Flow: a detent at the centre
+                            -- X, Y and Speed: a detent at the centre
                             if (s_ri(2 downto 1) = "00" or s_ri = 5) and s_rh > 512 - C_DB and s_rh < 512 + C_DB then v_t := to_unsigned(32768, 16);
                             else v_t := s_rh & "000000"; end if;
                             s_rt <= v_t;
@@ -549,6 +594,8 @@ begin
                     end case;
                 end if;
 
+                -- state 19: offim + a (n < 0) / - a (n > 0) ; state 18: the opposite (Fine), the same (Bold)
+                v_os := f_addsub(s_offim, s_anim(19 downto 4), s_nneg xor (s_seq(0) or not s_fine));
                 case to_integer(s_seq) is
                     -- ORDER: n = zone - 4 (0 .. 3) or zone - 3 (4 .. 7)
                     when 95 =>
@@ -614,19 +661,47 @@ begin
                         s_qh  <= s_hqn(0);
                         v_q5 := to_signed(3, 5) - s_hqn(5 downto 1);
                         s_qsh <= unsigned(v_q5(2 downto 0));
-                    -- TURN, CAMERA, FLOW (P12 has a detent at the centre; +-4 cycles of travel = the knob
-                    -- value << 3 as a 16-bit cycle fraction) and the duty swelling with it
+                    -- TURN, CAMERA ; the band duty (constant: Bold 1/2, Fine 1/6 on the half-integer levels)
                     when 51 =>
                         s_turn <= (not r_g(3)(15)) & r_g(3)(14 downto 0) & "00";
                         v_g3k := shift_left(resize(r_g(4)(15 downto 6), 12), 1) + resize(r_g(4)(15 downto 6), 12);
                         s_gain <= v_g3k(11 downto 4);
-                    when 50 =>
-                        if s_fine = '1' then s_D16 <= to_unsigned(6827, 16) + resize(r_g(5)(15 downto 3), 16);
-                        else                 s_D16 <= to_unsigned(16384, 16) + resize(r_g(5)(15 downto 1), 16); end if;
-                    when 49 =>
-                        -- Fine: the 1/6 line sits centred on the half-integer levels
-                        if s_fine = '1' then s_offim <= '1' & s_D16(15 downto 1); else s_offim <= (others => '0'); end if;
-                    when 48 => s_offre <= (r_g(5)(12 downto 0) & "000") + s_offim;
+                        if s_fine = '1' then s_D16 <= to_unsigned(10923, 16); s_offim <= to_unsigned(38229, 16);
+                        else                 s_D16 <= to_unsigned(32768, 16); s_offim <= (others => '0'); end if;
+
+                    -- SPEED (P12, Hypnos v1.1.0 shape): bipolar, |v| < 24 counts = still; exponential,
+                    -- 2^-12 .. 2^-2 cycle per field (piecewise-linear mantissa 1 + f/64, octave = ls / 64);
+                    -- the glided P12 (the knob ring) is the speed, never the phase
+                    when 42 =>
+                        -- |P12 - 512| as a one's complement (0 and 1023 both give 511)
+                        s_vneg <= not r_g(5)(15);
+                        if r_g(5)(15) = '1' then s_av <= '0' & r_g(5)(14 downto 6);
+                        else                     s_av <= '0' & not r_g(5)(14 downto 6); end if;
+                    when 41 =>
+                        -- u = |v| - 24; the borrow is the dead zone
+                        v_u11 := resize(s_av, 11) - 24;
+                        s_vzero <= v_u11(10);
+                        s_u <= v_u11(9 downto 0);
+                    when 40 =>
+                        s_ls <= s_u + shift_right(s_u, 2) + shift_right(s_u, 4);
+                    -- (39: the shifter loads, above; it needs at most 10 clocks)
+                    -- the Re phase accumulator: one cycle = 2^20, wraps forever without a seam (a negative
+                    -- step is the shifter's one's complement: 2^-20 cycle short, invisible)
+                    when 20 =>
+                        s_anim <= s_anim + s_spd;
+                    -- stream offsets (one shared adder; n > 0 reverses the travel so up = outward):
+                    --  Bold: one offset for both lobes, added to the SIGNED PHI.  The phase stays continuous
+                    --    through the nodal lines (every edge anti-aliased), so the lines flow THROUGH the
+                    --    pole: out of the cos >= 0 lobes, into the others.  (Adding it to |PHI| instead would
+                    --    stream every lobe outward, but the colour alternation then puts an un-anti-aliased
+                    --    seam, crawling with slivers, on every nodal line.)
+                    --  Fine: added to |PHI| (before the cosine's sign): every lobe streams out of the pole;
+                    --    the lines sit on the half-integer levels, so the mirror image is seamless.
+                    --  Log: no sign; both families take the same shift of log2|PHI|, a seamless zoom flow
+                    --    out of the pole (the Im offset follows at state 17).
+                    when 19 => s_offre <= v_os;
+                    when 18 => s_offrn <= v_os;
+                    when 17 => if s_log = '1' then s_offim <= s_offre; end if;
                     when 44 => s_init <= '0';
                     when others => null;
                 end case;
@@ -1066,8 +1141,9 @@ begin
             -- signs of the cosine (0) and sine (1): stage 30 from the delay line
             s31_sg <= dlh_q(26) & dlh_q(25);
             s32_sg <= s31_sg;
-            -- S34: + flow / line centring
-            s34_phi(0) <= s_offre + s33_p(0);
+            s33_ng <= s32_sg(0) and not s_log;
+            -- S34: + the stream offset / line centring
+            if s33_ng = '1' then s34_phi(0) <= s_offrn + s33_p(0); else s34_phi(0) <= s_offre + s33_p(0); end if;
             s34_phi(1) <= s_offim + s33_p(1);
         end if;
     end process p_phase;

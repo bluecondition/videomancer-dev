@@ -1,4 +1,4 @@
-# Multipole - Hardline (v0.1.0, 2026-11-15).  The field lines of a magnetic multipole and its conformal
+# Multipole - Hardline (v0.2.0, 2026-11-16; v0.1.0 2026-11-15).  The field lines of a magnetic multipole and its conformal
 # checkerboard: stripes of Re z^n and Im z^n about one pole, n = -4 .. 4, crisp black and white.
 # See multipole.vhd, multipole.py and SUMMARY.md.
 
@@ -6,13 +6,13 @@
 processing_delay_clks = 48
 program_id = "com.czartroniks.multipole"
 program_name = "Multipole"
-program_version = "0.1.0"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Illusion", "Optics", "Pattern"]
 program_type = "processing"
-description = "Multipole field lines and conformal checkerboards in black and white; video bends the lines, Flow pumps them."
+description = "Multipole field lines and conformal checkerboards in black and white; they stream from the pole, video bends them."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -109,11 +109,11 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Flow"
+name_label = "Speed"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 860
 display_min_value = -100
 display_max_value = 100
 suffix_label = "%"
@@ -131,7 +131,7 @@ toggle_switch_8 = 1
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 512
+linear_potentiometer_12 = 860
 
 [[preset]]
 name = "Field Lines"
@@ -146,7 +146,7 @@ toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 512
+linear_potentiometer_12 = 820
 
 [[preset]]
 name = "Quadrupole Net"
@@ -161,7 +161,7 @@ toggle_switch_8 = 1
 toggle_switch_9 = 0
 toggle_switch_10 = 1
 toggle_switch_11 = 0
-linear_potentiometer_12 = 512
+linear_potentiometer_12 = 300
 
 [[preset]]
 name = "Hyperbolas"
@@ -176,7 +176,7 @@ toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 512
+linear_potentiometer_12 = 760
 
 [[preset]]
 name = "Log Flower"
@@ -191,7 +191,7 @@ toggle_switch_8 = 0
 toggle_switch_9 = 1
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 512
+linear_potentiometer_12 = 900
 
 [[preset]]
 name = "Octupole Osc"
@@ -206,4 +206,4 @@ toggle_switch_8 = 1
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 1
-linear_potentiometer_12 = 512
+linear_potentiometer_12 = 200

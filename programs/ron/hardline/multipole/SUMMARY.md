@@ -1,6 +1,6 @@
 # MULTIPOLE (Hardline)
 
-**v0.1.0 built 2026-11-15, not flashed.** All six configs build on router1, seed 1; HD timing closed; 6,982 .. 7,001 LC (91 %), 25 EBR.
+**v0.2.0 built 2026-11-16, not flashed** (v0.1.0 built 2026-11-15, not flashed). All six configs build on router1, seed 1; HD timing closed; 7,133 .. 7,151 LC (93 %), 25 EBR.
 
 ## What it draws
 
@@ -20,7 +20,8 @@ cross at right angles everywhere.
 - Where the lines get finer than about 2 px (the pole for n < 0, the far field for n > 1, the nodal
   seams in Log space) the picture fades to flat grey; it never aliases.
 - The default frame is the dipole checkerboard, pole a little left of and below the centre, turned
-  -15 degrees.
+  -15 degrees, its cells streaming gently out of the pole (Speed 68 %).
+- v0.2.0 (Ron, 2026-11-16: the set may move by itself, as Hypnos does): P12 Flow became Speed.
 
 ## Controls
 
@@ -32,12 +33,12 @@ cross at right angles everywhere.
 | K4 | Order | n = -4, -3, -2, -1, 1, 2, 3, 4: eight steps, hysteresis with the two end exceptions. Default -1 |
 | K5 | Turn | rotates the figure; the knob spans exactly one lobe period, so 0 and 1023 are the same picture and a sawtooth modulator spins it without a seam. Default 470 (-15 degrees) |
 | K6 | Camera | how far the camera bends the linework, 0 .. 100 %. Default 100 % |
-| S7 | Glide | On: X, Y, Period, Turn, Camera and Flow ease 1/16 of the gap per field, never slower than half a knob count (about 1 px of pole travel) per field, landing exactly. Off: zero easing, the value latched at the field start is used that field (the accumulators still track). Default On |
+| S7 | Glide | On: X, Y, Period, Turn, Camera and Speed ease 1/16 of the gap per field, never slower than half a knob count (about 1 px of pole travel) per field, landing exactly. Off: zero easing, the value latched at the field start is used that field (the accumulators still track). Glide eases the speed, never the travelling phase, and never stops it. Default On |
 | S8 | Weave | Lines / Checker. Default Checker |
 | S9 | Space | Even / Log. Default Even |
 | S10 | Weight | Bold: equal bands, their edges on the nodal lines. Fine: 1/6-duty lines on the half-integer levels (open black ground); with Checker the two families are OR-ed into a net of field lines and equipotentials. Fine lines never get thinner than about 2 px: they dissolve to grey first. Default Bold |
 | S11 | Source | Video / Osc. Default Video |
-| P12 | Flow | bipolar, detent at the centre = rest. The Re phase travels +-4 cycles (the lines pump out of or into the pole under the hand) and the band duty swells with it: 0.25 at the bottom (thin white cells), 0.5 at rest, 0.75 at the top (fat white cells). Fine: 0.10 .. 0.23 |
+| P12 | Speed | bipolar (Hypnos v1.1.0 shape), centre +-24 counts = still. Up = outward, down = inward, for every order (n > 0 is reversed inside). Bold: the Re lines flow through the pole, out of the cos >= 0 lobes and into the others (the dipole's field flowing); in Checker the cells ride that flow. Fine: every lobe streams out of the pole, the field lines and equipotentials born at the pole and swallowed at the nodal lines. Log: both families shift log2\|PHI\| together, a zoom flow in which the nested lobes pour out of the pole like Hypnos rings. Exponential, 2^-12 cycle per field (about one band period a minute at 60 Hz) to 0.246 cycle per field (15 band periods a second) at either end; 0 and 1023 are both full speed. Display -100 .. 100 %. Default 860 (68 %, 0.026 cycle per field: 1.5 band periods a second at 60 Hz, 0.8 at 1080p30) |
 
 Every knob has a +-1-count hold against pot jitter (latched unconditionally on the first field).
 
@@ -52,7 +53,7 @@ K6 = 0 gives exactly the clean figure. The nodal lines and the flat far field do
 skeleton of the figure survives a bold bend.
 
 Osc substitutes the shell's slow triangle lattice (640 x 540 px, drifting diagonally) at the same
-point at 1.5 x the camera level (up to 1.9 octaves). It is the only thing that moves by itself.
+point at 1.5 x the camera level (up to 1.9 octaves). The camera bends the streaming lines too.
 
 ## Engine
 
@@ -62,14 +63,17 @@ multiplier: nine small table-interpolation products (the largest 11 x 8) and one
 
 - Per field (vblank sequencer, started by the vsync edge after active video): the six knobs go
   through one hold + glide datapath (two rotating rings); the pole position by a serial multiplier;
-  log2 R0, the Log step, Turn, the duty, the Flow offsets; the K6 gain table is refilled.
+  log2 R0, the Log step, Turn, the duty; the Speed decode (|v| - 24, x 1.3125, mantissa 1 + f/64
+  shifted serially by the octave, one bit per clock, as Hypnos), the Re phase accumulator (Q20, one
+  cycle = 2^20, wraps without a seam) and the two Re stream offsets (cos >= 0 / < 0); the K6 gain
+  table is refilled.
 - Per pixel, 47 stages, latency 48 clocks in every mode:
   1-15 hi/lo = max/min(|dx|,|dy|), two integer logs, u = log2(hi/lo) -> log2 r and theta (tables);
   16-25 a = n theta + turn (gated shift-adds), octant fold, log2|cos a| and log2|sin a| (the small
   one through a third integer log so the nodal lines stay exact), L0 = log2(2/|n|) + n (log2 r -
   log2 R0) + bend;
   26-34 two phase chains (Re, Im): Even 2^L by an exp2 mantissa table and one barrel shift, Log
-  (2 or 3) L shifted; the sign of the cosine / sine; + Flow;
+  (2 or 3) L shifted; the sign of the cosine / sine; + the stream offset picked by that sign;
   27-34 one filter width for both chains from the analytic gradient (Even L0 + log2|n| - log2 r;
   Log log2(q / ln 2) - log2 r - log2 of the smaller of |cos|, |sin|);
   35-40 Hypnos's box filter of the band square wave per chain; 41-42 the weave in 17 coverage
@@ -80,19 +84,20 @@ multiplier: nine small table-interpolation products (the largest 11 x 8) and one
 
 ## Status
 
-- Router: router1 (`NEXTPNR_ROUTER="--router router1"`, as Hypnos), all six configs on seed 1. router2 was
-  not tried.
-- Post-route Fmax: HD Analog 86.34, HD HDMI 78.05, HD Dual 76.30 MHz (Fmin 74.25); SD Analog 84.75,
-  SD HDMI 83.93, SD Dual 87.59 MHz (Fmin 27). HD Dual has 2 MHz of margin.
-- 6,982 .. 7,001 / 7,680 LC (91 %), 25 / 32 EBR. Six bitstreams pass iceunpack. No
-  `emulate_transparency` in the yosys log (every RAM carries `no_rw_check`); `dupin.py`: no
-  duplicate-input cells.
-- vmprog: `out/rev_b/ron/hardline/multipole.vmprog` (built 2026-11-16 00:02 from these sources).
+- v0.2.0 (2026-11-16 02:02): router1 (`NEXTPNR_ROUTER="--router router1"`), all six configs on seed 1.
+  Post-route Fmax: HD Analog 90.65, HD HDMI 83.79, HD Dual 77.30 MHz (Fmin 74.25); SD Analog 90.28,
+  SD HDMI 84.63, SD Dual 71.95 MHz (Fmin 27). 7,133 .. 7,151 / 7,680 LC (93 %, about 50 over the
+  ~7,100 target), 25 / 32 EBR. (An intermediate build with every lobe streaming outward in Bold too
+  routed at 81 .. 86 MHz HD; it was replaced for the nodal-line seam, see Cut / deviations.) Six bitstreams pass iceunpack; no
+  `emulate_transparency`; `dupin.py`: no duplicate-input cells.
+- v0.1.0 (2026-11-16 00:02): router1, seed 1 on all six; HD Analog 86.34, HD HDMI 78.05, HD Dual
+  76.30 MHz; 6,982 .. 7,001 LC.
+- vmprog: `out/rev_b/ron/hardline/multipole.vmprog` (v0.2.0, built from these sources).
 
 Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh hardline multipole`
 
 Verification (GHDL image tester against the integer model `.hardline_work/rb_multipole/imodel.py`,
-Glide off): 0 differing pixels in every frame compared (the capture sits 4 columns right of the model: the
+Glide off unless stated): 0 differing pixels in every frame compared (the capture sits 4 columns right of the model: the
 generated avid).
 - 720p decimation 1 (1280 x 720), default frame, black input: 0 of 918,720.
 - 720p decimation 1, Source Osc, K6 100 %: 0. 720p decimation 1, bear.png as the camera, K6 100 %: 0.
@@ -101,6 +106,13 @@ generated avid).
 - 320 x 180 (720p decimation 4): Log checker, Log + Fine + Lines at n = 3, n = 4 Fine net with Flow
   and Period moved, n = -3 Lines with Turn / Period / Flow moved, n = 2 Log Fine with the pole far
   off-centre, Glide on with knobs off their defaults: 0 each.
+- v0.2.0: Speed at the centre, 720p decimation 1: 0 of 918,720 against the model and 0 differing
+  samples against the v0.1.0 RTL frame. Motion at 640 x 360 (motion.png): Bold Checker at Speed
+  +95 % and -95 %, Fine net at +95 %, frames after 2 and 3 fields, each 0 against the model with
+  exactly 2 and 3 fields of travel; Log Checker at +95 %: 0. Measured on the RTL frames, Bold +95 %
+  moves the right-hand lobe out of the pole and the left-hand lobe into it, -95 % the reverse, and
+  Fine moves every lobe outward. Glide on at the power-up defaults (Order -1, Speed 68 %): 0, the
+  speed snapping on the first field and then streaming.
 - Not simulated: 1080p / 1080i rasters, a glide in motion (the tester's knobs are static; the first
   field snaps), knob changes mid-run.
 
@@ -112,8 +124,21 @@ generated avid).
 - The camera adds to log2|PHI| (a zoom about the pole), not to the phase. A phase add posterises
   the flat far field into blobs that are the camera picture; the log add leaves flat areas flat
   and is a phase add in Log space.
-- Flow also swells the band duty. A phase offset of a whole number of cycles returns the same
-  picture, so without the swell the slider's ends would look like its centre.
+- v0.2.0: P12 Flow (a static +-4-cycle offset that also swelled the band duty) is now Speed. The
+  duty swell was dropped, not tied to |speed|: the motion carries the slider's ends, and a duty
+  that changes with speed would change the picture's weight whenever the hand moves. The band duty
+  is constant (Bold 1/2, Fine 1/6), so a still frame at Speed 0 equals the v0.1.0 frame at Flow 0.
+- Speed glides through the shared knob ring at 1/16 per field (Hypnos eases speed at 1/8), and
+  its exponential mantissa is piecewise linear (1 + f/64 per octave, under 6 % off a true 2^x).
+- "Up = lines stream out of the pole" holds in Fine and Log, not in Bold. In Bold the travel is
+  added to the signed PHI, so half the lobes stream out of the pole and half into it (a flow through
+  the pole). Adding it to |PHI| in Bold, so every lobe streams outward, was built and simulated
+  first. The lobe colour alternation then puts a seam on every nodal line: mirrored slivers of
+  opposite colour meet there with no anti-aliasing, a crawling dotted line. Fine has no alternation
+  (its lines sit on the half-integer levels), so its mirror image is seamless. Log has no sign at
+  all.
+- In Even space only the Re family travels; in Checker the cells slide along the static Im lines.
+  In Log space both families move (a pure zoom flow).
 - Log density is stepped in half octaves (mantissa 1 or 1.5), not continuous: two 22 x 9
   multipliers cost about 1,080 LUT. K3 in Log space therefore steps.
 - Log space uses one filter width for both families (the narrower one); with Fine + Checker a
