@@ -1,0 +1,148 @@
+# Decade - Vellum (v0.1.0, 2026-11-16).  Keuffel & Esser log-log graph paper: decades converging on an origin,
+# each ruled at log10(n), with a plotted family of power laws (or exponentials on semi-log paper) over it.
+# The drift is an endless zoom into the origin; the camera bends the paper and is plotted as data.
+# See decade.vhd, decade.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 40
+program_id = "com.czartroniks.decade"
+program_name = "Decade"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Grid", "Curve", "Print"]
+program_type = "processing"
+description = "Log-log graph paper zooming into its origin, ruled at log10(n), with a plotted family of power-law curves."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 689
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Lines"
+value_labels = ["Decades", "1-2-5", "1..9", "Halves"]
+initial_value_label = "1..9"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 670
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Paper"
+value_labels = ["Log-log", "Semi-log"]
+initial_value_label = "Log-log"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Tone"
+value_labels = ["Grey", "Ink"]
+initial_value_label = "Grey"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Plot"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 460
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Log-log"
+
+[[preset]]
+name = "Growth"
+toggle_switch_8 = 1
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Log Cross"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_4 = 300
+linear_potentiometer_12 = 330
+
+[[preset]]
+name = "Blueprint"
+rotary_potentiometer_4 = 1023
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Rays"
+rotary_potentiometer_3 = 560
+rotary_potentiometer_4 = 300
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Steep"
+rotary_potentiometer_3 = 860
+rotary_potentiometer_5 = 720
+linear_potentiometer_12 = 1023
