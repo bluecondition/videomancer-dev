@@ -17,7 +17,7 @@ S7 Glide, S9 Tone (Grey / Ink), S10 Weight (Bold / Fine), S11 Source (Video / Os
 
 | # | Program | Picture | P12 headline | Status |
 |---|---------|---------|--------------|--------|
-| 1 | sliver | Long translucent pointed triangles crossing the frame, each turning about its own point; overlaps make new greys | Spread: a pinwheel of blades out to scattered wedges | launched 2026-11-17 |
+| 1 | [sliver](sliver/) | Long translucent pointed triangles crossing the frame, each turning about its own point; overlaps make new greys | Spread: a pinwheel of blades out to scattered wedges | v0.1.0 built 2026-11-17, router2 seed 1 all configs, HD 75.7-80.3 MHz (HD Dual 1.9 % margin), 90 % LC, 21 EBR; model = RTL; camera = triangle-mosaic film steps (a layer, not edge widening); slivers wheel about the gathering point; not flashed |
 | 2 | crease | A striped sheet folded along straight creases: stripes kink into sharp chevrons and stream round the bends (Pleat: herringbone) | Angle: the stripes turn on the sheet, every kink opens and closes | launched 2026-11-17 |
 | 3 | koch | The Koch snowflake as nested polygonal bands; Dive: an endless zoom into its point | Depth: a plain triangle grows its generations of spikes | launched 2026-11-17 |
 | 4 | [meander](meander/) | Greek-key friezes stacked up the screen, alternate rows running opposite ways; Slant leans them into pointed zigzags | Wind: battlements wind up into a full key | v0.1.0 built 2026-11-17, router1 seed 1 all configs, HD 84.0-92.1 MHz, 90 % LC, 17 EBR; model = RTL; camera = line weight per node; not flashed |
