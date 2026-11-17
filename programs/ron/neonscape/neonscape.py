@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-NEONSCAPE v0.1.0 - build hook.  Writes neonscape_pkg.vhd next to this file (pure python: the builder runs
+NEONSCAPE v0.2.0 - build hook.  Writes neonscape_pkg.vhd next to this file (pure python: the builder runs
 it with the system python3).  `python3 neonscape.py --preview DIR` also dumps the sprite art and the
 palettes as PNGs (needs PIL; the build never uses it).
 
@@ -13,8 +13,8 @@ Package contents
                           entry 2 r + s   fill ramp r (0 .. 7), segment s (key s -> key s + 1)
                           entry 16 + w    wire colour of object w, lerped toward the palette's hot colour
   C_NS_LROM  2048 x 16  per-line tables: the circle's half-chord, then the span-coded sprite rows
-                        (4 words a row: b1 b0 / b3 b2 / b5 b4 / zones z0 .. z6, 2 bits each, z0 in the LSBs;
-                        zone = z[number of boundaries <= x])
+                        (4 words a row: b1 b0 / b3 b2 / b5 b4 / zones z0 .. z6, 2 bits each, z0 in the LSBs,
+                        bit 14 = the row's crease parity; zone = z[number of boundaries <= x])
   C_NS_NEAR  64 x 6     near range knots: A[c + 1] & A[c]  (3 bits each, 64 rows a unit, cells 128 wide)
   C_NS_FAR   64 x 6     far range knots:  A[c + 1] & A[c]  (3 bits each, 32 rows a unit, cells 64 wide)
   C_NS_CITY  64 x 16    skyline: mastB mastA styleB styleA wide hB hA  (cells 128 wide; heights in 32-row floors)
@@ -162,8 +162,13 @@ def bez(p0, p1, p2, s):
     return (a * p0[0] + b * p1[0] + c * p2[0], a * p0[1] + b * p1[1] + c * p2[1])
 
 
+def hbits(lines, rows, step):
+    """Per-ROM-row parity that flips at each virtual row in `lines`: a wire across the sprite's body there."""
+    return [sum(1 for l in lines if l <= r * step) & 1 for r in range(rows)]
+
+
 def art_palm():
-    """256 x 384 virtual px; trunk = zone 2, fronds = zone 1."""
+    """256 x 384 virtual px; trunk = zone 2 (ringed), fronds = zone 1."""
     cv = canvas(256, 384)
     crown = (134.0, 120.0)
     fronds = [  # control, tip
@@ -183,38 +188,63 @@ def art_palm():
         for x in range(int(xc - hw), int(xc + hw) + 1):
             cv[y][x] = 2
     disc(cv, 134, 122, 12, 10, 1)
-    return [cv[y] for y in range(0, 384, 2)]          # 192 rows
+    return [cv[y] for y in range(0, 384, 2)], hbits(range(150, 384, 22), 192, 2)     # 192 rows
 
 
 def art_car_rear():
-    """Half a rear view, centre at x = 0: 256 x 192 virtual px.  1 body, 2 glass / tyres / plate, 3 lights."""
+    """Half a rear view, centre at x = 0: 256 x 192 virtual px.  A wedge supercar as a wire structure:
+    1 body, 2 glass / tyres / plate / panel seams (thin slivers), 3 lights; creases from the row parity."""
     cv = canvas(256, 192)
-    poly(cv, [(0, 16), (104, 16), (128, 24), (186, 78), (224, 92), (232, 112), (232, 160), (0, 160)], 1)   # shell
-    poly(cv, [(0, 26), (100, 26), (118, 34), (160, 74), (0, 74)], 2)                                       # rear glass
-    poly(cv, [(0, 100), (212, 100), (216, 124), (0, 124)], 3)                                               # light bar
-    poly(cv, [(0, 134), (44, 134), (44, 152), (0, 152)], 2)                                                 # plate
-    poly(cv, [(140, 160), (226, 160), (226, 190), (146, 190)], 2)                                           # tyre
-    poly(cv, [(0, 160), (140, 160), (146, 176), (0, 176)], 1)                                               # valance
-    poly(cv, [(70, 164), (104, 164), (104, 174), (70, 174)], 3)                                             # exhaust
-    return [cv[y] for y in range(0, 192, 2)]          # 96 rows
+    poly(cv, [(0, 14), (96, 14), (122, 24), (178, 74), (214, 84), (232, 104), (234, 150), (226, 160), (0, 160)], 1)
+    # rear glass with louvres
+    poly(cv, [(0, 24), (98, 24), (116, 32), (158, 72), (0, 72)], 2)
+    for y in range(24, 72):
+        if ((y - 24) // 8) % 2 == 1:
+            for x in range(256):
+                if cv[y][x] == 2:
+                    cv[y][x] = 1
+    # seams: the centre line, the deck's diagonal, the fender
+    poly(cv, [(0, 74), (2, 74), (2, 98), (0, 98)], 2)
+    poly(cv, [(146, 76), (154, 76), (214, 98), (206, 98)], 2)
+    poly(cv, [(214, 104), (217, 104), (217, 150), (214, 150)], 2)
+    # light bar: grille, frame, two lamps
+    poly(cv, [(0, 98), (228, 98), (232, 124), (0, 124)], 1)
+    poly(cv, [(0, 102), (44, 102), (44, 120), (0, 120)], 2)
+    poly(cv, [(52, 102), (124, 102), (124, 120), (52, 120)], 3)
+    poly(cv, [(132, 102), (206, 102), (210, 120), (132, 120)], 3)
+    # bumper: centre seam, plate
+    poly(cv, [(0, 124), (2, 124), (2, 160), (0, 160)], 2)
+    poly(cv, [(0, 132), (40, 132), (40, 150), (0, 150)], 2)
+    poly(cv, [(118, 126), (121, 126), (121, 160), (118, 160)], 2)                                           # bumper rib
+    # valance, exhaust, tyre
+    poly(cv, [(0, 160), (148, 160), (154, 176), (0, 176)], 1)
+    poly(cv, [(64, 164), (100, 164), (100, 173), (64, 173)], 2)
+    poly(cv, [(148, 160), (228, 160), (228, 190), (154, 190)], 2)
+    return [cv[y] for y in range(0, 192, 2)], hbits([82, 128, 146], 96, 2)            # 96 rows
 
 
 def art_car_side():
-    """Side view facing right, 256 x 96 at 2 virtual px a unit across and 2 a row (512 x 96 on screen... rows / 2)."""
-    cv = canvas(256, 96)
-    poly(cv, [(6, 58), (10, 42), (58, 36), (92, 14), (150, 12), (188, 34), (236, 42), (250, 54), (250, 70),
-              (6, 70)], 1)                                                                                  # shell
-    poly(cv, [(70, 36), (98, 19), (124, 18), (124, 36)], 2)                                                 # rear window
-    poly(cv, [(130, 18), (148, 17), (178, 36), (130, 36)], 2)                                               # front window
-    poly(cv, [(6, 46), (22, 44), (22, 54), (6, 56)], 3)                                                     # tail light
-    poly(cv, [(238, 46), (250, 54), (250, 60), (236, 58)], 3)                                               # head light
-    disc(cv, 58, 70, 21, 21, 2)
-    disc(cv, 196, 70, 21, 21, 2)
-    return [cv[y] for y in range(0, 96, 2)]           # 48 rows
+    """Side view facing right: 512 x 160 virtual px, stored 256 x 80 (2 px a unit both ways)."""
+    cv = canvas(512, 160)
+    poly(cv, [(10, 126), (6, 98), (16, 74), (140, 62), (196, 26), (300, 22), (378, 64), (498, 92), (506, 112),
+              (502, 126)], 1)                                                                               # shell
+    poly(cv, [(152, 64), (202, 32), (296, 28), (362, 64)], 2)                                               # glass
+    poly(cv, [(246, 30), (254, 30), (254, 64), (246, 64)], 1)                                               # B pillar
+    poly(cv, [(226, 64), (230, 64), (227, 90), (223, 90)], 2)                                               # door seams
+    poly(cv, [(356, 64), (360, 64), (357, 90), (353, 90)], 2)
+    poly(cv, [(6, 92), (20, 92), (20, 106), (6, 106)], 3)                                                   # tail light
+    poly(cv, [(484, 94), (504, 100), (505, 108), (482, 104)], 3)                                            # head light
+    disc(cv, 112, 124, 34, 34, 2)
+    disc(cv, 398, 124, 34, 34, 2)
+    return [cv[y][0:512:2] for y in range(0, 160, 2)], hbits([76, 98, 114], 80, 2)                             # 80 rows
 
 
 def art_cloud():
     """256 x 48 units (2 virtual px a unit both ways): zone 1 top, zone 2 the lower shelf."""
+    return _cloud(), [0] * 48
+
+
+def _cloud():
     cv = canvas(256, 48)
     for (cx, cy, rx, ry) in [(60, 34, 34, 12), (96, 24, 30, 18), (136, 18, 34, 17), (176, 27, 30, 15),
                              (206, 35, 26, 10), (118, 34, 80, 10)]:
@@ -229,6 +259,10 @@ def art_cloud():
 
 
 def art_birds(frame):
+    return _birds(frame), [0] * 32
+
+
+def _birds(frame):
     """256 x 32 virtual px: three gulls on a diagonal, wings up (0) or down (1)."""
     cv = canvas(256, 32)
     for (cx, cy) in [(60, 6), (132, 16), (204, 26)]:
@@ -245,8 +279,8 @@ def art_birds(frame):
     return cv
 
 
-def row_words(row):
-    """A 256-wide row of zones -> 4 words."""
+def row_words(row, hb=0):
+    """A 256-wide row of zones (+ the row's crease parity) -> 4 words."""
     segs = []                                       # [zone, start]
     for x, z in enumerate(row):
         if not segs or segs[-1][0] != z:
@@ -272,7 +306,7 @@ def row_words(row):
     zw = 0
     for i, z in enumerate(zones):
         zw |= (z & 3) << (2 * i)
-    return [bounds[0] | (bounds[1] << 8), bounds[2] | (bounds[3] << 8), bounds[4] | (bounds[5] << 8), zw]
+    return [bounds[0] | (bounds[1] << 8), bounds[2] | (bounds[3] << 8), bounds[4] | (bounds[5] << 8), zw | (hb << 14)]
 
 
 def decode_row(words):
@@ -284,11 +318,11 @@ def decode_row(words):
     return out
 
 
-# line ROM layout
-LR_CIRCLE = 0
-LR_PALM, PALM_ROWS = 256, 192
-LR_CAR, CAR_ROWS = 1024, 96
-LR_SIDE, SIDE_ROWS = 1408, 48
+# line ROM layout (words)
+LR_CIRCLE = 0                      # 256 half-chords, two a word (even index in the low byte)
+LR_PALM, PALM_ROWS = 128, 192
+LR_CAR, CAR_ROWS = 896, 96
+LR_SIDE, SIDE_ROWS = 1280, 80
 LR_CLOUD, CLOUD_ROWS = 1600, 48
 LR_BIRD, BIRD_ROWS = 1792, 32      # frame 1 at + 128
 
@@ -299,11 +333,13 @@ SPRITES = [("palm", LR_PALM, art_palm), ("car", LR_CAR, art_car_rear), ("side", 
 
 def line_rom():
     rom = [0] * 2048
-    for i in range(256):
-        rom[i] = min(255, int(round(math.sqrt(max(0.0, 256.0 * 256.0 - (i + 0.5) ** 2)))))
+    ch = [min(255, int(round(math.sqrt(max(0.0, 256.0 * 256.0 - (i + 0.5) ** 2))))) for i in range(256)]
+    for i in range(128):
+        rom[i] = ch[2 * i] | (ch[2 * i + 1] << 8)
     for _, base, fn in SPRITES:
-        for r, row in enumerate(fn()):
-            rom[base + 4 * r: base + 4 * r + 4] = row_words(row)
+        rows, hb = fn()
+        for r, row in enumerate(rows):
+            rom[base + 4 * r: base + 4 * r + 4] = row_words(row, hb[r])
     return rom
 
 
@@ -397,20 +433,33 @@ def preview(outdir):
     cols = [(10, 10, 20), (60, 220, 200), (255, 90, 170), (255, 230, 90)]
     tiles = []
     for name, base, fn in SPRITES:
-        rows = len(fn())
+        rows = len(fn()[0])
+        gate = 2 if name == "palm" else 1
+        z = [decode_row(rom[base + 4 * r: base + 4 * r + 4]) for r in range(rows)]
+        hb = [(rom[base + 4 * r + 3] >> 14) & 1 for r in range(rows)]
+        ident = [[(z[r][x], hb[r] if z[r][x] == gate else 0) for x in range(256)] for r in range(rows)]
         im = Image.new("RGB", (256, rows))
         for r in range(rows):
-            z = decode_row(rom[base + 4 * r: base + 4 * r + 4])
             for x in range(256):
-                im.putpixel((x, r), cols[z[x]])
-        ysc = 1 if name.startswith("bird") else 2
-        tiles.append(im.resize((256 * 2, rows * ysc * 2), Image.NEAREST))
-    W = sum(t.size[0] for t in tiles) + 10 * (len(tiles) + 1)
-    H = max(t.size[1] for t in tiles) + 20
-    sheet = Image.new("RGB", (W, H), (40, 40, 40))
+                edge = (x > 0 and ident[r][x] != ident[r][x - 1]) or (r > 0 and ident[r][x] != ident[r - 1][x])
+                im.putpixel((x, r), (255, 255, 255) if edge else tuple(c // 3 for c in cols[z[r][x]]))
+        xsc = 4 if name == "side" else 2
+        ysc = 2 if name.startswith("bird") else 4
+        if name in ("side", "cloud"):
+            xsc, ysc = 4, 4
+        elif name.startswith("bird"):
+            xsc, ysc = 2, 2
+        else:
+            xsc, ysc = 2, 4
+        tiles.append(im.resize((256 * xsc, rows * ysc), Image.NEAREST))
+    W = sum(t.size[0] for t in tiles[:3]) + 40
+    sheet = Image.new("RGB", (W, 800 + 420), (40, 40, 40))
     x = 10
-    for t in tiles:
+    for t in tiles[:3]:
         sheet.paste(t, (x, 10)); x += t.size[0] + 10
+    x = 10
+    for t in tiles[3:]:
+        sheet.paste(t, (x, 800)); x += t.size[0] + 10
     sheet.save(os.path.join(outdir, "sprites.png"))
 
 

@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEONSCAPE v0.1.0 -- wireframe neon landscapes (proof of concept).
+-- NEONSCAPE v0.2.0 -- wireframe neon landscapes (proof of concept).
 --
 -- A scene of layered objects, each drawn the same way: every pixel gets a REGION ID (object + facet), a wire is
 -- drawn wherever the ID differs from a neighbour (left, or the line above: one line store), and a region is
@@ -29,7 +29,9 @@
 --
 --   K1  Land     Open / Hills / Ranges / Metro / Valley / Palms / Strip / Tunnel
 --   K2  Sky      Sun / Sun Clouds / Sun Birds / Dusk / Moon / Moon Clouds / Storm / Stars
---   K3  Horizon  25 % .. 75 % of the screen
+--   K3  Sheen    the light that runs along the wires: 0 = none; 50 % = natural (each kind of object has its own
+--                direction and scale, and pulses come and go); above that the objects join one bright diagonal
+--                sweep one by one; 100 % = that sweep over everything.  (The horizon height now comes with the Land setting.)
 --   K4  Speed    bipolar, centre = still: flight (Drive) or lateral travel with parallax (Pan)
 --   K5  Colour   8 palettes (8 fill ramps of 3 keys + a wire colour per object each)
 --   K6  Camera   camera (or Osc) strength, three effects: lights the sky ramp, bends the grid's rows,
@@ -59,7 +61,6 @@ use work.all;
 architecture neonscape of program_top is
     constant C_LAT : integer := 33;   -- = processing_delay_clks
 
-    constant C_DEF_K3  : integer := 600;
     constant C_DEF_P12 : integer := 512;
     constant C_G       : integer := 2883584;      -- grid: du = C_G / d (cells per virtual px, Q20): 2.75 cells of camera height
 
@@ -69,6 +70,8 @@ architecture neonscape of program_top is
     constant C_CM1   : std_logic_vector(15 downto 0) := x"5A93";   -- clouds, band 1
     constant C_CM2   : std_logic_vector(15 downto 0) := x"A64D";   -- clouds, band 2
     constant C_BM    : std_logic_vector(15 downto 0) := x"1242";   -- birds
+    -- sheen: which pulses show, by (pulse number, object): about three in five
+    constant C_SHG   : std_logic_vector(0 to 63) := x"B6D5_E39A_6F4B_D2ED";
 
     ---------------------------------------------------------------------------
     -- [A] timing-ID steps
@@ -101,13 +104,19 @@ architecture neonscape of program_top is
     begin
         if a > b then return a; else return b; end if;
     end function;
-    -- 8-zone stepped knob with hysteresis; a value under 8 is the firmware's label index at program load
+    -- 8-zone stepped knob with hysteresis: a new zone is taken only 16 counts inside it (the two ends of the
+    -- travel excepted, so a knob resting at either stop still selects its zone); a value under 8 is the
+    -- firmware's label index at program load
     function f_zone8(k : unsigned(9 downto 0); cur : unsigned(2 downto 0)) return unsigned is
-        variable v_c : signed(10 downto 0);
     begin
-        if k < 8 then return k(2 downto 0); end if;
-        v_c := signed(resize(k, 11)) - signed(resize(cur & "1000000", 11));
-        if v_c > 72 or v_c < -72 then return k(9 downto 7); end if;
+        if k(9 downto 3) = "0000000" then return k(2 downto 0); end if;
+        if k(9 downto 7) /= cur then
+            if (k(6 downto 4) /= "000" and k(6 downto 4) /= "111")
+               or (k(9 downto 7) = "000" and k(6 downto 4) = "000")
+               or (k(9 downto 7) = "111" and k(6 downto 4) = "111") then
+                return k(9 downto 7);
+            end if;
+        end if;
         return cur;
     end function;
     -- signed 8-bit delta times one bit of t, shifted: a gated operand for the colour lerp
@@ -162,7 +171,9 @@ architecture neonscape of program_top is
 
     -- [B] controls
     signal s_land, s_sky, s_pal : unsigned(2 downto 0) := (others => '0');
-    signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);     -- horizon glide (Q3)
+    signal s_gs : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);          -- sheen glide
+    signal c_gn : unsigned(3 downto 0) := (others => '0');                    -- sheen strength (0 .. 8)
+    signal c_un : unsigned(3 downto 0) := (others => '0');                    -- objects below this number join the uniform sweep
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(1023 * 8, 13);         -- camera glide
     signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);    -- fill glide
     signal s_gm : unsigned(12 downto 0) := (others => '0');
@@ -181,7 +192,7 @@ architecture neonscape of program_top is
 
     -- [C] per-field values
     signal c_t    : unsigned(15 downto 0) := (others => '0');     -- field counter
-    signal c_hz   : unsigned(10 downto 0) := to_unsigned(600, 11);
+    signal c_hz   : unsigned(10 downto 0) := to_unsigned(588, 11);
     signal c_bot  : unsigned(10 downto 0) := to_unsigned(480, 11);
     signal c_cart : signed(11 downto 0) := to_signed(248, 12);    -- the rear-view car's top row below the horizon
     signal c_fp   : unsigned(13 downto 0) := (others => '0');     -- fill position (Q3)
@@ -257,11 +268,13 @@ architecture neonscape of program_top is
     signal l_fill : std_logic_vector(7 downto 0) := (others => '0');
     signal l_rip, l_v1, l_v2 : std_logic := '0';
     signal l_wf : unsigned(2 downto 0) := (others => '0');
-    signal l_rf : unsigned(3 downto 0) := (others => '0');
+    signal l_rf : unsigned(4 downto 0) := (others => '0');
     signal l_oy : unsigned(6 downto 0) := (others => '0');
+    signal l_od, l_pc : unsigned(13 downto 0) := (others => '0');             -- sheen: per-line phase terms
+    signal l_dm : unsigned(9 downto 0) := (others => '0');                    -- d - 56, for the masts
     signal n_xn0, n_xf0, n_xc0, n_xa0, n_xb0, n_xr0 : unsigned(13 downto 0) := (others => '0');
     signal n_x0 : signed(12 downto 0) := (others => '0');
-    signal n_pp0 : unsigned(8 downto 0) := (others => '0');
+    signal n_pa0 : unsigned(13 downto 0) := (others => '0');
 
     -- [D] source (camera luma or the Osc lattice), smoothed and scaled
     signal s_cin : unsigned(5 downto 0) := (others => '0');
@@ -273,8 +286,11 @@ architecture neonscape of program_top is
     signal b_x  : signed(12 downto 0) := (others => '0');
     signal b_u  : unsigned(28 downto 0) := (others => '0');
     signal b_px : unsigned(10 downto 0) := (others => '0');
-    signal b_pxd1, b_pxd2 : unsigned(10 downto 0) := (others => '0');
-    signal b_pp : unsigned(8 downto 0) := (others => '0');
+    signal b_pa : unsigned(13 downto 0) := (others => '0');
+    signal s18_np : unsigned(8 downto 0) := (others => '0');
+    signal s18_ix, s18_wo : unsigned(2 downto 0) := (others => '0');
+    signal s18_ng : std_logic := '0';
+    signal s19_n6 : unsigned(5 downto 0) := (others => '0');
 
     -- near range
     signal n2_a0, n2_a1 : unsigned(2 downto 0) := (others => '0');
@@ -306,7 +322,6 @@ architecture neonscape of program_top is
     -- city
     signal c12_e : unsigned(15 downto 0) := (others => '0');
     signal c12_an, c12_aw, c13_ant : std_logic := '0';
-    signal c13_ha : unsigned(9 downto 0) := (others => '0');
     signal c13_st : std_logic_vector(1 downto 0) := "00";
     signal c12_half, c12_cp, c12_wi, c12_c0 : std_logic := '0';
     signal c12_wc : unsigned(2 downto 0) := (others => '0');
@@ -374,8 +389,13 @@ architecture neonscape of program_top is
     signal cr_q, cr_qf : std_logic_vector(15 downto 0) := x"8080";
     signal cr_wp : unsigned(7 downto 0) := to_unsigned(6, 8);
     signal cr_rp : unsigned(7 downto 0) := to_unsigned(0, 8);
+    -- and the luma's first five pixels of delay, in a second one
+    signal yr_ram : t_cr := (others => (others => '0'));
+    attribute no_rw_check of yr_ram : signal is true;
+    signal yr_q : std_logic_vector(15 downto 0) := x"0040";
+    signal yr_rp : unsigned(7 downto 0) := to_unsigned(3, 8);
     signal s_bu, s_bv2, s_bud, s_bvd : unsigned(12 downto 0) := to_unsigned(4100, 13);
-    type t_y5 is array (1 to 7) of unsigned(9 downto 0);
+    type t_y5 is array (5 to 7) of unsigned(9 downto 0);
     signal s_yd : t_y5 := (others => to_unsigned(64, 10));
     signal s_hist : std_logic_vector(7 downto 0) := (others => '0');
     signal o1_ya : unsigned(11 downto 0) := (others => '0');
@@ -414,6 +434,7 @@ begin
         variable v_m  : unsigned(9 downto 0);
         variable v_k  : unsigned(9 downto 0);
         variable v_p4 : unsigned(3 downto 0);
+        variable v_m7 : unsigned(6 downto 0);
     begin
         if rising_edge(clk) then
             -- [A] timing ID -> steps (decoded free-running)
@@ -481,14 +502,15 @@ begin
             -- scene tables (free-running decode of the latched zones)
             c_efar <= '0'; c_ecity <= '0'; c_enear <= '0'; c_epalm <= '0'; c_eroad <= '0'; c_tun <= '0';
             case to_integer(s_land) is
-                when 0      => null;                                                            -- Open
-                when 1      => c_efar <= '1';                                                   -- Hills
-                when 2      => c_efar <= '1'; c_enear <= '1';                                   -- Ranges
-                when 3      => c_ecity <= '1';                                                  -- Metro
-                when 4      => c_ecity <= '1'; c_enear <= '1';                                  -- Valley
-                when 5      => c_enear <= '1'; c_epalm <= '1'; c_eroad <= '1';                  -- Palms
-                when 6      => c_ecity <= '1'; c_epalm <= '1'; c_eroad <= '1';                  -- Strip
-                when others => c_tun <= '1'; c_eroad <= '1';                                    -- Tunnel
+                -- (each Land brings its horizon row: 50 % .. 62 % of the screen)
+                when 0      => c_hz <= to_unsigned(605, 11);                                                      -- Open
+                when 1      => c_hz <= to_unsigned(626, 11); c_efar <= '1';                                       -- Hills
+                when 2      => c_hz <= to_unsigned(626, 11); c_efar <= '1'; c_enear <= '1';                       -- Ranges
+                when 3      => c_hz <= to_unsigned(670, 11); c_ecity <= '1';                                      -- Metro
+                when 4      => c_hz <= to_unsigned(648, 11); c_ecity <= '1'; c_enear <= '1';                      -- Valley
+                when 5      => c_hz <= to_unsigned(588, 11); c_enear <= '1'; c_epalm <= '1'; c_eroad <= '1';      -- Palms
+                when 6      => c_hz <= to_unsigned(610, 11); c_ecity <= '1'; c_epalm <= '1'; c_eroad <= '1';      -- Strip
+                when others => c_hz <= to_unsigned(540, 11); c_tun <= '1'; c_eroad <= '1';                        -- Tunnel
             end case;
             c_esun <= '0'; c_emoon <= '0'; c_estar <= '0'; c_ecl1 <= '0'; c_ecl2 <= '0'; c_ebird <= '0'; c_erain <= '0';
             case to_integer(s_sky) is
@@ -507,14 +529,14 @@ begin
                 c_sunc <= to_unsigned(144, 9); c_sx <= to_signed(0, 12);
             end if;
 
-            -- [B] shared glide (1/8 of the gap per field, +-2 deadband): horizon, camera, fill
+            -- [B] shared glide (1/8 of the gap per field, +-2 deadband): sheen, camera, fill
             if s_zgo = '1' then
                 z_gp <= "00"; z_gc <= "00"; z_grun <= '1';
             elsif z_grun = '1' then
                 case z_gp is
                     when "00" =>
                         case to_integer(z_gc) is
-                            when 0      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
+                            when 0      => s_gm <= s_gs; s_gr <= unsigned(registers_in(2));
                             when 1      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
@@ -531,7 +553,7 @@ begin
                         z_gp <= "10";
                     when others =>
                         case to_integer(z_gc) is
-                            when 0      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 0      => s_gs <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
@@ -560,8 +582,6 @@ begin
                             if s_vneg = '1' then c_uph <= c_uph - shift_left(resize(s_vm, 29), 9);
                             else c_uph <= c_uph + shift_left(resize(s_vm, 29), 9); end if;
                         end if;
-                    when 43 =>                              -- horizon: 270 + k / 2 + k / 32 rows
-                        c_hz <= to_unsigned(270, 11) + resize(s_g3(12 downto 4), 11) + resize(s_g3(12 downto 8), 11);
                     when 44 =>
                         c_bot <= to_unsigned(1080, 11) - c_hz;
                     when 45 =>                              -- the car sits 40 rows off the bottom, bobbing a row
@@ -584,6 +604,13 @@ begin
                         if c_t(7) = '1' then v_p4 := not v_p4; end if;
                         c_swm <= v_p4(3 downto 1);
                         c_swn <= c_t(8);
+                    when 50 =>                              -- sheen: the natural strength rises over the knob's lower
+                        v_m7 := resize(s_gs(11 downto 6), 7) + 4;      -- half; over the upper half the objects join the
+                        if s_gs(12) = '0' then                         -- uniform sweep one by one
+                            c_gn <= v_m7(6 downto 3); c_un <= (others => '0');
+                        else
+                            c_gn <= to_unsigned(8, 4); c_un <= v_m7(6 downto 3) + 2;
+                        end if;
                     when others => null;
                 end case;
             end if;
@@ -665,6 +692,7 @@ begin
         variable v_w   : signed(4 downto 0);
         variable v_zz  : unsigned(21 downto 0);
         variable v_l   : unsigned(2 downto 0);
+        variable v_by  : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             e_zk <= '0';
@@ -732,7 +760,7 @@ begin
                     e_c2  <= signed(resize(e_d, 11)) - 470;
                     e_bd  <= signed(resize(e_d, 11)) - 250;
                     e_cr  <= e_s - c_cart;
-                    e_cs  <= signed(resize(v_y, 12)) - 943;
+                    e_cs  <= signed(resize(v_y, 12)) - 879;
                     dv_n <= to_unsigned(C_G, 22); dv_r <= (others => '0'); dv_q <= (others => '0');
                     if e_d = 0 then dv_d <= to_unsigned(1, 10); else dv_d <= e_d; end if;
                 when 3 =>
@@ -781,14 +809,14 @@ begin
                     e_ba <= (others => '0');
                     if e_obj = '1' and c_epalm = '1' and e_d < 384 then
                         v_row := to_unsigned(191, 8) - e_d(8 downto 1);
-                        e_ba <= to_unsigned(256, 11) + (v_row & "00");
+                        e_ba <= to_unsigned(128, 11) + (v_row & "00");
                         e_ben <= '1'; e_bpalm <= '1';
                     elsif e_low = '1' and c_eroad = '1' and s_pan = '0' and e_cr >= 0 and e_cr < 192 then
-                        e_ba <= to_unsigned(1024, 11) + (unsigned(e_cr(7 downto 1)) & "00");
+                        e_ba <= to_unsigned(896, 11) + (unsigned(e_cr(7 downto 1)) & "00");
                         e_bfold <= '1';
                         e_ben <= '1';
-                    elsif e_low = '1' and c_eroad = '1' and s_pan = '1' and e_cs >= 0 and e_cs < 96 then
-                        e_ba <= to_unsigned(1408, 11) + (unsigned(e_cs(6 downto 1)) & "00");
+                    elsif e_low = '1' and c_eroad = '1' and s_pan = '1' and e_cs >= 0 and e_cs < 160 then
+                        e_ba <= to_unsigned(1280, 11) + (unsigned(e_cs(7 downto 1)) & "00");
                         e_bunit <= '1';
                         e_ben <= '1';
                     end if;
@@ -824,8 +852,8 @@ begin
                 when 11 =>
                     n_x0 <= e_x0(12 downto 0);
                     n_xr0 <= unsigned(e_x0) + resize(v_y(10 downto 1), 14) + (c_t(9 downto 0) & "00");
-                when 12 =>
-                    n_pp0 <= unsigned(e_x0(8 downto 0)) + (v_y(7 downto 0) & '0') + (c_t(5 downto 0) & "000");
+                when 12 =>                                   -- the sheen's diagonal phase: x + y + 4 t
+                    n_pa0 <= unsigned(e_x0) + resize(v_y & '0', 14) + (c_t(10 downto 0) & "000");
                 when 26 =>
                     e_du <= dv_q;
                 when 27 =>                                   -- du x half the width
@@ -895,15 +923,18 @@ begin
                     if e_ln /= 0 then l_v1 <= '1'; else l_v1 <= '0'; end if;
                     if e_ln(1) = '1' and s_tv2 = '1' then l_v2 <= '1'; else l_v2 <= '0'; end if;
                     l_wf <= e_d(7 downto 5) + c_t(8 downto 6);
-                    l_rf <= v_y(7 downto 4) + c_t(3 downto 0) + c_t(4 downto 1);
+                    l_rf <= v_y(7 downto 3) - c_t(4 downto 0) - (c_t(3 downto 0) & '0');      -- falls 24 rows a field
+                    if e_d >= 56 then l_dm <= e_d - 56; else l_dm <= (others => '0'); end if;
                     l_oy <= f_tri7(v_y(9 downto 2) + c_t(8 downto 1));
-                    lr_a <= "000" & e_sa;
-                when 33 => lr_a <= "000" & e_sb;
+                    lr_a <= "0000" & e_sa(7 downto 1);
+                when 33 => lr_a <= "0000" & e_sb(7 downto 1);
                 when 34 => lr_a <= e_aa;
                 when 35 => lr_a <= e_aa + 1;
-                    if c_emoon = '1' then l_sw <= "00" & lr_qf(7 downto 1); else l_sw <= '0' & lr_qf(7 downto 0); end if;
+                    if e_sa(0) = '1' then v_by := lr_qf(15 downto 8); else v_by := lr_qf(7 downto 0); end if;
+                    if c_emoon = '1' then l_sw <= "00" & v_by(7 downto 1); else l_sw <= '0' & v_by; end if;
                 when 36 => lr_a <= e_aa + 2;
-                    l_bw <= "00" & lr_qf(7 downto 1);
+                    if e_sb(0) = '1' then v_by := lr_qf(15 downto 8); else v_by := lr_qf(7 downto 0); end if;
+                    l_bw <= "00" & v_by(7 downto 1);
                 when 37 => lr_a <= e_aa + 3;
                     l_arow(0) <= lr_qf;
                 when 38 => lr_a <= e_ba;
@@ -918,6 +949,9 @@ begin
                 when 43 => l_brow(2) <= lr_qf;
                 when 44 =>
                     if e_ben = '1' then l_brow(3) <= lr_qf; else l_brow(3) <= (others => '0'); end if;
+                -- sheen: the other directions.  x + 4 t (the diagonal phase less y) and y - 2 t
+                when 45 => l_od <= to_unsigned(0, 14) - resize(v_y & '0', 14);
+                when 46 => l_pc <= resize(v_y & '0', 14) - (c_t(11 downto 0) & "00");
                 when others => null;
             end case;
         end if;
@@ -976,8 +1010,7 @@ begin
             else
                 b_u <= b_u + resize(l_dup, 29); b_px <= b_px + 1;
             end if;
-            b_pxd1 <= b_px; b_pxd2 <= b_pxd1;
-            if s_st(15) = '1' then b_pp <= n_pp0; else b_pp <= b_pp + s_xs; end if;      -- stage 16
+            if s_st(16) = '1' then b_pa <= n_pa0; else b_pa <= b_pa + s_xs; end if;      -- stage 17
         end if;
     end process p_beam;
 
@@ -1004,7 +1037,7 @@ begin
         variable v_pr  : std_logic;
         variable v_ax  : unsigned(11 downto 0);
         variable v_e5  : unsigned(4 downto 0);
-        variable v_n4  : unsigned(3 downto 0);
+        variable v_n5  : unsigned(4 downto 0);
         variable v_zs  : unsigned(11 downto 0);
         variable v_wi  : unsigned(5 downto 0);
         variable v_c   : unsigned(9 downto 0);
@@ -1118,7 +1151,6 @@ begin
                 if c12_e(8) = '1' then v_an := c12_e(13) and c12_aw; else v_an := c12_e(13) and c12_an; end if;
             end if;
             c13_h  <= resize(v_h4 & "00000", 10) + resize(s_cg & "00", 10);
-            c13_ha <= resize(v_h4 & "00000", 10) + resize(s_cg & "00", 10) + 56;
             c13_ant <= v_an; c13_st <= v_st;
             c13_bp <= c12_c0 & (c12_half and not c12_e(8));
             c13_cp <= c12_cp;
@@ -1126,7 +1158,7 @@ begin
             c13_lit <= C_NS_WIN(to_integer(v_wi)) and c12_wi and (l_d(4) xor l_d(3));
             -- 14
             -- (the tower's style picks its wire pattern: floors, bays, both or neither; some carry a mast)
-            if l_d < c13_h or (c13_ant = '1' and l_d < c13_ha) then c14_in <= c_ecity; else c14_in <= '0'; end if;
+            if l_d < c13_h or (c13_ant = '1' and l_dm < c13_h) then c14_in <= c_ecity; else c14_in <= '0'; end if;
             c14_sub <= c13_bp & (l_d(5) and c13_st(1)) & (c13_cp and c13_st(0));
             c14_lit <= c13_lit;
 
@@ -1153,14 +1185,14 @@ begin
             ----------------------------------------------------------------
             -- 12
             v_a12 := unsigned(b_x(12 downto 6)) & l_d(9 downto 5);
-            t12_h <= v_a12 + shift_left(v_a12, 3) + shift_left(v_a12, 7) + 693;
+            t12_h <= v_a12 + shift_left(v_a12, 3) + 693;
             t12_x <= unsigned(b_x(5 downto 3));
             -- 13
-            v_hh := t12_h xor ("0000" & t12_h(11 downto 4));
-            t13_h <= v_hh + shift_left(v_hh, 5) + shift_left(v_hh, 2) + 1447;
+            v_hh := t12_h xor ("0000" & t12_h(11 downto 4)) xor ("0000000" & t12_h(11 downto 7));
+            t13_h <= v_hh + shift_left(v_hh, 5) + 1447;
             t13_x <= t12_x;
             -- 14
-            v_hh := t13_h xor ("0000000" & t13_h(11 downto 7));
+            v_hh := t13_h xor ("000000" & t13_h(11 downto 6));
             if v_hh(11 downto 8) = "0000" and v_hh(2 downto 0) = t13_x and v_hh(5 downto 3) = l_d(4 downto 2) then
                 t14_on <= c_estar;
             else
@@ -1175,8 +1207,8 @@ begin
             r13_e <= C_NS_RAIN(to_integer(b_xr(9 downto 5)));
             if b_xr(4 downto 2) = "000" then r13_nw <= '1'; else r13_nw <= '0'; end if;
             -- 14
-            v_n4 := l_rf + r13_e(3 downto 0);
-            if r13_e(4) = '1' and r13_nw = '1' and v_n4 < 6 then r14_on <= c_erain; else r14_on <= '0'; end if;
+            v_n5 := l_rf + (r13_e(3 downto 0) & '0');
+            if r13_e(4) = '1' and r13_nw = '1' and v_n5 < 12 then r14_on <= c_erain; else r14_on <= '0'; end if;
 
             ----------------------------------------------------------------
             -- sprite slots: span-coded rows.  A = clouds / birds, B = palms / car
@@ -1262,6 +1294,11 @@ begin
         variable v_e    : std_logic;
         variable v_w    : unsigned(3 downto 0);
         variable v_tri  : unsigned(4 downto 0);
+        variable v_src  : std_logic_vector(1 downto 0);
+        variable v_sc   : std_logic;
+        variable v_ph   : unsigned(13 downto 0);
+        variable v_gi   : unsigned(5 downto 0);
+        variable v_pm   : unsigned(7 downto 0);
         variable v_sum  : signed(13 downto 0);
         variable v_c    : signed(10 downto 0);
         variable v_d8   : signed(7 downto 0);
@@ -1284,6 +1321,7 @@ begin
                 v_dash := (l_pdash and g14_up) or (not s_pan and g14_dc and g14_zh and not l_gfar);
                 if b14_z /= 0 and (l_bfold = '1' or l_bunit = '1') then
                     v_obj := "1001"; v_sub := "00" & std_logic_vector(b14_z); v_ramp := "111";
+                    if b14_z = "01" then v_sub(2) := l_brow(3)(14); end if;       -- creases across the body
                     case b14_z is
                         when "01"   => v_t := to_unsigned(60, 8);
                         when "10"   => v_t := to_unsigned(6, 8);
@@ -1304,6 +1342,7 @@ begin
                 -- sky half (and its mirror in the lake): nearest first
                 if b14_z /= 0 and l_obj = '1' then
                     v_obj := "0110"; v_sub := "00" & std_logic_vector(b14_z); v_ramp := "110";
+                    if b14_z = "10" then v_sub(2) := l_brow(3)(14); end if;       -- rings up the trunk
                     if b14_z = "10" then v_t := to_unsigned(52, 8); else v_t := to_unsigned(28, 8); end if;
                     v_fon := l_fill(6);
                 elsif n14_in = '1' and l_obj = '1' then
@@ -1340,7 +1379,7 @@ begin
             i_d1 <= s15_id; i_d2 <= i_d1; i_d3 <= i_d2;
             s_g15 <= s_g15(2 downto 0) & s_gav_sr(13);
             lb_we <= s_gav_sr(13);
-            lb_wa <= b_pxd2;
+            if s_st(15) = '1' then lb_wa <= (others => '0'); else lb_wa <= lb_wa + 1; end if;     -- pixel index at stage 16
             lb_wd <= lb_qf(7 downto 0) & s15_id;
 
             ----------------------------------------------------------------
@@ -1360,17 +1399,15 @@ begin
             s16_ramp <= s15_ramp; s16_t <= s15_t; s16_fon <= s15_fon; s16_ovl <= s15_ovl; s16_tw <= s15_tw;
 
             ----------------------------------------------------------------
-            -- 17: colour table entry and lerp position.  A sheen travels along every wire: a 64-px pulse
-            -- in every 256 along the diagonal lifts the wire toward the palette's hot colour.
+            -- 17: colour table entry and lerp position
             ----------------------------------------------------------------
             v_w := f_max4(f_max4(s16_m1, s16_m2), s16_m3);
-            if b_pp(6) = '1' then v_tri := not b_pp(5 downto 1); else v_tri := b_pp(5 downto 1); end if;
             s17_blk <= '0'; s17_w <= '0';
             if s16_ovl = "10" then
                 s17_ent <= to_unsigned(28, 5); s17_t6 <= (others => '0');
             elsif s16_e = '1' then
                 s17_ent <= '1' & v_w; s17_w <= '1';
-                if b_pp(8 downto 7) = "00" then s17_t6 <= v_tri & '0'; else s17_t6 <= (others => '0'); end if;
+                s17_t6 <= (others => '0');
             elsif s16_ovl = "01" then
                 s17_ent <= to_unsigned(27, 5); s17_t6 <= s16_tw & "0000";
             elsif s16_fon = '1' then
@@ -1385,8 +1422,53 @@ begin
             pal_a <= s_pal & s17_ent;
             s18_t6 <= s17_t6; s18_blk <= s17_blk;
             s19_t6 <= s18_t6; s19_blk <= s18_blk;
-            s20_t6 <= s19_t6; s20_blk <= s19_blk;        -- pal_q at 19, pal_qf at 20
+            s20_blk <= s19_blk;                          -- pal_q at 19, pal_qf at 20
             s18_w <= s17_w; s19_w <= s18_w; s20_w <= s19_w; s21_w <= s20_w; s22_w <= s21_w; s23_w <= s22_w;
+
+            ----------------------------------------------------------------
+            -- 18 .. 20: SHEEN, the light that runs along the wires (a wire's lerp position toward the
+            -- palette's hot colour): a 64-px triangle pulse in every 256 of a phase.  Natural: each kind of
+            -- object reads its own phase (a direction and a scale), and a table keyed by the pulse's number and
+            -- the object lets about three pulses in five through.  Uniform: the diagonal phase at scale 1 with
+            -- every pulse shown; an object uses it once its number is under c_un.
+            --   A  x + y + 4 t   "/" fronts      C  y - 2 t   bands moving down      D  x + 4 t   bands moving left
+            ----------------------------------------------------------------
+            case s17_ent(3 downto 0) is
+                when "0001" => v_src := "10"; v_sc := '0';       -- sun            C, 256
+                when "0010" => v_src := "11"; v_sc := '1';       -- clouds, birds  D, 512
+                when "0011" => v_src := "11"; v_sc := '1';       -- far range      D, 512
+                when "0100" => v_src := "10"; v_sc := '1';       -- city           C, 512
+                when "0101" => v_src := "00"; v_sc := '1';       -- near range     A, 512
+                when "0110" => v_src := "11"; v_sc := '0';       -- palms          D, 256
+                when "0111" => v_src := "10"; v_sc := '1';       -- grid           C, 512
+                when "1000" => v_src := "10"; v_sc := '0';       -- road           C, 256
+                when "1001" => v_src := "11"; v_sc := '0';       -- car            D, 256
+                when others => v_src := "00"; v_sc := '0';
+            end case;
+            if unsigned(s17_ent(3 downto 0)) < c_un then
+                v_src := "00"; v_sc := '0'; s18_ng <= '1';
+            else
+                s18_ng <= '0';
+            end if;
+            if v_src = "11" then v_ph := b_pa + l_od; else v_ph := b_pa; end if;
+            if v_src = "10" then v_ph := l_pc; end if;
+            if v_sc = '1' then s18_np <= v_ph(9 downto 1); s18_ix <= v_ph(12 downto 10);
+            else s18_np <= v_ph(8 downto 0); s18_ix <= v_ph(11 downto 9); end if;
+            s18_wo <= s17_ent(2 downto 0);
+            -- 19: the pulse (a triangle, 0 .. 31) times the strength (0 .. 8)
+            v_gi := s18_ix & s18_wo;
+            if s18_np(6) = '1' then v_tri := not s18_np(5 downto 1); else v_tri := s18_np(5 downto 1); end if;
+            if s18_np(8 downto 7) /= "00" or (s18_ng = '0' and C_SHG(to_integer(v_gi)) = '0') then
+                v_tri := (others => '0');
+            end if;
+            v_pm := (others => '0');
+            if c_gn(0) = '1' then v_pm := v_pm + resize(v_tri, 8); end if;
+            if c_gn(1) = '1' then v_pm := v_pm + resize(v_tri & '0', 8); end if;
+            if c_gn(2) = '1' then v_pm := v_pm + resize(v_tri & "00", 8); end if;
+            if c_gn(3) = '1' then v_pm := resize(v_tri & "000", 8); end if;
+            s19_n6 <= v_pm(7 downto 2);
+            -- 20
+            if s19_w = '1' then s20_t6 <= s19_n6; else s20_t6 <= s19_t6; end if;
 
             ----------------------------------------------------------------
             -- 21 / 22: c0 + (delta x t) >> 5, the product as three pairs of gated operands
@@ -1468,9 +1550,13 @@ begin
                 s_bv2 <= s_bv2 + v_iv - (unsigned(cr_qf(7 downto 0)) & "00");
             end if;
             s_bud <= s_bu; s_bvd <= s_bv2;
-            -- luma taps y(n - 5), y(n - 6), y(n - 7): the chroma's group delay plus the glow's 2 px
-            s_yd(1) <= v_iy;
-            for i in 2 to 7 loop s_yd(i) <= s_yd(i - 1); end loop;
+            -- luma taps y(n - 5), y(n - 6), y(n - 7): the chroma's group delay plus the glow's 2 px.
+            -- s_yd(5) = the input 5 pixels back (written at t, read at t + 3 into yr_q, fabric register at t + 4)
+            yr_ram(to_integer(cr_wp)) <= "000000" & std_logic_vector(v_iy);
+            yr_q  <= yr_ram(to_integer(yr_rp));
+            yr_rp <= yr_rp + 1;
+            s_yd(5) <= unsigned(yr_q(9 downto 0));
+            for i in 6 to 7 loop s_yd(i) <= s_yd(i - 1); end loop;
             o1_ya <= resize(s_yd(5), 12) + resize(s_yd(7), 12) + 2;
             o1_yb <= s_yd(6);
             v_sc := resize(s_bu, 14) + s_bud;  o2_u <= v_sc(13 downto 4);

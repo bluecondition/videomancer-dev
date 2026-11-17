@@ -1,11 +1,11 @@
-# NEONSCAPE (v0.1.0, 2026-11-17).  Wireframe neon landscapes: grid floor, sun / moon, mesh mountains, city, palms,
+# NEONSCAPE (v0.2.0, 2026-11-17).  Wireframe neon landscapes: grid floor, sun / moon, mesh mountains, city, palms,
 # car, clouds, birds, rain, stars, lake mirror, tunnel.  See neonscape.vhd, neonscape.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 33
 program_id = "com.czartroniks.neonscape"
 program_name = "Neonscape"
-program_version = "0.1.0"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -29,11 +29,11 @@ initial_value_label = "Dusk"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Horizon"
+name_label = "Sheen"
 control_mode = "linear"
-display_min_value = 25
-display_max_value = 75
-initial_value = 600
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -109,6 +109,7 @@ name = "Sunset Drive"
 [[preset]]
 name = "Wire City"
 rotary_potentiometer_1 = 448
+rotary_potentiometer_3 = 700
 rotary_potentiometer_2 = 576
 rotary_potentiometer_5 = 320
 linear_potentiometer_12 = 0
@@ -125,7 +126,6 @@ linear_potentiometer_12 = 760
 name = "Mirror Lake"
 rotary_potentiometer_1 = 320
 rotary_potentiometer_2 = 192
-rotary_potentiometer_3 = 520
 rotary_potentiometer_5 = 192
 toggle_switch_10 = 1
 linear_potentiometer_12 = 1023
@@ -134,7 +134,7 @@ linear_potentiometer_12 = 1023
 name = "Tunnel Run"
 rotary_potentiometer_1 = 960
 rotary_potentiometer_2 = 64
-rotary_potentiometer_3 = 512
+rotary_potentiometer_3 = 1023
 rotary_potentiometer_4 = 860
 rotary_potentiometer_5 = 448
 linear_potentiometer_12 = 300
