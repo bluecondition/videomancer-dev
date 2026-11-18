@@ -25,6 +25,9 @@ import math
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import nbengine  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------------------------------------------------------------------------------------------------
@@ -316,11 +319,13 @@ def bed_tab():
 
 # ---------------------------------------------------------------------------------------------------------
 # Waves (the filler).  Depth index i = min(15, still depth >> 4) (rows).
-#   C_NB_DTAB  16 x 22   kstep (14: phase per knot, 65536 = one wave) & shoal (5: amplitude gain, eighths)
-#                        & class (3: wave shape, 0 = round .. 7 = a steep breaking front)
+#   C_NB_SOFF  128 x 16  each knot's phase offset (4096 = a wave), shortening over the rising bed
+#   C_NB_DT2   16 x 8    shoal (5: amplitude gain, eighths) << 3 | class (wave shape, 0 round .. 3 breaking)
 #   C_NB_SIZE  16 x 4    each wave's size in eighths (4 .. 11), by its number: waves come in sets
-#   C_NB_SHAPE 1024 x 8  wave profile by class (3) & phase (7): signed, 64 = the amplitude.  Phase 0 is the
+#   C_NB_SHAPE 512 x 8   wave profile by class (2) & phase (7): signed, 64 = the amplitude.  Phase 0 is the
 #                        crest; the front (the shoreward, left side) is the end of the phase.
+#   C_NB_UCODE 512 x 24  the engine's program (nbengine.py)
+#   C_NB_SCINIT 512 x 16 the engine's scratch RAM at start: 128 .. 255 the phase offsets, 256 .. 383 the bed
 # ---------------------------------------------------------------------------------------------------------
 WAVE_DEEP_KNOTS = 32.0                        # wavelength in deep water (16 px knots)
 
@@ -342,10 +347,11 @@ SIZES = [6, 7, 9, 11, 8, 6, 5, 7, 10, 8, 6, 7, 9, 6, 5, 8]
 
 
 def shape_tab():
+    """4 classes x 128 phases: 0 round (deep) .. 3 a steep breaking front."""
     out = []
-    for c in range(8):
-        F = 0.5 - 0.42 * c / 7.0                 # the front's share of the wave
-        q = 1.0 + 1.3 * c / 7.0                  # peaked crests, flat troughs
+    for c in range(4):
+        F = 0.5 - 0.42 * c / 3.0                 # the front's share of the wave
+        q = 1.0 + 1.3 * c / 3.0                  # peaked crests, flat troughs
         ys = []
         for p in range(128):
             ph = (p + 0.5) / 128.0
@@ -358,6 +364,33 @@ def shape_tab():
         m = sum(ys) / len(ys)
         out += [max(-127, min(127, int(round(64.0 * (y - m))))) for y in ys]
     return out
+
+
+def dt2_tab():
+    """By depth index: shoal << 3 | class (0 .. 3)."""
+    return [(sh << 3) | (cl >> 1) for ks, sh, cl in dtab()]
+
+
+def soff_tab():
+    """Each knot's phase offset (4096 = one wave), accumulated from the right edge at the mean sea level, so the
+    waves shorten over the rising bed."""
+    bed = bed_tab()
+    acc, out = 0, [0] * 128
+    for k in range(127, -1, -1):
+        d = bed[k] - 626
+        i = min(15, d >> 4) if d > 0 else 0
+        acc += dtab()[i][0]
+        out[k] = int(round(acc / 16.0)) & 0xFFFF
+    return out
+
+
+def scinit_tab():
+    v = [0] * 512
+    v[nbengine.S_CX], v[nbengine.S_CY], v[nbengine.S_CT] = 540, 700, 40      # the crab's first place
+    for k, (o, b) in enumerate(zip(soff_tab(), bed_tab())):
+        v[128 + k] = o
+        v[256 + k] = b
+    return v
 
 
 def vhd_table(name, depth, width, vals):
@@ -380,9 +413,12 @@ def write_pkg():
              vhd_table("C_NB_PAL", 256, 48, pal_rom()),
              vhd_table("C_NB_LROM", 1024, 16, line_rom()),
              vhd_table("C_NB_BED", 128, 10, bed_tab()),
-             vhd_table("C_NB_DTAB", 16, 22, [(ks << 8) | (sh << 3) | cl for ks, sh, cl in dtab()]),
+             vhd_table("C_NB_SOFF", 128, 16, soff_tab()),
+             vhd_table("C_NB_DT2", 16, 8, dt2_tab()),
              vhd_table("C_NB_SIZE", 16, 4, SIZES),
-             vhd_table("C_NB_SHAPE", 1024, 8, [v & 255 for v in shape_tab()]),
+             vhd_table("C_NB_SHAPE", 512, 8, [v & 255 for v in shape_tab()]),
+             vhd_table("C_NB_UCODE", 512, 24, (nbengine.ucode() + [0] * 512)[:512]),
+             vhd_table("C_NB_SCINIT", 512, 16, scinit_tab()),
              "end package neonbeach_pkg;", ""]
     with open(os.path.join(HERE, "neonbeach_pkg.vhd"), "w") as f:
         f.write("\n".join(parts))

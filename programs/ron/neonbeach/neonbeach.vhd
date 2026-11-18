@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.1.0 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.3.0 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -19,16 +19,21 @@
 --   sea strip       every line under the horizon redraws the sky objects at the same distance (a mirror),
 --                    dimmed and broken by drifting ripple gaps
 --   water           between the surface and the sea bed, both read per pixel from a knot table (block RAM,
---                    16 virtual px a knot, lerped): layers at k / 8 of the local depth (fewer where it is
---                    shallow), columns every 64 px.  v0.1.0: a flat surface at the Tide level
+--                    16 virtual px a knot, lerped, double-buffered by field): eight layers at k / 8 of the local
+--                    depth, columns every 64 px; a foam band under the surface (churned triangles), spray over it
+--   waves           a small microcoded engine (nbengine.py) fills the knot table once a field: each wave's phase
+--                    (Rhythm), its size (waves come in sets), shoaling, the depth cap (breaking: the excess is
+--                    foam), the profile by class, two chop waves (Chop), the surge, foam (Foam), the swash sheet
+--                    running up the beach; it also runs the crab
 --   sand            under the bed line: cells 32 px wide and 32 rows deep, the rows parallel to the sand's
---                    surface
---   crab            span-coded, folded about its centre line (slot B)
+--                    surface.  Wet sand (a 4-bit counter per cell, swept in vblank): the wash covers cells a
+--                    triangle at a time; as it drains the cells keep their diagonals and lose them as they dry
+--   crab            span-coded, folded about its centre line (slot B); walks, pauses, runs from the wash, burrows
+--                    when switched off and comes up somewhere new
 --
 --   K1 Rhythm  K2 Tide  K3 Foam  K4 Chop  K5 Swell  K6 Camera
 --   S7 Fill (Wires / Fill)  S8 Colour (Neon / Ice)  S9 Crab  S10 Sky (Day / Night)  S11 Source
 --   P12 Sun    elevation of the sun or moon; the sky, the palette and the stars follow it
---   (v0.1.0: Tide and the controls below K5 are live; Rhythm, Foam, Chop and Swell come with the waves)
 --
 -- Stage numbering: a register "at stage S" holds pixel n at T + S + n (T = the g_start clock).  One latency
 -- (33) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).  Chassis ([A] timing, virtual
@@ -50,12 +55,13 @@ architecture neonbeach of program_top is
     constant C_HZ    : integer := 356;      -- the horizon (virtual row)
     constant C_SL0   : integer := 626;      -- still sea level at Tide 50 %
     constant C_SUNX  : integer := 240;      -- sun / moon centre, virtual px right of the screen centre
-    constant C_CRX   : integer := 560;      -- crab centre, virtual px from the canvas's left edge (v0.1.0: fixed)
-    constant C_CRY   : integer := 830;      -- crab top row
     constant C_DEF_P12 : integer := 614;
 
     constant C_CM1 : std_logic_vector(15 downto 0) := x"5A93";   -- clouds
     constant C_BM  : std_logic_vector(15 downto 0) := x"1242";   -- gulls
+    -- foam and spray: hand-picked aperiodic masks (a coordinate-bit hash tiles a visible motif)
+    constant C_FOAMM : std_logic_vector(0 to 63) := "0000001000111001000011011110000000010000111101010011000110011100";
+    constant C_DOT   : std_logic_vector(0 to 63) := "1011000000101000000000001000000110000000000100000000000110000000";
     -- sheen: which pulses show, by (pulse number, object): about three in five
     constant C_SHG : std_logic_vector(0 to 63) := x"B6D5_E39A_6F4B_D2ED";
 
@@ -102,6 +108,20 @@ architecture neonbeach of program_top is
         variable v : signed(14 downto 0);
     begin
         if b = '1' then v := shift_left(resize(d, 15), sh); else v := (others => '0'); end if;
+        return v;
+    end function;
+
+    -- gated operands for the filler's small products (size x shoal; the foam gains)
+    function f_gw(d : unsigned(4 downto 0); b : std_logic; sh : natural) return unsigned is
+        variable v : unsigned(8 downto 0);
+    begin
+        if b = '1' then v := shift_left(resize(d, 9), sh); else v := (others => '0'); end if;
+        return v;
+    end function;
+    function f_gf(d : unsigned(9 downto 0); b : std_logic; sh : natural) return unsigned is
+        variable v : unsigned(11 downto 0);
+    begin
+        if b = '1' then v := shift_left(resize(d, 12), sh); else v := (others => '0'); end if;
         return v;
     end function;
 
@@ -169,7 +189,7 @@ architecture neonbeach of program_top is
     signal c_injk : std_logic_vector(1 downto 0) := "00";
     signal c_injent : unsigned(4 downto 0) := (others => '0');
     signal c_injt : unsigned(5 downto 0) := (others => '0');
-    signal k_zy, k_zu, k_zv, k_hy, k_hu, k_hv : unsigned(7 downto 0) := x"40";
+    signal k_hy, k_hu, k_hv : unsigned(7 downto 0) := x"40";
     signal l_skyc : std_logic_vector(47 downto 0) := (others => '0');
 
     -- [C] line ROM / colour ROM / line store
@@ -196,11 +216,60 @@ architecture neonbeach of program_top is
     signal kr_wa : unsigned(7 downto 0) := (others => '0');
     signal kr_wd : std_logic_vector(47 downto 0) := (others => '0');
 
-    -- [C] filler (v0.1.0: a flat surface at the sea level)
-    signal f_run, f_first : std_logic := '0';
-    signal f_k   : unsigned(6 downto 0) := (others => '0');
-    signal f_st  : unsigned(1 downto 0) := (others => '0');
-    signal f_bq, f_b, f_s, f_bn, f_sn : unsigned(9 downto 0) := (others => '0');
+    -- [C] the engine (nbengine.py): once a field, from the field start on, the waves into the knot table bank
+    -- that is not on screen.  Registers r0 .. r15 live in the scratch RAM's top (496 .. 511).
+    signal u_run : std_logic := '0';
+    signal u_wd  : unsigned(1 downto 0) := (others => '0');          -- watchdog: field starts since it began
+    signal u_pc, u_npc : unsigned(8 downto 0) := (others => '0');
+    signal u_ph  : unsigned(3 downto 0) := (others => '0');
+    signal u_iq, u_ir : std_logic_vector(23 downto 0) := (others => '0');
+    signal u_a, u_b, u_res : unsigned(15 downto 0) := (others => '0');
+    signal u_lt  : std_logic := '0';
+    signal u_sum : unsigned(16 downto 0) := (others => '0');
+    signal d_sub, d_xz, d_yi, d_ya : std_logic := '0';                -- pre-decoded adder controls
+    signal sc_ram : t_c_nb_scinit := C_NB_SCINIT;
+    attribute no_rw_check of sc_ram : signal is true;
+    signal sc_ra, sc_wa : unsigned(8 downto 0) := (others => '0');
+    signal sc_q, sc_wd : unsigned(15 downto 0) := (others => '0');
+    signal sc_we : std_logic := '0';
+    signal sh_q  : unsigned(7 downto 0) := (others => '0');
+    signal m_x, m_p : unsigned(17 downto 0) := (others => '0');
+    signal m_y   : unsigned(7 downto 0) := (others => '0');
+    signal m_c   : unsigned(3 downto 0) := (others => '0');
+    signal k_srf, k_bed : unsigned(9 downto 0) := (others => '0');   -- the staged knot word
+    signal k_ds  : unsigned(10 downto 0) := (others => '0');
+    signal k_db, k_fm : unsigned(7 downto 0) := (others => '0');
+    signal k_w   : std_logic := '0';
+    signal o_e, o_ks : unsigned(7 downto 0) := (others => '0');      -- swash envelope, shoreline knot
+    signal o_cx, o_cy : unsigned(9 downto 0) := to_unsigned(540, 10);  -- the crab: centre x, top row
+    signal o_cs : unsigned(7 downto 0) := (others => '0');           -- its sink (0 .. 96) | frame << 7
+    signal o_ch : unsigned(10 downto 0) := (others => '0');          -- its hole's wetness cell
+    signal c_cry, c_cyh : unsigned(10 downto 0) := to_unsigned(700, 11);   -- per field: its drawn top, its hole line
+    signal c_cx2 : unsigned(10 downto 0) := to_unsigned(1080, 11);
+    signal c_dbank : std_logic := '0';                              -- the knot table bank on screen
+    signal u_lfsr : unsigned(15 downto 0) := x"ACE1";
+    signal s_k1, s_k3, s_k4, s_k5 : unsigned(9 downto 0) := to_unsigned(512, 10);
+
+    -- [C] wet sand: Pixel Beach's per-cell counter.  2048 cells (32 rows of depth x 64 columns of 32 px), 4 bits:
+    -- 15 = under the wash, 14 = only the upper triangle, 13 .. 1 drying (one step every 12 fields), 0 dry.  A
+    -- sweep rewrites every cell in vblank; the pixel path reads it in active video.
+    type t_wt is array (0 to 2047) of std_logic_vector(3 downto 0);
+    signal wt_ram : t_wt := (others => (others => '0'));
+    attribute no_rw_check of wt_ram : signal is true;
+    signal wt_a, wt_wa, wt_pa : unsigned(10 downto 0) := (others => '0');
+    signal wt_q, wt_qf, wt_wd : std_logic_vector(3 downto 0) := (others => '0');
+    signal wt_we : std_logic := '0';
+    signal ws_run, ws_rows, ws_tick, ws_uw : std_logic := '0';
+    signal ws_col, ws_c1, ws_c2 : unsigned(5 downto 0) := (others => '0');
+    signal ws_r0 : unsigned(5 downto 0) := (others => '0');
+    signal ws_r1, ws_r2 : unsigned(4 downto 0) := (others => '0');
+    signal ws_v1, ws_v2 : std_logic := '0';
+    signal ws_p  : unsigned(1 downto 0) := (others => '0');
+    signal ws_a1, ws_a2, ws_l : unsigned(7 downto 0) := (others => '0');
+    signal ws_dp : unsigned(4 downto 0) := (others => '0');
+    signal ws_fc, ws_dist : signed(8 downto 0) := (others => '0');
+    signal ws_reach, ws_rc2 : signed(9 downto 0) := (others => '0');
+    signal ws_div : unsigned(3 downto 0) := (others => '0');
 
     -- [C] line engine
     signal e_zk   : std_logic := '0';
@@ -217,6 +286,7 @@ architecture neonbeach of program_top is
     signal e_dyu  : signed(11 downto 0) := (others => '0');
     signal e_c1, e_bd : signed(10 downto 0) := (others => '0');
     signal e_cr   : signed(11 downto 0) := (others => '0');
+    signal e_cv   : std_logic := '0';
     signal e_rm   : unsigned(8 downto 0) := (others => '0');
     signal e_aa, e_ba : unsigned(9 downto 0) := (others => '0');
     signal e_aen, e_ben, e_son, e_bon : std_logic := '0';
@@ -262,7 +332,7 @@ architecture neonbeach of program_top is
     -- water and sand (stages 2 .. 14)
     type t_f4 is array (2 to 5) of unsigned(3 downto 0);
     signal w_f   : t_f4 := (others => (others => '0'));
-    type t_x7 is array (2 to 10) of unsigned(6 downto 0);
+    type t_x7 is array (2 to 10) of unsigned(10 downto 0);
     signal w_xb  : t_x7 := (others => (others => '0'));     -- column parities (64 px, 32 px) & the sand x (5)
     signal w5_ps1, w5_ps2 : signed(14 downto 0) := (others => '0');
     signal w5_s0, w5_b0 : unsigned(9 downto 0) := (others => '0');
@@ -282,6 +352,21 @@ architecture neonbeach of program_top is
     signal wd_ss : t_s3 := (others => (others => '0'));       -- sand facets: column, row, diagonal
     signal wd_inw, wd_ins, wd_cp : std_logic_vector(10 to 13) := (others => '0');
     signal w13_lay : std_logic := '0';
+    signal w5_fm, w6_fm, w7_fm, w8_fm : unsigned(7 downto 0) := (others => '0');
+    signal w8_sph, w9_sph : unsigned(6 downto 0) := (others => '0');
+    signal w9_inf, w9_up : std_logic := '0';
+    signal w9_nn : signed(11 downto 0) := (others => '0');
+    signal wd_inf, wd_sp : std_logic_vector(10 to 13) := (others => '0');
+    type t_s2 is array (10 to 13) of std_logic_vector(1 downto 0);
+    signal wd_ff : t_s2 := (others => "00");
+    signal wd_ft : t_t7 := (others => (others => '0'));
+    signal f14_in, sp14 : std_logic := '0';
+    signal wd_up : std_logic_vector(10 to 13) := (others => '0');          -- the upper triangle of a sand cell
+    type t_h2 is array (10 to 13) of unsigned(1 downto 0);
+    signal wd_h : t_h2 := (others => "00");                                -- a 2-bit cell hash
+    signal k14_wash : std_logic := '0';
+    signal f14_sub : std_logic_vector(1 downto 0) := "00";
+    signal f14_t : unsigned(6 downto 0) := (others => '0');
     signal w14_in, s14_in : std_logic := '0';
     signal w14_sub : std_logic_vector(1 downto 0) := "00";
     signal s14_sub : std_logic_vector(2 downto 0) := "000";
@@ -414,6 +499,10 @@ begin
                 s_night <= registers_in(6)(3);
                 s_src   <= registers_in(6)(4);
                 s_k2    <= unsigned(registers_in(1));
+                s_k1    <= unsigned(registers_in(0));
+                s_k3    <= unsigned(registers_in(2));
+                s_k4    <= unsigned(registers_in(3));
+                s_k5    <= unsigned(registers_in(4));
                 s_xs    <= s_xsr;
                 -- wire thickness: 3 x 2 at 1080p, 2 x 2 at 720p, 3 x 1 at 1080i, 1 x 1 at SD
                 if s_xsr = 2 then s_th2 <= '1'; s_th3 <= '1';
@@ -480,6 +569,11 @@ begin
                     when 43 =>
                         c_fp <= resize(s_gp, 14);
                         c_cgn <= s_g6(12 downto 9);
+                    when 52 =>                              -- the crab, from the engine's last pass
+                        c_cry <= resize(o_cy, 11) + resize(o_cs(6 downto 0), 11);
+                    when 53 =>
+                        c_cyh <= resize(o_cy, 11) + 96;
+                        c_cx2 <= o_cx & '0';
                     when 44 =>                              -- clouds and gulls drift on their own
                         c_sa1 <= c_t(13 downto 0);
                         c_sab <= c_t(11 downto 0) & "00";
@@ -489,7 +583,7 @@ begin
                         elsif c_mid = '1' then c_tod <= "01";
                         elsif c_lo = '1' then c_tod <= "10";
                         end if;
-                        c_esun <= not s_night; c_emoon <= s_night; c_ecrab <= not s_croff;
+                        c_esun <= not s_night; c_emoon <= s_night; c_ecrab <= '1';   -- (the engine burrows it)
                         if s_night = '0' and c_e(9 downto 6) /= "0000" then c_ebird <= '1'; else c_ebird <= '0'; end if;
                         if s_night = '1' or c_e(9 downto 6) = "0000" then c_sden <= "11";
                         elsif c_e(9 downto 6) = "0001" then c_sden <= "10";
@@ -502,9 +596,9 @@ begin
                     when 50 | 51 =>
                         c_inj <= '1';
                         if s_night = '1' then
-                            c_injent <= s_zc(0) & "0000"; c_injt <= c_e(9 downto 4);
+                            c_injent <= '0' & s_zc(0) & "000"; c_injt <= c_e(9 downto 4);
                         else
-                            c_injent <= s_zc(0) & '0' & c_e(9 downto 7); c_injt <= c_e(6 downto 1);
+                            c_injent <= '0' & s_zc(0) & c_e(9 downto 7); c_injt <= c_e(6 downto 1);
                         end if;
                         if s_zc(0) = '0' then c_injk <= "01"; else c_injk <= "10"; end if;
                     when others => null;
@@ -633,7 +727,8 @@ begin
                     e_dyu <= signed(resize(e_d, 12)) - c_sunc;
                     e_c1  <= signed(resize(e_d, 11)) - 200;
                     e_bd  <= signed(resize(e_d, 11)) - 60;
-                    e_cr  <= signed(resize(v_y, 12)) - C_CRY;
+                    e_cr  <= signed(resize(v_y, 12)) - signed(resize(c_cry, 12));
+                    if v_y < c_cyh then e_cv <= '1'; else e_cv <= '0'; end if;    -- above its hole line
                     v_rm := to_signed(C_HZ, 12) - signed(resize(e_d, 12));
                     if v_rm(11) = '1' then e_rm <= (others => '0'); else e_rm <= unsigned(v_rm(8 downto 0)); end if;
                 when 3 =>
@@ -672,8 +767,8 @@ begin
                     -- slot B: the crab
                     e_ben <= '0';
                     e_ba <= (others => '0');
-                    if c_ecrab = '1' and e_cr(11 downto 7) = "00000" and e_cr(6 downto 5) /= "11" then   -- 0 <= e_cr < 96
-                        if c_t(5) = '1' then e_ba <= to_unsigned(768, 10) + (unsigned(e_cr(6 downto 1)) & "00");
+                    if c_ecrab = '1' and e_cv = '1' and e_cr(11 downto 7) = "00000" and e_cr(6 downto 5) /= "11" then   -- 0 <= e_cr < 96
+                        if o_cs(7) = '1' then e_ba <= to_unsigned(768, 10) + (unsigned(e_cr(6 downto 1)) & "00");
                         else e_ba <= to_unsigned(576, 10) + (unsigned(e_cr(6 downto 1)) & "00"); end if;
                         e_ben <= '1';
                     end if;
@@ -696,7 +791,7 @@ begin
                     n_xw0 <= unsigned(w_x0 + 1920);          -- water and sand: half units from the canvas's left
                 when 7 =>
                     n_x0 <= e_x0(12 downto 0);
-                    n_xb0 <= signed(n_xw0) - (2 * C_CRX);    -- the crab: half units from its centre line
+                    n_xb0 <= signed(n_xw0) - signed(resize(c_cx2, 14));   -- the crab: half units from its centre line
                 when 12 =>                                   -- the sheen's diagonal phase: x + y + 4 t
                     n_pa0 <= unsigned(e_x0) + resize(v_y & '0', 14) + (c_t(10 downto 0) & "000");
                 when 32 =>
@@ -873,6 +968,7 @@ begin
         variable v_n, v_sd, v_dd : signed(11 downto 0);
         variable v_r2  : unsigned(10 downto 0);
         variable v_sk  : unsigned(6 downto 0);
+        variable v_wv  : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
             ----------------------------------------------------------------
@@ -880,9 +976,9 @@ begin
             -- lift (8), the inside tests (9), the layer divide (10 .. 12), level of detail (13)
             ----------------------------------------------------------------
             -- 2
-            if s_zone = '1' then kr_a <= (others => '0'); else kr_a <= '0' & b_xw(11 downto 5); end if;
+            kr_a <= c_dbank & b_xw(11 downto 5);
             w_f(2) <= b_xw(4 downto 1);
-            w_xb(2) <= b_xw(7) & b_xw(6 downto 1);
+            w_xb(2) <= b_xw(11 downto 1);
             for i in 3 to 5 loop w_f(i) <= w_f(i - 1); end loop;
             for i in 3 to 10 loop w_xb(i) <= w_xb(i - 1); end loop;
             -- 5 .. 8: the steps times the fraction, as gated operands.  The bed's lerp runs one stage behind
@@ -894,9 +990,11 @@ begin
             w5_s0 <= unsigned(kr_qf(47 downto 38));
             w5_b0 <= unsigned(kr_qf(26 downto 17));
             w5_db <= signed(kr_qf(16 downto 9));
+            w5_fm <= unsigned(kr_qf(8 downto 1));
             -- 6 (the camera raises the sand by up to 118 rows: folded into the bed's base here)
             v_db := resize(w5_db, 11);
             w6_ps <= w5_ps1 + w5_ps2;
+            w6_fm <= w5_fm;
             w6_pb1 <= f_gk(v_db, w_f(5)(0), 0) + f_gk(v_db, w_f(5)(1), 1);
             w6_pb2 <= f_gk(v_db, w_f(5)(2), 2) + f_gk(v_db, w_f(5)(3), 3);
             w6_s0 <= signed(resize(w5_s0, 12)) - signed(resize(s_cg & "00", 12));   -- the surface up to 236 rows
@@ -905,10 +1003,14 @@ begin
             w7_srf <= w6_s0 + resize(shift_right(w6_ps, 4), 12);
             w7_pb <= w6_pb1 + w6_pb2;
             w7_b0 <= w6_b0;
+            w7_fm <= w6_fm;
             -- 8: rows under the surface; the bed.  (n, the rows under the sand and the depth are linearly
             -- dependent: computed in one stage they gave ABC's &mfs a redundancy to exploit, which broke
             -- abc9's carry-box order.  n goes one stage early.)
             w8_n   <= signed(resize(l_row, 12)) - w7_srf;
+            w8_fm  <= w7_fm;
+            -- the spray band over the surface: (foam - 64) / 2 rows where the foam is over 64
+            if w7_fm(7 downto 6) /= "00" then w8_sph <= w7_fm(7 downto 1) - 32; else w8_sph <= (others => '0'); end if;
             w8_srf <= w7_srf;
             w8_bed <= w7_b0 + resize(shift_right(w7_pb, 4), 12);
             -- 9: the local depth, rows under the sand line
@@ -916,6 +1018,15 @@ begin
             v_sd := signed(resize(l_row, 12)) - w8_bed;
             v_dd := w8_bed - w8_srf;
             w9_inw <= (not v_n(11)) and v_sd(11);
+            -- foam: the top rows under the surface, as thick as the knot's foam / 4
+            if v_n(11) = '0' and v_sd(11) = '1' and v_n(10 downto 6) = "00000" and unsigned(v_n(5 downto 0)) < w8_fm(7 downto 2) then
+                w9_inf <= '1';
+            else
+                w9_inf <= '0';
+            end if;
+            w9_up <= v_n(11) and v_sd(11);
+            w9_nn <= -v_n;
+            w9_sph <= w8_sph;
             w9_ins <= not v_sd(11);
             if v_n(11) = '1' then w9_n <= (others => '0');
             elsif v_n(10) = '1' then w9_n <= (others => '1');
@@ -948,19 +1059,51 @@ begin
             else wd_wt(10) <= to_unsigned(127, 7) - w9_n(7 downto 1); end if;
             wd_st(10) <= to_unsigned(127, 7) - w9_sd(9 downto 3);
             wd_ss(10) <= w_xb(9)(5) & w9_sd(5) & '0';
+            -- the wetness cell under this pixel (row of depth, column), its upper triangle, its hash
+            wt_pa <= w9_sd(9 downto 5) & w_xb(9)(10 downto 5);
+            if w9_sd(4 downto 0) < w_xb(9)(4 downto 0) then wd_up(10) <= '1'; else wd_up(10) <= '0'; end if;
+            wd_h(10) <= (w_xb(9)(5) xor w9_sd(6)) & (w_xb(9)(6) xor w9_sd(5));
             wd_inw(10) <= w9_inw; wd_ins(10) <= w9_ins; wd_cp(10) <= w_xb(9)(6);
+            -- foam facets: a churn mask per 16 px x 8 rows (drifting), and a diagonal in every cell
+            wd_inf(10) <= w9_inf;
+            wd_ff(10)(1) <= C_FOAMM(to_integer((w_xb(9)(6 downto 4) xor c_t(6 downto 4)) & w9_n(5 downto 3)));
+            if w_xb(9)(3 downto 0) > w9_n(3 downto 0) then wd_ff(10)(0) <= '1'; else wd_ff(10)(0) <= '0'; end if;
+            wd_ft(10) <= to_unsigned(127, 7) - (w9_n(5 downto 0) & '0');
+            -- spray: dots in 8 px cells over the band, reshuffled a few times a second
+            if w9_up = '1' and w9_nn(11 downto 7) = "00000" and unsigned(w9_nn(6 downto 0)) < w9_sph
+               and C_DOT(to_integer((w_xb(9)(5 downto 3) xor c_t(5 downto 3)) & l_row(5 downto 3))) = '1' then
+                wd_sp(10) <= '1';
+            else
+                wd_sp(10) <= '0';
+            end if;
             for i in 11 to 13 loop
                 wd_wt(i) <= wd_wt(i - 1); wd_st(i) <= wd_st(i - 1); wd_ss(i) <= wd_ss(i - 1);
                 wd_inw(i) <= wd_inw(i - 1); wd_ins(i) <= wd_ins(i - 1); wd_cp(i) <= wd_cp(i - 1);
+                wd_inf(i) <= wd_inf(i - 1); wd_sp(i) <= wd_sp(i - 1); wd_ff(i) <= wd_ff(i - 1); wd_ft(i) <= wd_ft(i - 1);
+                wd_up(i) <= wd_up(i - 1); wd_h(i) <= wd_h(i - 1);
             end loop;
-            -- 13: level of detail: eight layers where the water is 128 rows deep or more, four, two, none
-            if wd_d(12)(9 downto 7) /= "000" then w13_lay <= wd_q(12)(0);
-            elsif wd_d(12)(6) = '1' then w13_lay <= wd_q(12)(1);
-            elsif wd_d(12)(5) = '1' then w13_lay <= wd_q(12)(2);
-            else w13_lay <= '0'; end if;
+            -- 13: always eight layers (switching the layer bit by depth drew stair-step verticals where the
+            -- count changed); where they crowd near the shore they merge into a solid bright edge
+            w13_lay <= wd_q(12)(0);
             -- 14
             w14_in <= wd_inw(13); w14_sub <= w13_lay & wd_cp(13); w14_t <= wd_wt(13);
-            s14_in <= wd_ins(13); s14_sub <= wd_ss(13); s14_t <= wd_st(13);
+            s14_in <= wd_ins(13);
+            -- the wash: 15 = the whole cell, 14 = its upper triangle.  Drying sand keeps its diagonals for a while
+            -- and loses them a triangle at a time (the upper ones last), by the cell's hash
+            v_wv := unsigned(wt_qf);
+            if v_wv = 15 or (v_wv = 14 and wd_up(13) = '1') then
+                k14_wash <= '1'; s14_sub <= wd_ss(13)(2 downto 1) & wd_up(13);
+            else
+                k14_wash <= '0';
+                if v_wv >= 14 or (wd_up(13) = '1' and v_wv >= 3 + resize(wd_h(13), 4))
+                   or (wd_up(13) = '0' and v_wv >= 8 + resize(wd_h(13), 4)) then
+                    s14_sub <= wd_ss(13)(2 downto 1) & wd_up(13);
+                else
+                    s14_sub <= wd_ss(13)(2 downto 1) & '0';
+                end if;
+            end if;
+            if wd_st(13) > (v_wv & "00") then s14_t <= wd_st(13) - (v_wv & "00"); else s14_t <= (others => '0'); end if;
+            f14_in <= wd_inf(13); f14_sub <= wd_ff(13); f14_t <= wd_ft(13); sp14 <= wd_sp(13);
 
             ----------------------------------------------------------------
             -- sun / moon
@@ -1087,40 +1230,255 @@ begin
     -- [C] FILLER (vblank): writes the knot table from the right edge to the left.  v0.1.0: the surface is
     -- the sea level wherever the bed is below it, and the bed itself on the beach.
     ---------------------------------------------------------------------------
-    p_fill : process(clk)
-        variable v_ds : signed(10 downto 0);
-        variable v_db : signed(10 downto 0);
+    ---------------------------------------------------------------------------
+    -- [C] WET SAND: the RAM (one write statement; the pixel path reads it in active video) and the sweep (in
+    -- vblank, after the sky keys): per column a reach in quarter cells from the swash (the engine's envelope and
+    -- shoreline, from its last pass) plus two drifting triangle lobes, then its 32 cells read, updated and
+    -- written back one a clock.
+    ---------------------------------------------------------------------------
+    p_wet : process(clk)
+        variable v_l9  : signed(8 downto 0);
+        variable v_rch : signed(9 downto 0);
+        variable v_top : signed(9 downto 0);
+        variable v_o, v_n : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
+            if s_zone = '1' and ws_rows = '1' then wt_a <= ws_r0(4 downto 0) & ws_col; else wt_a <= wt_pa; end if;
+            wt_q  <= wt_ram(to_integer(wt_a));
+            wt_qf <= wt_q;
+            if wt_we = '1' then wt_ram(to_integer(wt_wa)) <= wt_wd; end if;
+
+            -- the row pipeline: the cell issued two clocks ago is in wt_qf now
+            ws_r1 <= ws_r0(4 downto 0); ws_r2 <= ws_r1;
+            ws_c1 <= ws_col; ws_c2 <= ws_c1;
+            ws_v1 <= ws_rows and not ws_r0(5); ws_v2 <= ws_v1;
+            ws_rc2 <= ws_reach;
+            wt_we <= '0';
+            if ws_v2 = '1' then
+                v_o := unsigned(wt_qf);
+                v_top := signed(resize(ws_r2 & "00", 10));
+                if ws_rc2 >= v_top + 4 then v_n := to_unsigned(15, 4);
+                elsif ws_rc2 > v_top then v_n := to_unsigned(14, 4);
+                elsif v_o >= 14 then v_n := to_unsigned(13, 4);
+                elsif ws_tick = '1' and v_o /= 0 then v_n := v_o - 1;
+                else v_n := v_o; end if;
+                if ws_uw = '1' and ws_r2 = 0 then v_n := to_unsigned(13, 4); end if;    -- the sea bed's top row: damp
+                if o_cs(6 downto 0) >= 90 and (ws_r2 & ws_c2) = o_ch then v_n := to_unsigned(13, 4); end if;   -- the crab's hole
+                wt_we <= '1'; wt_wa <= ws_r2 & ws_c2; wt_wd <= std_logic_vector(v_n);
+            end if;
+
+            if s_zone = '1' and s_zc = 120 then
+                ws_run <= '1'; ws_rows <= '0'; ws_col <= (others => '0'); ws_p <= "00";
+                ws_a1 <= c_t(7 downto 0) + (c_t(6 downto 0) & '0');               -- lobes drift: 3 t and -2 t
+                ws_a2 <= to_unsigned(0, 8) - (c_t(6 downto 0) & '0');
+                ws_dp <= o_e(7 downto 3);
+                v_l9 := signed(resize(o_ks, 9)) - signed(resize(o_e(7 downto 3), 9));
+                ws_fc <= shift_right(v_l9, 1);                                     -- the run-up's front column
+                if ws_div = 11 then ws_div <= (others => '0'); ws_tick <= '1'; else ws_div <= ws_div + 1; ws_tick <= '0'; end if;
+            elsif ws_run = '1' then
+                if ws_rows = '0' then
+                    case ws_p is
+                        when "00" =>
+                            ws_l <= resize(f_tri7(ws_a1), 8) + resize(f_tri7(ws_a2), 8);
+                            if (ws_col & '1') >= o_ks(6 downto 0) and o_ks(7) = '0' then ws_uw <= '1'; else ws_uw <= '0'; end if;
+                            ws_dist <= ws_fc - signed(resize(ws_col, 9));
+                            ws_p <= "01";
+                        when "01" =>
+                            v_l9 := signed(resize(ws_l, 9)) - 128;
+                            ws_reach <= signed(resize(ws_dp, 10)) + resize(shift_right(v_l9, 5), 10);
+                            ws_p <= "10";
+                        when "10" =>
+                            if ws_uw = '1' then
+                                ws_reach <= (others => '0');
+                            elsif ws_dist > 0 then
+                                ws_reach <= ws_reach - shift_left(resize(ws_dist, 10), 3) - 4;
+                            end if;
+                            ws_a1 <= ws_a1 + 37; ws_a2 <= ws_a2 + 23;
+                            ws_p <= "11";
+                        when others =>
+                            ws_rows <= '1'; ws_r0 <= (others => '0');
+                    end case;
+                else
+                    if ws_r0(5) = '0' then
+                        ws_r0 <= ws_r0 + 1;
+                    else
+                        ws_rows <= '0'; ws_p <= "00";
+                        if ws_col = 63 then ws_run <= '0'; else ws_col <= ws_col + 1; end if;
+                    end if;
+                end if;
+            end if;
+        end if;
+    end process p_wet;
+
+    p_eng : process(clk)
+        variable v_op  : integer range 0 to 31;
+        variable v_d, v_ra, v_rb : unsigned(3 downto 0);
+        variable v_i11 : unsigned(10 downto 0);
+        variable v_res : unsigned(15 downto 0);
+        variable v_n   : natural range 0 to 3;
+        variable v_wr  : std_logic;
+        variable v_sub : std_logic;
+        variable v_x, v_y, v_sum : unsigned(16 downto 0);
+    begin
+        if rising_edge(clk) then
+            -- the program, the scratch RAM (one write statement), the wave shapes: registered reads
+            u_iq <= std_logic_vector(C_NB_UCODE(to_integer(u_pc)));
+            sc_q <= sc_ram(to_integer(sc_ra));
+            if sc_we = '1' then sc_ram(to_integer(sc_wa)) <= sc_wd; end if;
+            sh_q <= C_NB_SHAPE(to_integer(u_a(8 downto 0)));
+            sc_we <= '0';
             kr_we <= '0';
-            f_bq <= C_NB_BED(to_integer(f_k));
-            if s_zone = '1' and s_zc = 100 then
-                f_run <= '1'; f_k <= to_unsigned(127, 7); f_st <= "00"; f_first <= '1';
-            elsif f_run = '1' then
-                case f_st is
-                    when "00" => f_st <= "01";
-                    when "01" => f_b <= f_bq; f_st <= "10";
-                    when "10" =>
-                        if f_b > c_sl(9 downto 0) then f_s <= c_sl(9 downto 0); else f_s <= f_b; end if;
-                        f_st <= "11";
+            u_lfsr <= u_lfsr(14 downto 0) & (u_lfsr(15) xor u_lfsr(13) xor u_lfsr(12) xor u_lfsr(10));
+            -- the serial multiplier: one partial product a clock
+            if m_c /= 0 then
+                if m_y(0) = '1' then m_p <= m_p + m_x; end if;
+                m_x <= m_x(16 downto 0) & '0';
+                m_y <= '0' & m_y(7 downto 1);
+                m_c <= m_c - 1;
+            end if;
+
+            v_op := to_integer(unsigned(u_ir(23 downto 19)));
+            v_d  := unsigned(u_ir(18 downto 15));
+            v_ra := unsigned(u_ir(14 downto 11));
+            v_rb := unsigned(u_ir(10 downto 7));
+            v_i11 := unsigned(u_ir(10 downto 0));
+            v_n := to_integer(unsigned(u_ir(1 downto 0)));
+
+            -- started at every field start once it has finished (the bank it wrote goes on screen); a
+            -- watchdog restarts it if four field starts pass without it finishing
+            if s_zgo = '1' and (u_run = '0' or u_wd = 3) then
+                if u_run = '0' then c_dbank <= not c_dbank; end if;
+                u_run <= '1'; u_pc <= (others => '0'); u_ph <= (others => '0'); u_wd <= (others => '0');
+            elsif s_zgo = '1' then
+                u_wd <= u_wd + 1;
+            elsif u_run = '1' then
+                case to_integer(u_ph) is
+                    when 0 => u_ph <= to_unsigned(1, 4);                 -- (program word read)
+                    when 1 =>
+                        u_ir <= u_iq;
+                        u_ph <= to_unsigned(2, 4);
+                    when 2 =>
+                        sc_ra <= "11111" & v_ra;                         -- operand a
+                        -- the adder's controls, decoded while the operands are read (off the execute path)
+                        if v_op = 3 or v_op = 25 or v_op = 26 or v_op = 27 then d_sub <= '1'; else d_sub <= '0'; end if;
+                        if v_op = 27 then d_xz <= '1'; d_ya <= '1'; else d_xz <= '0'; d_ya <= '0'; end if;
+                        if v_op = 4 then d_yi <= '1'; else d_yi <= '0'; end if;
+                        u_ph <= to_unsigned(3, 4);
+                    when 3 =>
+                        sc_ra <= "11111" & v_rb;                         -- operand b
+                        u_ph <= to_unsigned(4, 4);
+                    when 4 =>
+                        if v_ra = 0 then u_a <= (others => '0'); else u_a <= sc_q; end if;
+                        u_ph <= to_unsigned(5, 4);
+                    when 5 =>
+                        if v_rb = 0 then u_b <= (others => '0'); else u_b <= sc_q; end if;
+                        if v_op = 17 then sc_ra <= u_a(8 downto 0); end if;                              -- FRD
+                        u_ph <= to_unsigned(6, 4);
+                    when 6 =>
+                        -- execute
+                        -- one 17-bit adder: ADD, SUB, ADDI, ABS (0 - a) and the MIN / MAX compare (a - b), its
+                        -- controls registered in phase 2, its sum registered here; results are picked in phase 7
+                        if d_xz = '1' then v_x := (others => '0'); else v_x := unsigned(resize(signed(u_a), 17)); end if;
+                        if d_yi = '1' then v_y := unsigned(resize(signed(v_i11), 17));
+                        elsif d_ya = '1' then v_y := unsigned(resize(signed(u_a), 17));
+                        else v_y := unsigned(resize(signed(u_b), 17)); end if;
+                        if d_sub = '1' then v_y := not v_y; end if;
+                        u_sum <= v_x + v_y + ("" & d_sub);
+                        v_res := (others => '0');
+                        u_npc <= u_pc + 1;
+                        case v_op is
+                            when 1  => v_res := unsigned(resize(signed(u_ir(14 downto 0)), 16));           -- LDI
+                            when 5  => v_res := shift_right(u_a, v_n + 1);                                  -- SHR
+                            when 6  => v_res := shift_left(u_a, v_n + 1);                                   -- SHL
+                            when 7  => v_res := u_a and resize(v_i11, 16);                                  -- AND
+                            when 8  =>                                                                      -- MUL
+                                m_p <= (others => '0'); m_x <= resize(u_a(9 downto 0), 18); m_y <= u_b(7 downto 0);
+                                m_c <= to_unsigned(8, 4);
+                            when 10 => u_npc <= unsigned(u_ir(8 downto 0));                                 -- JMP
+                            when 11 => if u_a(15) = '1' then u_npc <= unsigned(u_ir(8 downto 0)); end if;   -- JN
+                            when 12 => if u_a = 0 then u_npc <= unsigned(u_ir(8 downto 0)); end if;         -- JZ
+                            when 24 => if u_a(15) = '0' and u_a /= 0 then u_npc <= unsigned(u_ir(8 downto 0)); end if;  -- JP
+                            when 13 =>                                                                      -- IN
+                                case to_integer(v_i11(2 downto 0)) is
+                                    when 0      => v_res := resize(s_k1, 16);
+                                    when 1      => v_res := resize(s_k3, 16);
+                                    when 2      => v_res := resize(s_k4, 16);
+                                    when 3      => v_res := resize(s_k5, 16);
+                                    when 4      => v_res := resize(c_sl, 16);
+                                    when 5      => v_res := c_t;
+                                    when 6      => v_res := u_lfsr;
+                                    when others => v_res := (0 => s_croff, others => '0');
+                                end case;
+                            when 16 =>                                                                      -- TAB
+                                if v_i11(0) = '0' then v_res := resize(C_NB_DT2(to_integer(u_a(3 downto 0))), 16);
+                                else v_res := resize(C_NB_SIZE(to_integer(u_a(3 downto 0))), 16); end if;
+                            when 18 =>                                                                      -- FWR
+                                sc_we <= '1'; sc_wa <= u_a(8 downto 0); sc_wd <= u_b;
+                            when 19 =>                                                                      -- KST
+                                case to_integer(v_i11(2 downto 0)) is
+                                    when 0      => k_srf <= u_a(9 downto 0);
+                                    when 1      => k_ds  <= u_a(10 downto 0);
+                                    when 2      => k_bed <= u_a(9 downto 0);
+                                    when 3      => k_db  <= u_a(7 downto 0);
+                                    when 4      => k_fm  <= u_a(7 downto 0);
+                                    when others => k_w   <= u_a(0);
+                                end case;
+                            when 20 =>                                                                      -- KWR
+                                kr_we <= '1';
+                                kr_wa <= (not c_dbank) & u_a(6 downto 0);
+                                kr_wd <= std_logic_vector(k_srf) & std_logic_vector(k_ds) & std_logic_vector(k_bed)
+                                         & std_logic_vector(k_db) & std_logic_vector(k_fm) & k_w;
+                            when 21 =>                                                                      -- OUT
+                                case to_integer(v_i11(2 downto 0)) is
+                                    when 0      => o_e  <= u_a(7 downto 0);
+                                    when 1      => o_ks <= u_a(7 downto 0);
+                                    when 2      => o_cx <= u_a(9 downto 0);
+                                    when 3      => o_cy <= u_a(9 downto 0);
+                                    when 4      => o_cs <= u_a(7 downto 0);
+                                    when others => o_ch <= u_a(10 downto 0);
+                                end case;
+                            when 22 => u_run <= '0';                                                        -- END
+                            when 23 => v_res := resize(f_tri7(u_a(15 downto 8)), 16);                      -- TRI
+                            when 27 => v_res := u_a;                                                        -- ABS (negated in 7)
+                            when others => null;
+                        end case;
+                        u_res <= v_res;
+                        u_ph <= to_unsigned(7, 4);
+                    when 7 =>
+                        case v_op is
+                            when 2 | 3 | 4 => u_res <= u_sum(15 downto 0);                                  -- ADD SUB ADDI
+                            when 27 => if u_a(15) = '1' then u_res <= u_sum(15 downto 0); end if;           -- ABS (u_res = a)
+                            when 25 => if u_sum(16) = '1' then u_res <= u_a; else u_res <= u_b; end if;     -- MIN
+                            when 26 => if u_sum(16) = '1' then u_res <= u_b; else u_res <= u_a; end if;     -- MAX
+                            when 17 => u_res <= sc_q;                                                       -- FRD
+                            when 15 => u_res <= unsigned(resize(signed(sh_q), 16));                         -- SHP
+                            when 9  =>                                                                      -- MRD
+                                case to_integer(v_i11(1 downto 0)) is
+                                    when 0      => u_res <= m_p(15 downto 0);
+                                    when 1      => u_res <= resize(m_p(17 downto 6), 16);
+                                    when 2      => u_res <= resize(m_p(17 downto 7), 16);
+                                    when others => u_res <= resize(m_p(17 downto 3), 16);
+                                end case;
+                            when others => null;
+                        end case;
+                        if v_op /= 9 or m_c = 0 then u_ph <= to_unsigned(8, 4); end if;
                     when others =>
-                        if f_first = '1' then
-                            v_ds := (others => '0'); v_db := (others => '0');
-                        else
-                            v_ds := signed(resize(f_sn, 11)) - signed(resize(f_s, 11));
-                            v_db := signed(resize(f_bn, 11)) - signed(resize(f_b, 11));
+                        -- write back
+                        if true then
+                            case v_op is
+                                when 1 | 2 | 3 | 4 | 5 | 6 | 7 | 13 | 16 | 23 | 25 | 26 | 27 => v_wr := '1';
+                                when 9 | 15 | 17 => v_wr := '1';
+                                when others => v_wr := '0';
+                            end case;
+                            if v_d = 0 then v_wr := '0'; end if;
+                            sc_we <= v_wr; sc_wa <= "11111" & v_d; sc_wd <= u_res;
+                            u_pc <= u_npc;
+                            u_ph <= (others => '0');
                         end if;
-                        kr_we <= '1';
-                        kr_wa <= '0' & f_k;
-                        kr_wd <= std_logic_vector(f_s) & std_logic_vector(v_ds) & std_logic_vector(f_b)
-                                 & std_logic_vector(v_db(7 downto 0)) & "000000000";
-                        f_sn <= f_s; f_bn <= f_b; f_first <= '0';
-                        if f_k = 0 then f_run <= '0'; else f_k <= f_k - 1; end if;
-                        f_st <= "00";
                 end case;
             end if;
         end if;
-    end process p_fill;
+    end process p_eng;
 
     ---------------------------------------------------------------------------
     -- [E] MERGE, EDGES, COLOUR (stages 15 .. 24)
@@ -1172,9 +1530,15 @@ begin
                     when others => v_t := to_unsigned(100, 8);
                 end case;
                 v_fon := l_fill(7); v_sky := '0';
+            elsif s14_in = '1' and k14_wash = '1' then
+                v_obj := "0111"; v_sub := '0' & s14_sub; v_ramp := "100";
+                v_t := to_unsigned(80, 8); v_fon := l_fill(4); v_sky := '0';
             elsif s14_in = '1' then
                 v_obj := "1000"; v_sub := '0' & s14_sub; v_ramp := "101";
                 v_t := resize(s14_t, 8); v_fon := l_fill(5); v_sky := '0';
+            elsif f14_in = '1' then
+                v_obj := "0110"; v_sub := "00" & f14_sub; v_ramp := "011";
+                v_t := resize(f14_t, 8); v_fon := l_fill(3); v_sky := '0';
             elsif w14_in = '1' then
                 v_obj := "0101"; v_sub := "00" & w14_sub; v_ramp := "010";
                 v_t := resize(w14_t, 8); v_fon := l_fill(2); v_sky := '0';
@@ -1187,7 +1551,9 @@ begin
             end if;
             s15_id <= std_logic_vector(v_obj) & v_sub;
             s15_ramp <= v_ramp; s15_t <= v_t(6 downto 0); s15_fon <= v_fon; s15_sky <= v_sky;
-            if t14_on = '1' and v_obj = 0 then s15_ovl <= "01"; else s15_ovl <= "00"; end if;
+            if sp14 = '1' and v_obj < 5 then s15_ovl <= "10";
+            elsif t14_on = '1' and v_obj = 0 then s15_ovl <= "01";
+            else s15_ovl <= "00"; end if;
             s15_tw <= t14_tw;
 
             -- the ID history along the line, and the line store (this line's ID above last line's)
@@ -1219,7 +1585,9 @@ begin
             ----------------------------------------------------------------
             v_w := f_max4(f_max4(s16_m1, s16_m2), s16_m3);
             s17_blk <= '0'; s17_w <= '0'; s17_sky <= '0'; s17_pn <= c_pal; s_ik(17) <= "00";
-            if s16_e = '1' then
+            if s16_ovl = "10" then                      -- spray
+                s17_ent <= to_unsigned(28, 5); s17_t6 <= (others => '0');
+            elsif s16_e = '1' then
                 s17_ent <= '1' & v_w; s17_w <= '1';
                 s17_t6 <= (others => '0');
             elsif s16_ovl = "01" then
@@ -1324,14 +1692,15 @@ begin
 
             -- the sky keys from the made-up pixels, and the sky ramp word (c0 = zenith, delta = half the
             -- step to the horizon)
-            if s_ik(23) = "01" then k_zy <= s23_y(9 downto 2); k_zu <= s23_u(9 downto 2); k_zv <= s23_v(9 downto 2); end if;
+            if s_ik(23) = "01" then
+                l_skyc(47 downto 40) <= std_logic_vector(s23_y(9 downto 2));
+                l_skyc(39 downto 32) <= std_logic_vector(s23_u(9 downto 2));
+                l_skyc(31 downto 24) <= std_logic_vector(s23_v(9 downto 2));
+            end if;
             if s_ik(23) = "10" then k_hy <= s23_y(9 downto 2); k_hu <= s23_u(9 downto 2); k_hv <= s23_v(9 downto 2); end if;
-            l_skyc(47 downto 40) <= std_logic_vector(k_zy);
-            l_skyc(39 downto 32) <= std_logic_vector(k_zu);
-            l_skyc(31 downto 24) <= std_logic_vector(k_zv);
-            v_k9 := signed(resize(k_hy, 9)) - signed(resize(k_zy, 9)); l_skyc(23 downto 16) <= std_logic_vector(v_k9(8 downto 1));
-            v_k9 := signed(resize(k_hu, 9)) - signed(resize(k_zu, 9)); l_skyc(15 downto 8)  <= std_logic_vector(v_k9(8 downto 1));
-            v_k9 := signed(resize(k_hv, 9)) - signed(resize(k_zv, 9)); l_skyc(7 downto 0)   <= std_logic_vector(v_k9(8 downto 1));
+            v_k9 := signed(resize(k_hy, 9)) - signed(resize(unsigned(l_skyc(47 downto 40)), 9)); l_skyc(23 downto 16) <= std_logic_vector(v_k9(8 downto 1));
+            v_k9 := signed(resize(k_hu, 9)) - signed(resize(unsigned(l_skyc(39 downto 32)), 9)); l_skyc(15 downto 8)  <= std_logic_vector(v_k9(8 downto 1));
+            v_k9 := signed(resize(k_hv, 9)) - signed(resize(unsigned(l_skyc(31 downto 24)), 9)); l_skyc(7 downto 0)   <= std_logic_vector(v_k9(8 downto 1));
 
             -- 24: neon glow.  A wire's chroma is held over the black pixels that follow it (4 px), so the
             -- wide chroma filter below returns a wire at close to full saturation instead of a pastel, with
