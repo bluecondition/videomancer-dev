@@ -1,11 +1,11 @@
-# NEONSCAPE (v0.3.0, 2026-11-17).  Wireframe neon landscapes: grid floor, sun / moon, mesh mountains, city, palms,
+# NEONSCAPE (v0.3.1, 2026-11-17).  Wireframe neon landscapes: grid floor, sun / moon, mesh mountains, city, palms,
 # car, clouds, birds, rain, stars, lake mirror, tunnel.  See neonscape.vhd, neonscape.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 33
 program_id = "com.czartroniks.neonscape"
 program_name = "Neonscape"
-program_version = "0.3.0"
+program_version = "0.3.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

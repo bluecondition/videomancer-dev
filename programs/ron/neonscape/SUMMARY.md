@@ -4,9 +4,10 @@ Wireframe neon landscapes: the 1980s computer-graphics scene (grid floor, sun, m
 car, clouds, birds, rain, stars), with gradients that roll in object by object. A proof of concept that grew out
 of Outrun (Kinetic): more colour, crisp wires, many more objects, motion inside every object.
 
-**v0.3.0 built 2026-11-17, all six configs.** Flash `out/rev_b/ron/neonscape.vmprog`. Ron flashed v0.2.0.
+**v0.3.1 built 2026-11-18, all six configs.** Flash `out/rev_b/ron/neonscape.vmprog`. Ron flashed v0.2.0.
 v0.3.0 (Ron's notes from the hardware): controls moved (K3 = Fill, S7 = Sheen on / off, P12 = Horizon), sheen
 fixed at the old knob's 75 %, the road no longer drifts in Drive, the grid is uniform to the horizon.
+v0.3.1: the sheen's diagonal sweep restored (see "Status"), a spoiler on the car in both views.
 v0.2.0 (same day, Ron's notes on the v0.1.0 renders): the cars redrawn as wire structures and the side view
 un-squashed, the rain falls instead of rising, K3 = Sheen (was Horizon).
 
@@ -50,7 +51,7 @@ Floor half:
 |---|---|---|
 | Grid | a clean plane to the horizon: uniform cells, no level of detail (v0.3.0). Two divides per line (du = G / d, and du / d = how fast a line moves from one row to the next); lanes and rows are parity bits in the region ID. Where the lines get 4 lines apart their colour starts to run into the floor's glow, and at 2 lines apart they are replaced by the glow, so the grid converges into a band of light under the horizon (about 75 rows at 1080p) instead of aliasing | flight (Drive) or sideways slide (Pan) |
 | Road | the four centre lanes, a dashed centre line (Drive); a band near the bottom of the screen (Pan) | dashes run |
-| Car | span-coded sprite drawn as a wire structure: louvred rear glass, panel seams (thin dark slivers, so they show in wire and in fill), crease lines, light bar, plate, exhaust. Rear view 464 x 176 (Drive); side view 512 x 160 (Pan; it was 488 x 80 in v0.1.0) | bobs; lights blink |
+| Car | span-coded sprite drawn as a wire structure: louvred rear glass, panel seams (thin dark slivers, so they show in wire and in fill), crease lines, light bar, plate, exhaust, and a spoiler (v0.3.1): in the rear view a full-width blade above the roof with end plates, on struts down to the deck; in the side view a blade and end plate over the tail on a strut. Rear view 464 x 192 (Drive); side view 512 x 160 (Pan; it was 488 x 80 in v0.1.0). The side view's glass now fills the cabin under the roof (no frame): that freed the two spans a row needs for the strut | bobs; lights blink |
 | Lake (S10) | the sky half mirrored (every sky object is a function of d), dimmed, with ripple gaps that widen with depth and a per-line wobble | ripples drift |
 | Tunnel (Land) | the grid on both halves, the sun at its end | flight |
 
@@ -144,30 +145,38 @@ and the program is purely generative.
 
 ## Status
 
-- v0.3.0 built 2026-11-17 with router2 (the builder default), `./build_programs.sh ron neonscape`.
+- v0.3.1 built 2026-11-18 with router2 (the builder default), `./build_programs.sh ron neonscape`.
 
 | Config | Seed | Post-route Fmax | LC |
 |---|---|---|---|
-| HD Analog | 2 (seed 1 stalled the router) | 82.65 MHz | 7208 |
-| SD Analog | 1 | 75.54 MHz | 7211 |
-| HD HDMI | 1 | 81.30 MHz | 7218 |
-| SD HDMI | 1 | 76.04 MHz | 7206 |
-| HD Dual | 2 (seed 1 missed) | 81.35 MHz | 7219 |
-| SD Dual | 1 | 76.58 MHz | 7205 |
+| HD Analog | 3 (seed 1 stalled the router, seed 2 missed) | 81.37 MHz | 7279 |
+| SD Analog | 1 | 79.67 MHz | 7257 |
+| HD HDMI | 1 | 75.17 MHz | 7258 |
+| SD HDMI | 2 (seed 1 stalled the router) | 82.33 MHz | 7272 |
+| HD Dual | 1 | 78.34 MHz | 7285 |
+| SD Dual | 1 | 79.74 MHz | 7268 |
 
-- 7,219 / 7,680 LC (94.0 %), 21 / 32 block RAMs. HD needs 74.25 MHz, SD 27. The program alone is about 4,270 LUT
-  and 2,660 FF (standalone yosys); no block RAM carries read-during-write emulation. There is no room left:
-  anything added needs a matching removal.
-- Earlier builds: v0.1.0 (f0cdb09) 7,094 LC; v0.2.0 (3c51646) 7,131 LC, flashed by Ron.
-- Rendered in GHDL at 720p60 (decimation 1), hardware-hue previews in `.neonscape_work/prev/`. v0.3.0 (`h_*`):
-  Open wire-only (the clean grid), Palms wire-only and fully filled (road on the centre line), the tunnel, Open
-  with the horizon at 40 % and the sheen off. Older (`b_*` .. `g_*`): the camera at 40 % and 100 %, the lake,
-  Sharp, Pan, one NTSC frame. 1080p and 1080i were not rendered. The renders use a copy with the glides snapped
-  (`.neonscape_work/simsnap`), since a glide covers only a third of its travel in the three fields a render runs.
-- Not verified: motion (every render is one still), the grid's glow band and fade in motion and at 1080p, the
-  road fix on hardware (reasoned from the code: Drive now zeroes what Pan accumulates), hue on hardware.
+- 7,285 / 7,680 LC (94.9 %), 21 / 32 block RAMs. HD needs 74.25 MHz, SD 27. HD HDMI has under 1 MHz of margin
+  on its one routed seed, and two configs needed a second or third seed: the design is at the limit. Anything
+  added needs a matching removal, and a trim of 100 to 150 LC would make the build dependable.
+- **v0.3.0's sheen bug** (0f5a0df, flashed by Ron): a scripted edit deleted the line that runs the sheen's
+  diagonal phase counter, so the counter sat at zero. Everything on the shared sweep (sun, clouds, far range,
+  city, near range) had no sheen, and the palms' and car's bands did not travel. The tools said nothing and the
+  logic count fell (7,219 LC), which is why v0.3.0 looked smaller than it is. Found from Ron's report; a scan
+  for never-assigned signals (`.neonscape_work/undriven.py`) now runs after every scripted edit.
+- Earlier builds: v0.1.0 (f0cdb09) 7,094 LC; v0.2.0 (3c51646) 7,131 LC.
+- Rendered in GHDL at 720p60 (decimation 1), hardware-hue previews in `.neonscape_work/prev/`. v0.3.1 (`i_*`):
+  Palms and Valley wire-only, rendered with the sheen fix and before the spoiler. The spoiler was checked in the
+  sprite sheet only (`.neonscape_work/art/prev/sprites.png`, decoded from the same table words the engine
+  reads), not in an engine render. v0.3.0 (`h_*`): the clean grid, the tunnel, the horizon slider. Older
+  (`b_*` .. `g_*`): the camera at 40 % and 100 %, the lake, Sharp, Pan, one NTSC frame. 1080p and 1080i were not
+  rendered. The renders use a copy with the glides snapped (`.neonscape_work/simsnap`).
+- Not verified: motion (every render is one still), the grid's glow band in motion and at 1080p, the road fix on
+  hardware, hue on hardware.
+- The glow band is heaviest in the tunnel, where the floor's and the ceiling's meet (about a fifth of the
+  picture at 720p).
 - A first version of the clean grid drew lanes and rows directly (a per-pixel width accumulator and two 20-bit
   compares): 4,559 LUT standalone, about 99 % full. The shipped one keeps the wire detector and only adds the
   second divide, a 24-bit crowding accumulator and the glow entry in the colour table.
 - Tools: `.neonscape_work/sim.sh <tag> [--video IMG] [tester options]` (one render), `stat2.sh <dir> <tag>`
-  (standalone size).
+  (standalone size), `undriven.py <file.vhd>` (signals that lost their driver).

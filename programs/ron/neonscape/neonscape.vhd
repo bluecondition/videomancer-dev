@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEONSCAPE v0.3.0 -- wireframe neon landscapes (proof of concept).
+-- NEONSCAPE v0.3.1 -- wireframe neon landscapes (proof of concept).
 --
 -- A scene of layered objects, each drawn the same way: every pixel gets a REGION ID (object + facet), a wire is
 -- drawn wherever the ID differs from a neighbour (left, or the line above: one line store), and a region is
@@ -1021,6 +1021,7 @@ begin
                 if s_xs = 4 then b_w <= e_m(28 downto 5); else b_w <= e_m(27 downto 4); end if;
             elsif s_xn12 = '1' then b_w <= b_w - resize(e_mo(19 downto 4), 24);
             else b_w <= b_w + resize(e_mo(19 downto 4), 24); end if;
+            if s_st(16) = '1' then b_pa <= n_pa0; else b_pa <= b_pa + s_xs; end if;      -- stage 17
         end if;
     end process p_beam;
 
