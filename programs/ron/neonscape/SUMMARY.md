@@ -4,7 +4,9 @@ Wireframe neon landscapes: the 1980s computer-graphics scene (grid floor, sun, m
 car, clouds, birds, rain, stars), with gradients that roll in object by object. A proof of concept that grew out
 of Outrun (Kinetic): more colour, crisp wires, many more objects, motion inside every object.
 
-**v0.2.0 built 2026-11-17, all six configs, not flashed.** Flash `out/rev_b/ron/neonscape.vmprog`.
+**v0.3.0 built 2026-11-17, all six configs.** Flash `out/rev_b/ron/neonscape.vmprog`. Ron flashed v0.2.0.
+v0.3.0 (Ron's notes from the hardware): controls moved (K3 = Fill, S7 = Sheen on / off, P12 = Horizon), sheen
+fixed at the old knob's 75 %, the road no longer drifts in Drive, the grid is uniform to the horizon.
 v0.2.0 (same day, Ron's notes on the v0.1.0 renders): the cars redrawn as wire structures and the side view
 un-squashed, the rain falls instead of rising, K3 = Sheen (was Horizon).
 
@@ -46,7 +48,7 @@ Floor half:
 
 | Object | How | What moves |
 |---|---|---|
-| Grid | one divide per line (du = G / d); lanes from a per-pixel accumulator, rows from z = 1024 du. Level of detail: toward the horizon the lanes and rows double their pitch at 128 / 96 / 64 / 48 / 32 / 24 rows, and stop 16 rows short of it | flight (Drive) or sideways slide (Pan) |
+| Grid | a clean plane to the horizon: uniform cells, no level of detail (v0.3.0). Two divides per line (du = G / d, and du / d = how fast a line moves from one row to the next); lanes and rows are parity bits in the region ID. Where the lines get 4 lines apart their colour starts to run into the floor's glow, and at 2 lines apart they are replaced by the glow, so the grid converges into a band of light under the horizon (about 75 rows at 1080p) instead of aliasing | flight (Drive) or sideways slide (Pan) |
 | Road | the four centre lanes, a dashed centre line (Drive); a band near the bottom of the screen (Pan) | dashes run |
 | Car | span-coded sprite drawn as a wire structure: louvred rear glass, panel seams (thin dark slivers, so they show in wire and in fill), crease lines, light bar, plate, exhaust. Rear view 464 x 176 (Drive); side view 512 x 160 (Pan; it was 488 x 80 in v0.1.0) | bobs; lights blink |
 | Lake (S10) | the sky half mirrored (every sky object is a function of d), dimmed, with ripple gaps that widen with depth and a per-line wobble | ripples drift |
@@ -58,41 +60,37 @@ Floor half:
 |---|---|---|
 | K1 | Land | Open / Hills (far range) / Ranges (far + near) / Metro (city) / Valley (city + near range) / Palms (near range, palms, road, car; default) / Strip (city, palms, road, car) / Tunnel (road, car) |
 | K2 | Sky | Sun / Sun Clouds / Sun Birds / Dusk (sun, stars, clouds, birds; default) / Moon (+ stars) / Moon Clouds / Storm (moon, two cloud bands, rain) / Stars (+ birds) |
-| K3 | Sheen | the light that runs along the wires (see "Sheen"). 0 % = none; 50 % = natural (default); 100 % = the single bright diagonal sweep of v0.1.0. Was Horizon until v0.2.0: the horizon height now comes with the Land (Open 56 %, Hills / Ranges 58 %, Metro 62 %, Valley 60 %, Palms 54 %, Strip 56 %, Tunnel 50 %) and switches with it |
+| K3 | Fill | the rolling gradient scale (on P12 until v0.3.0). 0 % = wires only. Turning up, each object's gradient wipes outward from the horizon (8 rows a count), one after another: sun, sky, far range, city, near range, floor, sprites. 100 % = everything filled. Default 50 % |
 | K4 | Speed | bipolar, centre = still (+-8 deadband). Drive: flight, up to 15 cells a second. Pan: sideways travel, palms fastest, far range slowest |
 | K5 | Colour | Sunset / Miami / Laser / Arcade / Chrome / Toxic / Ice / Ember |
 | K6 | Camera | camera (or Osc) strength, default 100 %. Three effects: it lights the sky ramp (the picture shows in the sky, even with the gradients off), bends the grid's rows (up to 1.8 cells), and lifts the ridges and roofs (up to 236 rows) |
-| S7 | Gradient | On / Off (pure wireframe) |
+| S7 | Sheen | On / Off: the light that runs along the wires (see "Sheen"). Was the gradient kill switch until v0.3.0; K3 at 0 % does that now |
 | S8 | Shade | Smooth / Sharp (every ramp cut to 8 hard bands) |
 | S9 | View | Drive (first person, flying forward) / Pan (travelling sideways, parallax between the layers, side-view car) |
 | S10 | Ground | Grid / Lake |
 | S11 | Source | Video / Osc (a drifting triangle lattice) |
-| P12 | FILL | the rolling gradient scale. 0 % = wires only. Sliding up, each object's gradient wipes outward from the horizon (8 rows a count), one after another: sun, sky, far range, city, near range, floor, sprites. 100 % = everything filled |
+| P12 | HORIZON | 25 % .. 75 % of the screen, glided (default 56 %) |
 
 Presets: Sunset Drive (defaults), Wire City, Storm Ranges, Mirror Lake, Tunnel Run, Beach Cruise, Chrome Poster.
 Hand-written placeholders, to be replaced by captures from the hardware.
 
-## Sheen (K3)
+## Sheen (S7)
 
 A wire's colour is lerped toward the palette's hot colour (white) by a pulse: a triangle 64 px long in every 256
-of a phase.
+of a phase. Fixed at what v0.2.0's Sheen knob gave at 75 % (Ron's pick); S7 switches it off.
 
-- **Uniform** (the top of the knob, the v0.1.0 look): every wire reads the same phase, x + y + 4 t, so one set of
-  "/" fronts sweeps the whole picture and every pulse shows.
-- **Natural** (the middle): each kind of object reads its own phase and scale, and a table keyed by the pulse's
-  number and the object lets about three pulses in five through, so they come and go.
+- Sun, clouds, birds, far range, city and near range share one phase, x + y + 4 t: "/" fronts sweep across them
+  together, every pulse shown.
+- Palms, grid, road and car each read their own phase, and a table keyed by the pulse's number and the object
+  lets about three pulses in five through, so they come and go.
 
 | Object | Direction | Period |
 |---|---|---|
-| Sun, road | bands moving down, 2 rows a field | 256 rows |
-| City, grid | bands moving down (on the grid: toward the viewer) | 512 rows |
-| Near range | "/" fronts, 4 px a field | 512 px |
-| Far range, clouds, birds | upright bands moving left, 4 px a field | 512 px |
-| Palms, car | upright bands moving left | 256 px |
+| Grid | bands moving down, toward the viewer, 2 rows a field | 512 rows |
+| Road | bands moving down | 256 rows |
+| Palms, car | upright bands moving left, 4 px a field | 256 px |
 
-- The knob, glided: 0 .. 50 % raises the natural sheen from nothing to full strength in nine steps. 50 .. 100 %:
-  the objects join the uniform sweep one by one, far to near (sun, clouds, far range, city, near range, palms,
-  grid, road, car), until at 100 % everything is on it.
+- A grid wire only takes the sheen where the lines are well apart; further out its colour runs into the glow.
 
 ## Video
 
@@ -102,9 +100,12 @@ and the program is purely generative.
 
 ## Engine
 
-- Per field (in the vblank zone): glides (sheen, camera, fill), flight and pan phases, layer scrolls.
-- Per line (48 clocks of horizontal blanking, started when the line's last pixel has left stage 1): the row's
-  distance from the horizon, one 22-step divide for the grid, ten table reads (sun and bite chords, a sprite row
+- Per field (in the vblank zone): glides (fill, camera, horizon), flight and pan phases, layer scrolls. Drive
+  holds the pan position and the floor's sideways phase at zero: until v0.3.0 whatever Pan had built up stayed
+  applied in Drive, which pushed the road (and the palm gap and the range's valley) off the centre line or off
+  the screen.
+- Per line (52 clocks of horizontal blanking, started when the line's last pixel has left stage 1): the row's
+  distance from the horizon, two 22-step divides for the grid, ten table reads (sun and bite chords, a sprite row
   for each of the two sprite slots), the ramp positions, the fill flags, each layer's start x.
 - Per pixel (34 stages): a world-x counter per layer, loaded at staggered clocks so every object's bits meet at
   stage 14; merge (15); wire detection against the ID line store (16, 17); colour table and lerp (18 .. 23); glow
@@ -134,41 +135,39 @@ and the program is purely generative.
 - The camera's lift acts per pixel with no vertical smoothing, so a busy picture makes ragged ridges.
 - The city's lit windows show only when the city's gradient is in.
 - In Drive the far layers do not move (they are at the horizon); only the floor flies. Pan moves everything.
-- There is no horizon knob any more (see K3). Sun, moon and car are fixed in x. The moon has no slits; the tunnel has no sky objects but the sun.
+- Sun, moon and car are fixed in x. The moon has no slits; the tunnel has no sky objects but the sun.
 - K1 / K2 / K5 are label knobs: a pot resting at 1 .. 7 counts at the very bottom of its travel reads as that label
   (the load-time index fix).
-- Just under the horizon (16 .. 60 rows) the thinned rows are still about 6 rows apart, which reads as a bright
-  striped band, busier at 720p and SD than at 1080p. If it is too heavy on hardware, move the level-of-detail
-  thresholds up one step (state 32 of the line engine).
+- The glow band under the horizon is where the grid's lines would be closer than 2 lines apart. Its depth and
+  the fade into it are set by two bit tests each (the rows in state 51 of the line engine, the lanes at stage 14);
+  one bit lower doubles the band, one higher lets the lines run on until they alias.
 
 ## Status
 
-- v0.2.0 built 2026-11-17 with router2 (the builder default), `./build_programs.sh ron neonscape`.
+- v0.3.0 built 2026-11-17 with router2 (the builder default), `./build_programs.sh ron neonscape`.
 
 | Config | Seed | Post-route Fmax | LC |
 |---|---|---|---|
-| HD Analog | 1 | 78.81 MHz | 7129 |
-| SD Analog | 1 | 85.83 MHz | 7119 |
-| HD HDMI | 2 (seed 1 stalled the router) | 76.18 MHz | 7111 |
-| SD HDMI | 1 | 65.66 MHz | 7124 |
-| HD Dual | 1 | 76.62 MHz | 7128 |
-| SD Dual | 1 | 77.51 MHz | 7131 |
+| HD Analog | 2 (seed 1 stalled the router) | 82.65 MHz | 7208 |
+| SD Analog | 1 | 75.54 MHz | 7211 |
+| HD HDMI | 1 | 81.30 MHz | 7218 |
+| SD HDMI | 1 | 76.04 MHz | 7206 |
+| HD Dual | 2 (seed 1 missed) | 81.35 MHz | 7219 |
+| SD Dual | 1 | 76.58 MHz | 7205 |
 
-- 7,131 / 7,680 LC (92.9 %), 21 / 32 block RAMs. HD needs 74.25 MHz, SD 27. The program alone is about 4,190 LUT
-  and 2,600 FF (standalone yosys); no block RAM carries read-during-write emulation. HD HDMI's margin is thin
-  (76.18 on its one routed seed).
-- v0.1.0 (the first cut, commit f0cdb09) closed at 7,094 LC with HD Analog on seed 2.
-- Rendered in GHDL at 720p60 (decimation 1), hardware-hue previews in `.neonscape_work/prev/`. v0.2.0 (`g_*`):
-  the default scene wire-only at Sheen 50 % and 78 %, Valley + Moon Clouds fully filled at Sheen 100 %, Pan +
-  Strip + Storm fully filled. v0.1.0 (`b_*`, `c_*`, `d_*`): the camera at 40 % and 100 %, the lake, the tunnel,
-  Sharp, one NTSC frame (both fields; same picture, centre 4:3). 1080p and 1080i were not rendered. The renders
-  use a copy with the glides snapped (`.neonscape_work/simsnap`), since a glide covers only a third of its
-  travel in the three fields a render runs.
-- Not verified at all: motion (every render is one still: the rain's fall, the sheen's travel and the way the
-  objects join the sweep are reasoned, not seen), hue on hardware, the HD HDMI output with these crisp moving
-  wires (the output conditioning is Outrun's, which is also unflashed).
-- v0.2.0 logic budget: the first sheen (three directions with their own speeds, two crossfaded pulses) took the
-  design to 7,496 LC (97.6 %). It was cut back to one pulse path and the horizon's glide, the label knobs'
-  subtract-and-compare hysteresis and a third of the star hash were traded for it.
+- 7,219 / 7,680 LC (94.0 %), 21 / 32 block RAMs. HD needs 74.25 MHz, SD 27. The program alone is about 4,270 LUT
+  and 2,660 FF (standalone yosys); no block RAM carries read-during-write emulation. There is no room left:
+  anything added needs a matching removal.
+- Earlier builds: v0.1.0 (f0cdb09) 7,094 LC; v0.2.0 (3c51646) 7,131 LC, flashed by Ron.
+- Rendered in GHDL at 720p60 (decimation 1), hardware-hue previews in `.neonscape_work/prev/`. v0.3.0 (`h_*`):
+  Open wire-only (the clean grid), Palms wire-only and fully filled (road on the centre line), the tunnel, Open
+  with the horizon at 40 % and the sheen off. Older (`b_*` .. `g_*`): the camera at 40 % and 100 %, the lake,
+  Sharp, Pan, one NTSC frame. 1080p and 1080i were not rendered. The renders use a copy with the glides snapped
+  (`.neonscape_work/simsnap`), since a glide covers only a third of its travel in the three fields a render runs.
+- Not verified: motion (every render is one still), the grid's glow band and fade in motion and at 1080p, the
+  road fix on hardware (reasoned from the code: Drive now zeroes what Pan accumulates), hue on hardware.
+- A first version of the clean grid drew lanes and rows directly (a per-pixel width accumulator and two 20-bit
+  compares): 4,559 LUT standalone, about 99 % full. The shipped one keeps the wire detector and only adds the
+  second divide, a 24-bit crowding accumulator and the glow entry in the colour table.
 - Tools: `.neonscape_work/sim.sh <tag> [--video IMG] [tester options]` (one render), `stat2.sh <dir> <tag>`
   (standalone size).

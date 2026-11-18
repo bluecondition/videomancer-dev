@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-NEONSCAPE v0.2.0 - build hook.  Writes neonscape_pkg.vhd next to this file (pure python: the builder runs
+NEONSCAPE v0.3.0 - build hook.  Writes neonscape_pkg.vhd next to this file (pure python: the builder runs
 it with the system python3).  `python3 neonscape.py --preview DIR` also dumps the sprite art and the
 palettes as PNGs (needs PIL; the build never uses it).
 
@@ -12,6 +12,7 @@ Package contents
                         step to the next key).  colour = c0 + (d * t) >> 5, t = 0 .. 63.
                           entry 2 r + s   fill ramp r (0 .. 7), segment s (key s -> key s + 1)
                           entry 16 + w    wire colour of object w, lerped toward the palette's hot colour
+                          entry 26        the grid's wire colour, lerped toward the floor's glow (ramp 5, key 2)
   C_NS_LROM  2048 x 16  per-line tables: the circle's half-chord, then the span-coded sprite rows
                         (4 words a row: b1 b0 / b3 b2 / b5 b4 / zones z0 .. z6, 2 bits each, z0 in the LSBs,
                         bit 14 = the row's crease parity; zone = z[number of boundaries <= x])
@@ -122,6 +123,7 @@ def pal_rom():
         for w in range(16):
             c = p["wires"].get(w, "#FFFFFF")
             ent[16 + w] = pal_entry(c, p["hot"])
+        ent[26] = pal_entry(p["wires"][7], p["ramps"][5][2])       # the grid's wires running into the floor's glow
         out += ent
     return out
 

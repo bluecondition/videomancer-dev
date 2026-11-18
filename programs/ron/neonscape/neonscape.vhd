@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEONSCAPE v0.2.0 -- wireframe neon landscapes (proof of concept).
+-- NEONSCAPE v0.3.0 -- wireframe neon landscapes (proof of concept).
 --
 -- A scene of layered objects, each drawn the same way: every pixel gets a REGION ID (object + facet), a wire is
 -- drawn wherever the ID differs from a neighbour (left, or the line above: one line store), and a region is
@@ -20,8 +20,13 @@
 --                    local height (a 9-stage pipelined divide), flowing uphill; lit and shaded slopes
 --     palms          span-coded sprite lattice (slot B), swaying
 --   floor half (d = rows below the horizon)
---     grid           one divide per line: du = G / d cells per pixel, z = 1024 du; lanes from a per-pixel
---                    accumulator, rows from z + flight (bent per pixel by the camera)
+--     grid           a clean plane to the horizon: uniform cells, no level of detail.  Two divides per line:
+--                    du = G / d cells per pixel (z = 1024 du), and du / d, the rate at which a row or a lane
+--                    moves from one line to the next.  Lanes and rows are parity bits of u and z in the region
+--                    ID, so the wire detector draws them.  Where the lines crowd together (4 lines apart)
+--                    their colour starts to run into the floor's glow, and at 2 lines apart they are replaced
+--                    by the glow itself: the grid converges into a band of light
+--                    under the horizon instead of aliasing.
 --     road, car      the centre lanes with a dashed line; a span-coded car (rear view, or side view in Pan)
 --     lake           (S10) the sky half mirrored: every sky object is a function of d, so it is free;
 --                    ripple gaps and a per-line wobble
@@ -29,20 +34,20 @@
 --
 --   K1  Land     Open / Hills / Ranges / Metro / Valley / Palms / Strip / Tunnel
 --   K2  Sky      Sun / Sun Clouds / Sun Birds / Dusk / Moon / Moon Clouds / Storm / Stars
---   K3  Sheen    the light that runs along the wires: 0 = none; 50 % = natural (each kind of object has its own
---                direction and scale, and pulses come and go); above that the objects join one bright diagonal
---                sweep one by one; 100 % = that sweep over everything.  (The horizon height now comes with the Land setting.)
+--   K3  Fill     the rolling gradient scale: object by object (sun, sky, far range, city, near range, floor,
+--                sprites) the fill wipes out from the horizon; 0 % = wires only, 100 % = everything filled
 --   K4  Speed    bipolar, centre = still: flight (Drive) or lateral travel with parallax (Pan)
 --   K5  Colour   8 palettes (8 fill ramps of 3 keys + a wire colour per object each)
 --   K6  Camera   camera (or Osc) strength, three effects: lights the sky ramp, bends the grid's rows,
 --                lifts the ridges and roofs
---   S7  Gradient On / Off (pure wireframe)
+--   S7  Sheen    On / Off: the light that runs along the wires.  Far objects (sun .. near range) share one
+--                diagonal sweep; palms, grid, road and car each have their own direction and scale, and their
+--                pulses come and go (the 75 % setting of v0.2.0's Sheen knob)
 --   S8  Shade    Smooth / Sharp (ramps cut to 8 hard bands)
 --   S9  View     Drive / Pan
 --   S10 Ground   Grid / Lake
 --   S11 Source   Video / Osc
---   P12 FILL     the rolling gradient scale: object by object (sun, sky, far range, city, near range, floor,
---                sprites) the fill wipes out from the horizon; 0 % = wires only, 100 % = everything filled
+--   P12 HORIZON  25 % .. 75 % of the screen
 --
 -- Stage numbering: a register "at stage S" holds pixel n at T + S + n (T = the g_start clock).  One latency
 -- (33) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).  Chassis ([A] timing, virtual
@@ -61,7 +66,8 @@ use work.all;
 architecture neonscape of program_top is
     constant C_LAT : integer := 33;   -- = processing_delay_clks
 
-    constant C_DEF_P12 : integer := 512;
+    constant C_DEF_K3  : integer := 512;      -- fill
+    constant C_DEF_P12 : integer := 600;      -- horizon
     constant C_G       : integer := 2883584;      -- grid: du = C_G / d (cells per virtual px, Q20): 2.75 cells of camera height
 
     -- lattice presence / flip masks (bit = cell index)
@@ -171,11 +177,10 @@ architecture neonscape of program_top is
 
     -- [B] controls
     signal s_land, s_sky, s_pal : unsigned(2 downto 0) := (others => '0');
-    signal s_gs : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);          -- sheen glide
-    signal c_gn : unsigned(3 downto 0) := (others => '0');                    -- sheen strength (0 .. 8)
-    signal c_un : unsigned(3 downto 0) := (others => '0');                    -- objects below this number join the uniform sweep
+    signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);    -- horizon glide (Q3)
+    signal s_ws : unsigned(1 downto 0) := to_unsigned(1, 2);                  -- log2 of the wire thickness in virtual rows x px
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(1023 * 8, 13);         -- camera glide
-    signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);    -- fill glide
+    signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);     -- fill glide
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -185,7 +190,7 @@ architecture neonscape of program_top is
     signal s_k4 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_vm : unsigned(8 downto 0) := (others => '0');
     signal s_vneg : std_logic := '0';
-    signal s_goff, s_sharp, s_pan, s_lake, s_src : std_logic := '0';
+    signal s_shoff, s_sharp, s_pan, s_lake, s_src : std_logic := '0';
     -- scene enables
     signal c_efar, c_ecity, c_enear, c_epalm, c_eroad, c_tun : std_logic := '0';
     signal c_esun, c_emoon, c_estar, c_ecl1, c_ecl2, c_ebird, c_erain : std_logic := '0';
@@ -263,7 +268,9 @@ architecture neonscape of program_top is
     signal l_dup : unsigned(23 downto 0) := (others => '0');
     signal n_u0 : unsigned(28 downto 0) := (others => '0');
     signal l_zf : unsigned(11 downto 0) := (others => '0');
-    signal l_lod : unsigned(2 downto 0) := "000";
+    signal l_zt  : unsigned(5 downto 0) := (others => '0');        -- how far the rows' colour has run into the glow
+    signal l_zm  : std_logic := '0';                               -- the rows have merged
+    signal e_mo  : unsigned(21 downto 0) := (others => '0');
     signal l_gfar, l_proad, l_pdash : std_logic := '0';
     signal l_fill : std_logic_vector(7 downto 0) := (others => '0');
     signal l_rip, l_v1, l_v2 : std_logic := '0';
@@ -285,6 +292,8 @@ architecture neonscape of program_top is
     signal b_xn, b_xf, b_xc, b_xa, b_xb, b_xr : unsigned(13 downto 0) := (others => '0');
     signal b_x  : signed(12 downto 0) := (others => '0');
     signal b_u  : unsigned(28 downto 0) := (others => '0');
+    signal b_w  : unsigned(23 downto 0) := (others => '0');       -- a lane's share of its cell (Q16)
+    signal s_xn12 : std_logic := '0';
     signal b_px : unsigned(10 downto 0) := (others => '0');
     signal b_pa : unsigned(13 downto 0) := (others => '0');
     signal s18_np : unsigned(8 downto 0) := (others => '0');
@@ -350,7 +359,10 @@ architecture neonscape of program_top is
     signal a14_z, b14_z : unsigned(1 downto 0) := (others => '0');
 
     -- floor
-    signal g14_up, g14_zp, g14_rd, g14_dc, g14_zh : std_logic := '0';
+    signal g14_up, g14_zp, g14_rd, g14_dc, g14_zh, g14_lm : std_logic := '0';
+    signal g14_lt : unsigned(5 downto 0) := (others => '0');
+    signal s15_gw, s16_gw, s15_gm, s16_gm, s16_eh : std_logic := '0';
+    signal s15_gt, s16_gt : unsigned(5 downto 0) := (others => '0');
 
     -- merge, edges, colour
     signal s15_id : std_logic_vector(7 downto 0) := (others => '0');
@@ -434,7 +446,6 @@ begin
         variable v_m  : unsigned(9 downto 0);
         variable v_k  : unsigned(9 downto 0);
         variable v_p4 : unsigned(3 downto 0);
-        variable v_m7 : unsigned(6 downto 0);
     begin
         if rising_edge(clk) then
             -- [A] timing ID -> steps (decoded free-running)
@@ -482,7 +493,12 @@ begin
             -- [A][B] per-field latches
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
-                s_goff  <= registers_in(6)(0);
+                s_shoff <= registers_in(6)(0);
+                case to_integer(unsigned(s_tid)) is                    -- wire thickness in rows x px: 2, 4 or 8
+                    when 0 | 8              => s_ws <= "11";
+                    when 4 | 5 | 6 | 12 | 14 => s_ws <= "10";
+                    when others             => s_ws <= "01";
+                end case;
                 s_sharp <= registers_in(6)(1);
                 s_pan   <= registers_in(6)(2);
                 s_lake  <= registers_in(6)(3);
@@ -502,15 +518,14 @@ begin
             -- scene tables (free-running decode of the latched zones)
             c_efar <= '0'; c_ecity <= '0'; c_enear <= '0'; c_epalm <= '0'; c_eroad <= '0'; c_tun <= '0';
             case to_integer(s_land) is
-                -- (each Land brings its horizon row: 50 % .. 62 % of the screen)
-                when 0      => c_hz <= to_unsigned(605, 11);                                                      -- Open
-                when 1      => c_hz <= to_unsigned(626, 11); c_efar <= '1';                                       -- Hills
-                when 2      => c_hz <= to_unsigned(626, 11); c_efar <= '1'; c_enear <= '1';                       -- Ranges
-                when 3      => c_hz <= to_unsigned(670, 11); c_ecity <= '1';                                      -- Metro
-                when 4      => c_hz <= to_unsigned(648, 11); c_ecity <= '1'; c_enear <= '1';                      -- Valley
-                when 5      => c_hz <= to_unsigned(588, 11); c_enear <= '1'; c_epalm <= '1'; c_eroad <= '1';      -- Palms
-                when 6      => c_hz <= to_unsigned(610, 11); c_ecity <= '1'; c_epalm <= '1'; c_eroad <= '1';      -- Strip
-                when others => c_hz <= to_unsigned(540, 11); c_tun <= '1'; c_eroad <= '1';                        -- Tunnel
+                when 0      =>                                                       -- Open
+                when 1      =>  c_efar <= '1';                                       -- Hills
+                when 2      =>  c_efar <= '1'; c_enear <= '1';                       -- Ranges
+                when 3      =>  c_ecity <= '1';                                      -- Metro
+                when 4      =>  c_ecity <= '1'; c_enear <= '1';                      -- Valley
+                when 5      =>  c_enear <= '1'; c_epalm <= '1'; c_eroad <= '1';      -- Palms
+                when 6      =>  c_ecity <= '1'; c_epalm <= '1'; c_eroad <= '1';      -- Strip
+                when others =>  c_tun <= '1'; c_eroad <= '1';                        -- Tunnel
             end case;
             c_esun <= '0'; c_emoon <= '0'; c_estar <= '0'; c_ecl1 <= '0'; c_ecl2 <= '0'; c_ebird <= '0'; c_erain <= '0';
             case to_integer(s_sky) is
@@ -529,16 +544,16 @@ begin
                 c_sunc <= to_unsigned(144, 9); c_sx <= to_signed(0, 12);
             end if;
 
-            -- [B] shared glide (1/8 of the gap per field, +-2 deadband): sheen, camera, fill
+            -- [B] shared glide (1/8 of the gap per field, +-2 deadband): fill, camera, horizon
             if s_zgo = '1' then
                 z_gp <= "00"; z_gc <= "00"; z_grun <= '1';
             elsif z_grun = '1' then
                 case z_gp is
                     when "00" =>
                         case to_integer(z_gc) is
-                            when 0      => s_gm <= s_gs; s_gr <= unsigned(registers_in(2));
+                            when 0      => s_gm <= s_gp; s_gr <= unsigned(registers_in(2));
                             when 1      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
-                            when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
+                            when others => s_gm <= s_g3; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
                     when "11" =>
@@ -553,9 +568,9 @@ begin
                         z_gp <= "10";
                     when others =>
                         case to_integer(z_gc) is
-                            when 0      => s_gs <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 0      => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when others => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
                         if z_gc = 2 then z_grun <= '0'; end if;
@@ -572,23 +587,25 @@ begin
                             if s_vneg = '1' then c_zph <= c_zph - resize(s_vm(8 downto 1), 17);
                             else c_zph <= c_zph + resize(s_vm(8 downto 1), 17); end if;
                         end if;
+                    -- Pan: lateral travel.  Drive holds both at zero, so the road, the gap in the palms and the
+                    -- valley in the range sit on the centre line whatever Pan did before
                     when 41 =>
-                        if s_pan = '1' then                 -- Pan: lateral travel
-                            if s_vneg = '1' then c_pan <= c_pan - resize(s_vm, 22);
-                            else c_pan <= c_pan + resize(s_vm, 22); end if;
-                        end if;
+                        if s_pan = '0' then c_pan <= (others => '0');
+                        elsif s_vneg = '1' then c_pan <= c_pan - resize(s_vm, 22);
+                        else c_pan <= c_pan + resize(s_vm, 22); end if;
                     when 42 =>
-                        if s_pan = '1' then
-                            if s_vneg = '1' then c_uph <= c_uph - shift_left(resize(s_vm, 29), 9);
-                            else c_uph <= c_uph + shift_left(resize(s_vm, 29), 9); end if;
-                        end if;
+                        if s_pan = '0' then c_uph <= (others => '0');
+                        elsif s_vneg = '1' then c_uph <= c_uph - shift_left(resize(s_vm, 29), 9);
+                        else c_uph <= c_uph + shift_left(resize(s_vm, 29), 9); end if;
+                    when 43 =>                              -- horizon: 270 + k / 2 + k / 32 rows
+                        c_hz <= to_unsigned(270, 11) + resize(s_g3(12 downto 4), 11) + resize(s_g3(12 downto 8), 11);
                     when 44 =>
                         c_bot <= to_unsigned(1080, 11) - c_hz;
                     when 45 =>                              -- the car sits 40 rows off the bottom, bobbing a row
                         if c_t(3) = '1' then c_cart <= signed(resize(c_bot, 12)) - 232;
                         else c_cart <= signed(resize(c_bot, 12)) - 233; end if;
                     when 46 =>
-                        if s_goff = '1' then c_fp <= (others => '0'); else c_fp <= resize(s_gp, 14); end if;
+                        c_fp <= resize(s_gp, 14);
                         c_cgn <= s_g6(12 downto 9);
                     when 47 =>                              -- layer scrolls (half units): far .. near, palms fastest
                         c_sf <= c_pan(21 downto 8);
@@ -604,13 +621,6 @@ begin
                         if c_t(7) = '1' then v_p4 := not v_p4; end if;
                         c_swm <= v_p4(3 downto 1);
                         c_swn <= c_t(8);
-                    when 50 =>                              -- sheen: the natural strength rises over the knob's lower
-                        v_m7 := resize(s_gs(11 downto 6), 7) + 4;      -- half; over the upper half the objects join the
-                        if s_gs(12) = '0' then                         -- uniform sweep one by one
-                            c_gn <= v_m7(6 downto 3); c_un <= (others => '0');
-                        else
-                            c_gn <= to_unsigned(8, 4); c_un <= v_m7(6 downto 3) + 2;
-                        end if;
                     when others => null;
                 end case;
             end if;
@@ -673,7 +683,7 @@ begin
 
     ---------------------------------------------------------------------------
     -- [C] LINE ENGINE: kicked when a line's last pixel has left stage 1 (and once in the zone for line 0),
-    -- computes the NEXT line's constants in 48 clocks of horizontal blanking: one 22-step divide, ten table
+    -- computes the NEXT line's constants in 52 clocks of horizontal blanking: two 22-step divides, ten table
     -- reads, shifts and compares.  The l_* constants are written at state 32 or later, after the previous
     -- line's last pixel has cleared the 31-stage pixel path, so there is one copy of each.
     ---------------------------------------------------------------------------
@@ -690,9 +700,8 @@ begin
         variable v_sw  : unsigned(8 downto 0);
         variable v_o   : unsigned(13 downto 0);
         variable v_w   : signed(4 downto 0);
-        variable v_zz  : unsigned(21 downto 0);
-        variable v_l   : unsigned(2 downto 0);
         variable v_by  : unsigned(7 downto 0);
+        variable v_wz  : unsigned(21 downto 0);
     begin
         if rising_edge(clk) then
             e_zk <= '0';
@@ -712,8 +721,9 @@ begin
                 e_lc <= e_lc + 1;
             end if;
 
-            -- the divider (restoring, one quotient bit per clock): states 3 .. 24
-            if e_lc >= 3 and e_lc <= 24 then
+            -- the divider (restoring, one quotient bit per clock): G / d in states 3 .. 24, then (G / d) / d
+            -- in states 26 .. 47
+            if (e_lc >= 3 and e_lc <= 24) or (e_lc >= 26 and e_lc <= 47) then
                 v_r2 := dv_r & dv_n(21);
                 dv_n <= dv_n(20 downto 0) & '0';
                 if v_r2 >= resize(dv_d, 12) then
@@ -854,20 +864,36 @@ begin
                     n_xr0 <= unsigned(e_x0) + resize(v_y(10 downto 1), 14) + (c_t(9 downto 0) & "00");
                 when 12 =>                                   -- the sheen's diagonal phase: x + y + 4 t
                     n_pa0 <= unsigned(e_x0) + resize(v_y & '0', 14) + (c_t(10 downto 0) & "000");
-                when 26 =>
-                    e_du <= dv_q;
-                when 27 =>                                   -- du x half the width
-                    if s_xs = 4 then
-                        e_m <= shift_left(resize(e_du, 29), 9) + shift_left(resize(e_du, 29), 7);
+                when 25 =>                                   -- du; start the second divide
+                    e_du <= dv_q; e_mo <= dv_q;
+                    dv_n <= dv_q; dv_r <= (others => '0'); dv_q <= (others => '0');
+                when 27 | 49 =>                              -- du x half the width; then du / d x the pixels to the centre
+                    if s_xs = 4 or (s_xs = 3 and e_lc(5) = '1') then
+                        e_m <= shift_left(resize(e_mo, 29), 9) + shift_left(resize(e_mo, 29), 7);
                     else
-                        e_m <= shift_left(resize(e_du, 29), 10) - shift_left(resize(e_du, 29), 6);
+                        e_m <= shift_left(resize(e_mo, 29), 10) - shift_left(resize(e_mo, 29), 6);
                     end if;
-                when 28 =>
+                when 28 | 50 =>
                     if s_xs = 4 then
-                        e_m <= e_m + shift_left(resize(e_du, 29), 6) + shift_left(resize(e_du, 29), 4);
+                        e_m <= e_m + shift_left(resize(e_mo, 29), 6) + shift_left(resize(e_mo, 29), 4);
                     end if;
                 when 29 =>
                     n_u0 <= c_uph - e_m;
+                when 48 =>
+                    -- du / d (Q20), times the wire's thickness: the share of a cell that a row covers (Q10 of z)
+                    -- and that a lane covers for each pixel it lies from the centre column (Q20 of u)
+                    case s_ws is
+                        when "11"   => e_mo <= dv_q(18 downto 0) & "000";
+                        when "10"   => e_mo <= dv_q(19 downto 0) & "00";
+                        when others => e_mo <= dv_q(20 downto 0) & '0';
+                    end case;
+                when 51 =>
+                    -- rows: their colour runs into the glow from half a cell (4 lines apart), and they merge at a
+                    -- whole one (2 lines apart)
+                    if s_xs = 4 then v_wz := resize(e_mo(21 downto 1), 22); else v_wz := e_mo; end if;
+                    if v_wz(21 downto 10) /= 0 then l_zt <= (others => '1'); l_zm <= '1';
+                    elsif v_wz(9) = '1' then l_zt <= v_wz(8 downto 3); l_zm <= '0';
+                    else l_zt <= (others => '0'); l_zm <= '0'; end if;
                 when 32 =>
                     -- the line's constants (the previous line has left the pixel path by now)
                     l_d <= e_d; l_ab <= e_ab; l_obj <= e_obj; l_mir <= e_mir;
@@ -881,29 +907,8 @@ begin
                         when 3      => l_dup <= resize(e_du, 24) + resize(e_du(21 downto 1), 24);
                         when others => l_dup <= resize(e_du, 24);
                     end case;
-                    -- grid level of detail: toward the horizon the lanes and rows double their pitch every
-                    -- factor of 1.41 in distance, so rows stay about 6 or more lines apart and so do the lanes at the screen's edge
-                    v_zz := e_du + resize(c_zph, 22);
-                    -- (thresholds 128 / 96 / 64 / 48 / 32 / 24 / 16 rows: bit tests)
-                    if e_d(9 downto 7) /= "000" then v_l := "000";
-                    elsif e_d(6 downto 5) = "11" then v_l := "001";
-                    elsif e_d(6) = '1' then v_l := "010";
-                    elsif e_d(5 downto 4) = "11" then v_l := "011";
-                    elsif e_d(5) = '1' then v_l := "100";
-                    elsif e_d(4 downto 3) = "11" then v_l := "101";
-                    elsif e_d(4) = '1' then v_l := "110";
-                    else v_l := "111"; end if;
-                    l_lod <= v_l;
-                    if v_l = "111" then l_gfar <= '1'; else l_gfar <= '0'; end if;
-                    case v_l is
-                        when "000"  => l_zf <= v_zz(11 downto 0);
-                        when "001"  => l_zf <= v_zz(12 downto 1);
-                        when "010"  => l_zf <= v_zz(13 downto 2);
-                        when "011"  => l_zf <= v_zz(14 downto 3);
-                        when "100"  => l_zf <= v_zz(15 downto 4);
-                        when "101"  => l_zf <= v_zz(16 downto 5);
-                        when others => l_zf <= v_zz(17 downto 6);
-                    end case;
+                    l_zf <= e_du(11 downto 0) + c_zph(11 downto 0);
+                    if e_d < 16 then l_gfar <= '1'; else l_gfar <= '0'; end if;     -- the last rows are all glow
                     -- ramp positions
                     v_t := shift_right(e_d, 2);
                     if v_t > 127 then l_tsky <= (others => '0'); else l_tsky <= to_unsigned(127, 7) - v_t(6 downto 0); end if;
@@ -1010,7 +1015,12 @@ begin
             else
                 b_u <= b_u + resize(l_dup, 29); b_px <= b_px + 1;
             end if;
-            if s_st(16) = '1' then b_pa <= n_pa0; else b_pa <= b_pa + s_xs; end if;      -- stage 17
+            -- a lane's share of its cell (Q16): down to the centre column, up again after it
+            s_xn12 <= b_x(12);
+            if s_st(12) = '1' then
+                if s_xs = 4 then b_w <= e_m(28 downto 5); else b_w <= e_m(27 downto 4); end if;
+            elsif s_xn12 = '1' then b_w <= b_w - resize(e_mo(19 downto 4), 24);
+            else b_w <= b_w + resize(e_mo(19 downto 4), 24); end if;
         end if;
     end process p_beam;
 
@@ -1259,19 +1269,13 @@ begin
             else b14_z <= l_brow(3)(1 downto 0); end if;
 
             ----------------------------------------------------------------
-            -- floor: lanes from the accumulator, rows from z + flight + the camera's lift
+            -- floor: lane and row parities for the wire detector; how crowded the lanes are here
             ----------------------------------------------------------------
             -- 14
-            case l_lod is
-                when "000"  => g14_up <= b_u(20);
-                when "001"  => g14_up <= b_u(21);
-                when "010"  => g14_up <= b_u(22);
-                when "011"  => g14_up <= b_u(23);
-                when "100"  => g14_up <= b_u(24);
-                when "101"  => g14_up <= b_u(25);
-                when "110"  => g14_up <= b_u(26);
-                when others => g14_up <= '0';
-            end case;
+            g14_up <= b_u(20);
+            if b_w(23 downto 16) /= 0 then g14_lt <= (others => '1'); g14_lm <= '1';
+            elsif b_w(15) = '1' then g14_lt <= b_w(14 downto 9); g14_lm <= '0';
+            else g14_lt <= (others => '0'); g14_lm <= '0'; end if;
             if b_u(28 downto 21) = "00000000" or b_u(28 downto 21) = "11111111" then g14_rd <= '1'; else g14_rd <= '0'; end if;
             if (b_u(28 downto 20) = "000000000" and b_u(19 downto 17) = "000")
                or (b_u(28 downto 20) = "111111111" and b_u(19 downto 17) = "111") then g14_dc <= '1'; else g14_dc <= '0'; end if;
@@ -1291,6 +1295,8 @@ begin
         variable v_t    : unsigned(7 downto 0);
         variable v_fon  : std_logic;
         variable v_road, v_dash : std_logic;
+        variable v_gw, v_gm, v_eh : std_logic;
+        variable v_gt   : unsigned(5 downto 0);
         variable v_e    : std_logic;
         variable v_w    : unsigned(3 downto 0);
         variable v_tri  : unsigned(4 downto 0);
@@ -1298,7 +1304,6 @@ begin
         variable v_sc   : std_logic;
         variable v_ph   : unsigned(13 downto 0);
         variable v_gi   : unsigned(5 downto 0);
-        variable v_pm   : unsigned(7 downto 0);
         variable v_sum  : signed(13 downto 0);
         variable v_c    : signed(10 downto 0);
         variable v_d8   : signed(7 downto 0);
@@ -1312,6 +1317,7 @@ begin
             -- 15: who owns the pixel
             ----------------------------------------------------------------
             v_obj := "0000"; v_sub := "0000"; v_ramp := "000";
+            v_gw := '0'; v_gm := '0';
             v_t := resize(s_cg & '0', 8);
             if l_fill(0) = '1' then v_t := v_t + resize(l_tsky, 8); end if;
             if l_fill(0) = '1' or s_cg /= 0 then v_fon := '1'; else v_fon := '0'; end if;
@@ -1335,7 +1341,11 @@ begin
                     v_t := resize(l_tflr(6 downto 2), 8); v_fon := l_fill(5);
                 else
                     v_obj := "0111"; v_ramp := "101";
-                    v_sub := "0000"; v_sub(1) := g14_up; v_sub(0) := g14_zp and not l_gfar;
+                    v_sub := "0000"; v_sub(1) := g14_up; v_sub(0) := g14_zp and not l_zm;
+                    -- where the lines have merged the floor is the glow itself: over the wires where the lanes
+                    -- have (v_gm), under them where only the rows have (v_gw)
+                    v_gm := l_gfar or g14_lm;
+                    v_gw := l_zm;
                     v_t := resize(l_tflr, 8); v_fon := l_fill(5);
                 end if;
             else
@@ -1374,6 +1384,7 @@ begin
             elsif t14_on = '1' and v_obj = 0 and l_flr = '0' then s15_ovl <= "01";
             else s15_ovl <= "00"; end if;
             s15_tw <= t14_tw;
+            s15_gw <= v_gw; s15_gm <= v_gm; s15_gt <= g14_lt;
 
             -- the ID history along the line, and the line store (this line's ID above last line's)
             i_d1 <= s15_id; i_d2 <= i_d1; i_d3 <= i_d2;
@@ -1390,6 +1401,7 @@ begin
             if s_g15(0) = '1' and s15_id /= i_d1 then v_e := '1'; end if;
             if s_g15(1) = '1' and s_th2 = '1' and s15_id /= i_d2 then v_e := '1'; end if;
             if s_g15(2) = '1' and s_th3 = '1' and s15_id /= i_d3 then v_e := '1'; end if;
+            s16_eh <= v_e;                                   -- found along the line: on the floor, a lane
             if l_v1 = '1' and s15_id /= lb_qf(7 downto 0) then v_e := '1'; end if;
             if l_v2 = '1' and s15_id /= lb_qf(15 downto 8) then v_e := '1'; end if;
             s16_e  <= v_e;
@@ -1397,6 +1409,7 @@ begin
             s16_m2 <= f_max4(unsigned(i_d2(7 downto 4)), unsigned(i_d3(7 downto 4)));
             s16_m3 <= f_max4(unsigned(lb_qf(7 downto 4)), unsigned(lb_qf(15 downto 12)));
             s16_ramp <= s15_ramp; s16_t <= s15_t; s16_fon <= s15_fon; s16_ovl <= s15_ovl; s16_tw <= s15_tw;
+            s16_gw <= s15_gw; s16_gm <= s15_gm; s16_gt <= s15_gt;
 
             ----------------------------------------------------------------
             -- 17: colour table entry and lerp position
@@ -1405,9 +1418,19 @@ begin
             s17_blk <= '0'; s17_w <= '0';
             if s16_ovl = "10" then
                 s17_ent <= to_unsigned(28, 5); s17_t6 <= (others => '0');
+            elsif s16_gm = '1' and (s16_e = '0' or v_w = 7) then
+                s17_ent <= to_unsigned(26, 5); s17_t6 <= (others => '1');          -- merged lanes: the glow
             elsif s16_e = '1' then
                 s17_ent <= '1' & v_w; s17_w <= '1';
                 s17_t6 <= (others => '0');
+                -- a grid wire runs from its own colour (with the sheen) toward the floor's glow as the lines
+                -- crowd together: a lane by the lanes' share of a cell here, a row by the rows' on this line
+                if s16_eh = '1' then v_gt := s16_gt; else v_gt := l_zt; end if;
+                if v_w = 7 and v_gt /= 0 then
+                    s17_ent <= to_unsigned(26, 5); s17_w <= '0'; s17_t6 <= v_gt;
+                end if;
+            elsif s16_gw = '1' then
+                s17_ent <= to_unsigned(26, 5); s17_t6 <= (others => '1');          -- merged rows: the glow
             elsif s16_ovl = "01" then
                 s17_ent <= to_unsigned(27, 5); s17_t6 <= s16_tw & "0000";
             elsif s16_fon = '1' then
@@ -1426,11 +1449,12 @@ begin
             s18_w <= s17_w; s19_w <= s18_w; s20_w <= s19_w; s21_w <= s20_w; s22_w <= s21_w; s23_w <= s22_w;
 
             ----------------------------------------------------------------
-            -- 18 .. 20: SHEEN, the light that runs along the wires (a wire's lerp position toward the
-            -- palette's hot colour): a 64-px triangle pulse in every 256 of a phase.  Natural: each kind of
-            -- object reads its own phase (a direction and a scale), and a table keyed by the pulse's number and
-            -- the object lets about three pulses in five through.  Uniform: the diagonal phase at scale 1 with
-            -- every pulse shown; an object uses it once its number is under c_un.
+            -- 18 .. 20: SHEEN (S7), the light that runs along the wires (a wire's lerp position toward the
+            -- palette's hot colour): a 64-px triangle pulse in every 256 of a phase.  Objects 1 .. 5 (sun,
+            -- clouds, far range, city, near range) read the diagonal phase at scale 1 with every pulse shown:
+            -- one sweep.  Palms, grid, road and car each read their own phase and scale, and a table keyed by
+            -- the pulse's number and the object lets about three pulses in five through.  (v0.2.0's Sheen knob
+            -- at 75 %.)
             --   A  x + y + 4 t   "/" fronts      C  y - 2 t   bands moving down      D  x + 4 t   bands moving left
             ----------------------------------------------------------------
             case s17_ent(3 downto 0) is
@@ -1445,7 +1469,7 @@ begin
                 when "1001" => v_src := "11"; v_sc := '0';       -- car            D, 256
                 when others => v_src := "00"; v_sc := '0';
             end case;
-            if unsigned(s17_ent(3 downto 0)) < c_un then
+            if unsigned(s17_ent(3 downto 0)) < 6 then
                 v_src := "00"; v_sc := '0'; s18_ng <= '1';
             else
                 s18_ng <= '0';
@@ -1455,18 +1479,13 @@ begin
             if v_sc = '1' then s18_np <= v_ph(9 downto 1); s18_ix <= v_ph(12 downto 10);
             else s18_np <= v_ph(8 downto 0); s18_ix <= v_ph(11 downto 9); end if;
             s18_wo <= s17_ent(2 downto 0);
-            -- 19: the pulse (a triangle, 0 .. 31) times the strength (0 .. 8)
+            -- 19: the pulse (a triangle, 0 .. 31)
             v_gi := s18_ix & s18_wo;
             if s18_np(6) = '1' then v_tri := not s18_np(5 downto 1); else v_tri := s18_np(5 downto 1); end if;
-            if s18_np(8 downto 7) /= "00" or (s18_ng = '0' and C_SHG(to_integer(v_gi)) = '0') then
+            if s_shoff = '1' or s18_np(8 downto 7) /= "00" or (s18_ng = '0' and C_SHG(to_integer(v_gi)) = '0') then
                 v_tri := (others => '0');
             end if;
-            v_pm := (others => '0');
-            if c_gn(0) = '1' then v_pm := v_pm + resize(v_tri, 8); end if;
-            if c_gn(1) = '1' then v_pm := v_pm + resize(v_tri & '0', 8); end if;
-            if c_gn(2) = '1' then v_pm := v_pm + resize(v_tri & "00", 8); end if;
-            if c_gn(3) = '1' then v_pm := resize(v_tri & "000", 8); end if;
-            s19_n6 <= v_pm(7 downto 2);
+            s19_n6 <= v_tri & '0';
             -- 20
             if s19_w = '1' then s20_t6 <= s19_n6; else s20_t6 <= s19_t6; end if;
 
