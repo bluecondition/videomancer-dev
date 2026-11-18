@@ -121,3 +121,30 @@ CUT / DEVIATIONS
   720p and 1080p.  The anti-aliasing unit and the Fine line width follow the real pixel (Fine: 4 px at 1080p,
   3 at 720p / 1080i, 2 at SD); at SD the finest splinters (12 virtual px) are about 3 lines tall.
 - The first field after configuration is not valid (the source width is not yet measured).
+
+ZOOM WRAP CHECK (2026-11-17, after acceptance; no rebuild)
+The wrap of the zoom phase (one level, where the levels relabel) is clean in the integer model and in the RTL.
+- Model, 720p, black input, Glide off, default Drift (264 / 2^18 level per field): the pair of consecutive
+  fields straddling the wrap (phase 262108 -> 228, phi8 255 -> 0) against consecutive pairs mid-cycle
+  (differing px / mean |dY| / px with |dY| > 200, of 921,600):
+    Grey             wrap 58,988 / 3.18 / 499      mid-cycle 60,607 / 3.60 / 990
+    Ink              wrap 33,448 / 3.14 / 1,195    mid-cycle 29,901 / 2.93 / 1,392
+    Grey, Lines All  wrap 56,960 / 3.07 / 304      mid-cycle 58,108 / 3.49 / 982
+    Grey, Fine       wrap 112,604 / 8.51 / 1,939   mid-cycle 116,343 / 9.44 / 4,000
+    bear, Camera 100 %  wrap 221,126 / 11.89 / 2,787   mid-cycle 243,019 / 12.42 / 2,524
+  The wrap pair is the one-field motion only (differences along the edges, growing with the distance from the
+  eye; wrap_pair.png): no relabelled greys, no shifted kerfs, no popped pieces.
+- The wrap is also a threshold step (phi8 255 -> 256), so where pieces sit on their thresholds they split
+  there as at any other step.  Separated: the last field before the wrap with its thresholds evaluated one
+  step on but not relabelled, against the first field after it (the relabelling alone), at P12 60 %:
+  Grey 150,754 / 8.40 / 1,115 and Ink + All 71,702 / 6.91 / 3,161, against mid-cycle pairs without a threshold
+  step 164,665 / 9.65 / 1,647 and 75,073 / 7.81 / 4,767.  (wrapchk.py, wrapchk2.py in the work dir.)
+- RTL: a sim-only copy (work dir simwrap/, one register-file word changed: the phase starts four fields before
+  the wrap; the shipped sources are untouched) rendered in GHDL at 720p decimation 1, Lines All, P12 60 %,
+  default Drift: the last field before the wrap (phase 262108) and the first after it (phase 228) each match
+  the model with 0 mismatching pixels of 918,720, and the RTL pair's difference equals the model pair's
+  (157,653 px / 11.60 / 7,313).
+- Seen on the way: the split thresholds are 4 / 256 level apart (20 h and 8 h2), so the hard splits come in
+  small bursts on every fourth 1/256-level step (about every 15 fields at the default Drift), not singly.
+  The GHDL tester's 720p / 2 vertical blank (4,608 clocks) is shorter than the engine (up to 7,336 clocks), so a
+  wrap render there would show stale table values on the first lines; hardware blanks are far longer.
