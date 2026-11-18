@@ -1,0 +1,135 @@
+# NEON BEACH (v0.1.0, 2026-11-18).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+# See neonbeach.vhd, neonbeach.py and PLAN.md.
+
+[program]
+processing_delay_clks = 33
+program_id = "com.czartroniks.neonbeach"
+program_name = "Neon Beach"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Render", "Demo"]
+program_type = "processing"
+description = "Side-on wireframe shorebreak: waves break on a mesh beach, the wash splits the sand into triangles."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Rhythm"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 410
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Tide"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 460
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Foam"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 410
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Chop"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 410
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Swell"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Fill"
+value_labels = ["Wires", "Fill"]
+initial_value_label = "Wires"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Colour"
+value_labels = ["Neon", "Ice"]
+initial_value_label = "Neon"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Crab"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Sky"
+value_labels = ["Day", "Night"]
+initial_value_label = "Day"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Sun"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 614
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Shorebreak"
+
+[[preset]]
+name = "Golden Hour"
+linear_potentiometer_12 = 470
+toggle_switch_7 = 1
+
+[[preset]]
+name = "Moon Tide"
+toggle_switch_10 = 1
+linear_potentiometer_12 = 700
+rotary_potentiometer_2 = 700
+
+[[preset]]
+name = "Ice Wires"
+toggle_switch_8 = 1
+linear_potentiometer_12 = 900
