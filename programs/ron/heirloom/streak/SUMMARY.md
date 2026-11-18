@@ -205,3 +205,10 @@ streaks by the camera's brightness; the camera image itself is not shown.
   SD Dual 83.96 (seed 1); SD HDMI 84.91 MHz (**seed 2**: seed 1 stalled router1 at the timeout; no CARRY I0 = I1 in
   the netlist). 7534-7560 / 7680 LC (98.4 %, unchanged), 20/32 EBR. `out/rev_b/ron/heirloom/streak.vmprog`. NOT
   flashed.
+
+## Defaults captured from hardware (2026-11-18)
+Ron's live settings written as the defaults with `./capture_preset.sh --defaults`: K1 340 → 250, K2 526 → 900,
+K3 605 → 738, K4 640 → 342, K5 293 → 267, S7 on, S9 on, P12 445 → 536 (K6 stays at 1023).
+- **Build:** router2 (the queue default). HD Analog 77.78 MHz (**seed 3**: seeds 1–2 missed timing), HD HDMI 77.38,
+  HD Dual 84.62, SD Analog 78.43, SD HDMI 81.94, SD Dual 81.01 MHz (seed 1). 7534-7560 / 7680 LC, 20/32 EBR.
+  `out/rev_b/ron/heirloom/streak.vmprog`. If a rebuild misses HD Analog, use `NEXTPNR_ROUTER="--router router1"`.

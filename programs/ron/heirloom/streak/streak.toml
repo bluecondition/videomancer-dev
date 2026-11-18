@@ -23,7 +23,7 @@ name_label = "Bands"
 control_mode = "linear"
 display_min_value = 4
 display_max_value = 64
-initial_value = 340
+initial_value = 250
 display_float_digits = 0
 suffix_label = ""
 
@@ -33,7 +33,7 @@ name_label = "Taper"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 526
+initial_value = 900
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Blocks"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 605
+initial_value = 738
 display_float_digits = 0
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 640
+initial_value = 342
 display_float_digits = 0
 suffix_label = ""
 
@@ -63,7 +63,7 @@ name_label = "Edge"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 293
+initial_value = 267
 display_float_digits = 0
 suffix_label = "%"
 
@@ -81,7 +81,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Mosaic"
 value_labels = ["Blocks", "Lines"]
-initial_value_label = "Blocks"
+initial_value_label = "Lines"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -93,7 +93,7 @@ initial_value_label = "Sparse"
 parameter_id = "toggle_switch_9"
 name_label = "Flip"
 value_labels = ["Left", "Right"]
-initial_value_label = "Left"
+initial_value_label = "Right"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -113,7 +113,7 @@ name_label = "Streak"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 445
+initial_value = 536
 display_float_digits = 0
 suffix_label = "%"
 
