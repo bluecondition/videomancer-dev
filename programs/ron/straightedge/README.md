@@ -26,7 +26,7 @@ S7 Glide, S9 Tone (Grey / Ink), S10 Weight (Bold / Fine), S11 Source (Video / Os
 | 7 | splinter | The Conway-Radin pinwheel tiling: right triangles that split into five, turning every time; an endless spiral zoom | Shatter: a few great triangles break piece by piece into splinters | launched 2026-11-17 |
 | 8 | lowpoly | A faceted sheet: a mesh of triangles, every facet one flat lit grey; the camera becomes a low-poly portrait | Relief: a regular lattice crumples into shards | launched 2026-11-17 |
 | 9 | [hinge](hinge/) | Rigid squares hinged at their corners; alternate squares turn opposite ways and rhombic holes open between them | Open: a solid sheet opens to a checkerboard and closes turned | v0.1.0 built 2026-11-17, router1 seed 1 all configs (router2 misses / stalls), HD 79.7-84.1 MHz, 90 % LC, 11 EBR; model = RTL; camera = 32-px halftone of small squares inside the figure (busy at 100 %); Pinwheel squares grow up to 21 %; not flashed |
-| 10 | windrose | A compass rose: tiers of pointed stars, every point split light and dark, tiers turning against each other (Field: a wall of stars) | Point: fat stars to needles | launched 2026-11-17 |
+| 10 | [windrose](windrose/) | A compass rose: tiers of pointed stars, every point split light and dark, tiers turning against each other (Field: a wall of stars) | Point: fat stars to needles | v0.1.0 built 2026-11-17, router1 seed 1 all configs, HD 81.6-83.9 MHz, 92 % LC, 21 EBR; model = RTL; camera = weight of echo lines ruled round the great star; 24 points max (not 32); not flashed |
 
 Each program's K4, S8, camera target and P12 are in its spec (`.straightedge_work/prompts/<name>.txt`) until it is
 built, then in its `SUMMARY.md`.
