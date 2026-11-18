@@ -1,0 +1,157 @@
+# Hinge - Straightedge (v0.1.0, 2026-11-17).  Rigid squares hinged at their corners: alternate squares turn
+# opposite ways and pointed rhombic holes open between them.  The slider opens the sheet; Drift glides it.
+# See hinge.vhd, hinge.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.hinge"
+program_name = "Hinge"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Optics", "Pattern"]
+program_type = "processing"
+description = "Squares hinged at their corners open into rhombic holes. The slider turns them; video breaks them into a halftone."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Nest"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 6
+initial_value = 0
+display_float_digits = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 660
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Turn"
+value_labels = ["Hinged", "Pinwheel"]
+initial_value_label = "Hinged"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Tone"
+value_labels = ["Grey", "Ink"]
+initial_value_label = "Grey"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Open"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 228
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Hinge"
+
+[[preset]]
+name = "Checker"
+rotary_potentiometer_3 = 440
+rotary_potentiometer_5 = 600
+toggle_switch_9 = 1
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Pythagoras"
+rotary_potentiometer_3 = 560
+rotary_potentiometer_5 = 640
+toggle_switch_8 = 1
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Nested"
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 430
+rotary_potentiometer_5 = 700
+linear_potentiometer_12 = 330
+
+[[preset]]
+name = "Wireframe"
+rotary_potentiometer_3 = 520
+rotary_potentiometer_4 = 430
+rotary_potentiometer_5 = 380
+toggle_switch_10 = 1
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Lace"
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 256
+rotary_potentiometer_5 = 690
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 720
