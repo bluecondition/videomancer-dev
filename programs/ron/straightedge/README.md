@@ -34,6 +34,19 @@ built, then in its `SUMMARY.md`.
 Reserves (not built): ziggurat (stepped pyramids seen from above, apex leaning), hatch (LeWitt lines in four
 directions, tone by superposition).
 
+## How the camera came out (v0.1.x, sims only)
+
+The brief's rule (the camera is held per element and never bends a line) was kept everywhere, but most of the
+specified camera targets did not make the test image readable and were changed during the builds:
+
+- Reads well: windrose (weight of echo lines ruled round the star), lowpoly (one flat tone per facet; a low-poly
+  portrait from about Scale 30 % down).
+- A layer over the figure rather than the figure itself: sliver (triangle-mosaic films), koch (a screen of small
+  hexagram stars), hinge (a halftone of small squares, busy at 100 %), splinter (a white splinter in every piece).
+- Figure intact but the subject barely readable at the default Scale: crease, tines, pentagrid, meander.
+
+Judge on hardware before changing anything; K6 at 0 % is always the clean figure.
+
 ## Decisions
 
 - Ron, 2026-11-17: same style as Vellum and Hardline, but every program non-organic: straight lines, sharp and
