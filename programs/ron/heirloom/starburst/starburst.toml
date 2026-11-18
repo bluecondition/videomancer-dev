@@ -23,7 +23,7 @@ name_label = "Cells"
 control_mode = "linear"
 display_min_value = 2
 display_max_value = 8
-initial_value = 356
+initial_value = 477
 display_float_digits = 1
 suffix_label = ""
 
@@ -33,7 +33,7 @@ name_label = "Bands"
 control_mode = "linear"
 display_min_value = 50
 display_max_value = 300
-initial_value = 205
+initial_value = 667
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Teeth"
 control_mode = "linear"
 display_min_value = 50
 display_max_value = 200
-initial_value = 341
+initial_value = 290
 display_float_digits = 0
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 640
+initial_value = 188
 display_float_digits = 0
 suffix_label = ""
 
@@ -69,7 +69,7 @@ name_label = "Etch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 1014
 display_float_digits = 0
 suffix_label = "%"
 
@@ -95,7 +95,7 @@ initial_value_label = "Video"
 parameter_id = "toggle_switch_10"
 name_label = "Drift"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -109,7 +109,7 @@ name_label = "Burst"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 430
+initial_value = 438
 display_float_digits = 0
 suffix_label = "%"
 
