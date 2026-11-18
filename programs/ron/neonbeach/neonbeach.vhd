@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.3.0 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.3.1 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -224,9 +224,20 @@ architecture neonbeach of program_top is
     signal u_ph  : unsigned(3 downto 0) := (others => '0');
     signal u_iq, u_ir : std_logic_vector(23 downto 0) := (others => '0');
     signal u_a, u_b, u_res : unsigned(15 downto 0) := (others => '0');
-    signal u_lt  : std_logic := '0';
     signal u_sum : unsigned(16 downto 0) := (others => '0');
-    signal d_sub, d_xz, d_yi, d_ya : std_logic := '0';                -- pre-decoded adder controls
+    signal d_sub, d_xz, d_yi, d_ya : std_logic := '0';                -- pre-decoded controls
+    signal d_mw, d_mul, d_frd, d_fwr, d_kwr, d_end, d_wr, p6, p9 : std_logic := '0';
+    signal d_rs : std_logic_vector(7 downto 0) := (others => '0');
+    signal d_fs : std_logic_vector(6 downto 0) := (others => '0');
+    signal d_kf, d_of : std_logic_vector(7 downto 0) := (others => '0');
+    signal d_jc : std_logic_vector(2 downto 0) := "000";
+    signal d_mrd : unsigned(1 downto 0) := "00";
+    signal d_dst : unsigned(3 downto 0) := (others => '0');
+    signal d_tgt : unsigned(8 downto 0) := (others => '0');
+    signal d_imm, d_in, d_tab, sc_qf : unsigned(15 downto 0) := (others => '0');
+    signal d_i11 : unsigned(10 downto 0) := (others => '0');
+    signal d_sh  : natural range 0 to 3 := 0;
+    signal sh_qf : unsigned(7 downto 0) := (others => '0');
     signal sc_ram : t_c_nb_scinit := C_NB_SCINIT;
     attribute no_rw_check of sc_ram : signal is true;
     signal sc_ra, sc_wa : unsigned(8 downto 0) := (others => '0');
@@ -264,10 +275,11 @@ architecture neonbeach of program_top is
     signal ws_r0 : unsigned(5 downto 0) := (others => '0');
     signal ws_r1, ws_r2 : unsigned(4 downto 0) := (others => '0');
     signal ws_v1, ws_v2 : std_logic := '0';
-    signal ws_p  : unsigned(1 downto 0) := (others => '0');
+    signal ws_p  : unsigned(2 downto 0) := (others => '0');
     signal ws_a1, ws_a2, ws_l : unsigned(7 downto 0) := (others => '0');
     signal ws_dp : unsigned(4 downto 0) := (others => '0');
-    signal ws_fc, ws_dist : signed(8 downto 0) := (others => '0');
+    signal ws_fc, ws_dist, ws_sdist : signed(8 downto 0) := (others => '0');
+    signal ws_cap : signed(9 downto 0) := (others => '0');
     signal ws_reach, ws_rc2 : signed(9 downto 0) := (others => '0');
     signal ws_div : unsigned(3 downto 0) := (others => '0');
 
@@ -564,7 +576,7 @@ begin
                     when 49 => if c_e < 144 then c_lo <= '1'; else c_lo <= '0'; end if;
                     when 42 =>                              -- sea level: 626 -+ 96 rows
                         v_s := signed(resize(s_k2, 12)) - 512;
-                        v_c := shift_right(v_s + shift_left(v_s, 1), 4);
+                        v_c := shift_right(v_s, 3) + shift_right(v_s, 4);       -- 3/16 (no self-add: router1)
                         c_sl <= unsigned(to_signed(C_SL0, 11) - v_c(10 downto 0));
                     when 43 =>
                         c_fp <= resize(s_gp, 14);
@@ -618,48 +630,23 @@ begin
     end process p_ctrl;
 
     ---------------------------------------------------------------------------
-    -- [A] Generated avid (parity-locked start 3/4 clocks after the source's avid rise, field-latched width)
+    -- [C] BEAM COUNTERS: each layer's x (half units), loaded so that its results reach stage 14
     ---------------------------------------------------------------------------
-    p_gavid : process(clk)
+    p_beam : process(clk)
     begin
         if rising_edge(clk) then
-            g_hsq <= data_in.hsync_n;
-            g_hsr <= g_hsq and not data_in.hsync_n;
-            g_avq <= data_in.avid;
-            g_avr <= data_in.avid and not g_avq;
-
-            if g_hsr = '1' then
-                g_ph  <= '0';
-                g_arm <= '1';
+            if g_start = '1'  then b_xw <= n_xw0; else b_xw <= b_xw + s_xs; end if;      -- stage 1
+            if s_st(10) = '1' then                                                       -- stage 11
+                b_xa <= n_xa0; b_xb <= n_xb0; b_x <= n_x0;
             else
-                g_ph <= not g_ph;
+                b_xa <= b_xa + s_xs;
+                b_xb <= b_xb + signed(resize(s_xs, 14));
+                b_x <= b_x + signed(resize(s_xs, 13));
             end if;
-            g_rsr <= g_rsr(1 downto 0) & '0';
-            if g_avr = '1' and g_arm = '1' then
-                g_arm    <= '0';
-                g_rsr(0) <= '1';
-                g_sel    <= g_ph xor g_par;
-                if g_ph = '1' then
-                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
-                else
-                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
-                end if;
-            end if;
-            if g_pc = 15 then g_par <= '1';
-            elsif g_pc = 0 then g_par <= '0'; end if;
-
-            if g_start = '1' then
-                g_avid <= '1';
-                g_cnt  <= (others => '0');
-            elsif g_avid = '1' then
-                g_cnt <= g_cnt + 1;
-                if g_cnt = g_wm1 or g_hsr = '1' then
-                    g_avid <= '0';
-                end if;
-            end if;
+            if s_st(12) = '1' then b_px <= (others => '0'); else b_px <= b_px + 1; end if;   -- stage 13
+            if s_st(16) = '1' then b_pa <= n_pa0; else b_pa <= b_pa + s_xs; end if;      -- stage 17
         end if;
-    end process p_gavid;
-    g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
+    end process p_beam;
 
     ---------------------------------------------------------------------------
     -- [C] LINE ENGINE: kicked when a line's last pixel has left stage 1 (and once in the zone for line 0),
@@ -843,58 +830,6 @@ begin
     end process p_line;
 
     ---------------------------------------------------------------------------
-    -- [C] BEAM COUNTERS: each layer's x (half units), loaded so that its results reach stage 14
-    ---------------------------------------------------------------------------
-    p_beam : process(clk)
-    begin
-        if rising_edge(clk) then
-            if g_start = '1'  then b_xw <= n_xw0; else b_xw <= b_xw + s_xs; end if;      -- stage 1
-            if s_st(10) = '1' then                                                       -- stage 11
-                b_xa <= n_xa0; b_xb <= n_xb0; b_x <= n_x0;
-            else
-                b_xa <= b_xa + s_xs;
-                b_xb <= b_xb + signed(resize(s_xs, 14));
-                b_x <= b_x + signed(resize(s_xs, 13));
-            end if;
-            if s_st(12) = '1' then b_px <= (others => '0'); else b_px <= b_px + 1; end if;   -- stage 13
-            if s_st(16) = '1' then b_pa <= n_pa0; else b_pa <= b_pa + s_xs; end if;      -- stage 17
-        end if;
-    end process p_beam;
-
-    ---------------------------------------------------------------------------
-    -- [D] SOURCE: camera luma (or the Osc lattice), a one-pole smoother along the line, the K6 gain
-    ---------------------------------------------------------------------------
-    p_src : process(clk)
-        variable v_l : unsigned(5 downto 0);
-        variable v_o : unsigned(7 downto 0);
-        variable v_e : signed(10 downto 0);
-        variable v_p : unsigned(9 downto 0);
-    begin
-        if rising_edge(clk) then
-            v_l := unsigned(data_in.y(9 downto 4));
-            if s_src = '1' then
-                v_o := resize(f_tri7(unsigned(b_x(9 downto 2)) + c_t(7 downto 0)), 8) + resize(l_oy, 8);
-                s_cin <= v_o(7 downto 2);
-            elsif v_l > 4 then
-                s_cin <= v_l - 4;
-            else
-                s_cin <= (others => '0');
-            end if;
-            if s_avq = '1' then
-                v_e := signed(resize(s_cin & "0000", 11)) - signed(resize(s_cf, 11));
-                v_e := signed(resize(s_cf, 11)) + shift_right(v_e, 3);
-                s_cf <= unsigned(v_e(9 downto 0));
-            end if;
-            v_p := (others => '0');
-            if c_cgn(0) = '1' then v_p := v_p + resize(s_cf(9 downto 4), 10); end if;
-            if c_cgn(1) = '1' then v_p := v_p + resize(s_cf(9 downto 4) & '0', 10); end if;
-            if c_cgn(2) = '1' then v_p := v_p + resize(s_cf(9 downto 4) & "00", 10); end if;
-            if c_cgn(3) = '1' then v_p := v_p + resize(s_cf(9 downto 4) & "000", 10); end if;
-            s_cg <= v_p(9 downto 4);
-        end if;
-    end process p_src;
-
-    ---------------------------------------------------------------------------
     -- [F] OUTPUT CONDITIONING: chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent running 8-sums (resynced to
     -- neutral in blanking), luma [1 2 1]/4 at the chroma's group delay (+ 2 px for the glow), luma 13/16
     -- toward black, blanking gate.
@@ -951,6 +886,50 @@ begin
         end if;
     end process p_out;
 
+
+    ---------------------------------------------------------------------------
+    -- [A] Generated avid (parity-locked start 3/4 clocks after the source's avid rise, field-latched width)
+    ---------------------------------------------------------------------------
+    p_gavid : process(clk)
+    begin
+        if rising_edge(clk) then
+            g_hsq <= data_in.hsync_n;
+            g_hsr <= g_hsq and not data_in.hsync_n;
+            g_avq <= data_in.avid;
+            g_avr <= data_in.avid and not g_avq;
+
+            if g_hsr = '1' then
+                g_ph  <= '0';
+                g_arm <= '1';
+            else
+                g_ph <= not g_ph;
+            end if;
+            g_rsr <= g_rsr(1 downto 0) & '0';
+            if g_avr = '1' and g_arm = '1' then
+                g_arm    <= '0';
+                g_rsr(0) <= '1';
+                g_sel    <= g_ph xor g_par;
+                if g_ph = '1' then
+                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
+                else
+                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
+                end if;
+            end if;
+            if g_pc = 15 then g_par <= '1';
+            elsif g_pc = 0 then g_par <= '0'; end if;
+
+            if g_start = '1' then
+                g_avid <= '1';
+                g_cnt  <= (others => '0');
+            elsif g_avid = '1' then
+                g_cnt <= g_cnt + 1;
+                if g_cnt = g_wm1 or g_hsr = '1' then
+                    g_avid <= '0';
+                end if;
+            end if;
+        end if;
+    end process p_gavid;
+    g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
 
     ---------------------------------------------------------------------------
     -- [C] PIXEL PATH, stages 2 .. 14: one block per object, each ending in a few bits at stage 14
@@ -1193,43 +1172,38 @@ begin
     end process p_obj;
 
     ---------------------------------------------------------------------------
-    -- ROMs, the ID line store and the knot table (one write statement each; registered reads, re-registered
-    -- in fabric).  The sky's filled pixels take the per-field sky keys in place of the colour table's word.
+    -- [D] SOURCE: camera luma (or the Osc lattice), a one-pole smoother along the line, the K6 gain
     ---------------------------------------------------------------------------
-    p_rom : process(clk)
+    p_src : process(clk)
+        variable v_l : unsigned(5 downto 0);
+        variable v_o : unsigned(7 downto 0);
+        variable v_e : signed(10 downto 0);
+        variable v_p : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
-            lr_q   <= C_NB_LROM(to_integer(lr_a));
-            lr_qf  <= lr_q;
-            pal_q  <= C_NB_PAL(to_integer(pal_a));
-            if s19_sky = '1' then pal_qf <= unsigned(l_skyc); else pal_qf <= pal_q; end if;
+            v_l := unsigned(data_in.y(9 downto 4));
+            if s_src = '1' then
+                v_o := resize(f_tri7(unsigned(b_x(9 downto 2)) + c_t(7 downto 0)), 8) + resize(l_oy, 8);
+                s_cin <= v_o(7 downto 2);
+            elsif v_l > 4 then
+                s_cin <= v_l - 4;
+            else
+                s_cin <= (others => '0');
+            end if;
+            if s_avq = '1' then
+                v_e := signed(resize(s_cin & "0000", 11)) - signed(resize(s_cf, 11));
+                v_e := signed(resize(s_cf, 11)) + shift_right(v_e, 3);
+                s_cf <= unsigned(v_e(9 downto 0));
+            end if;
+            v_p := (others => '0');
+            if c_cgn(0) = '1' then v_p := v_p + resize(s_cf(9 downto 4), 10); end if;
+            if c_cgn(1) = '1' then v_p := v_p + resize(s_cf(9 downto 4) & '0', 10); end if;
+            if c_cgn(2) = '1' then v_p := v_p + resize(s_cf(9 downto 4) & "00", 10); end if;
+            if c_cgn(3) = '1' then v_p := v_p + resize(s_cf(9 downto 4) & "000", 10); end if;
+            s_cg <= v_p(9 downto 4);
         end if;
-    end process p_rom;
+    end process p_src;
 
-    p_lb : process(clk)
-    begin
-        if rising_edge(clk) then
-            lb_q  <= lb_ram(to_integer(b_px));
-            lb_qf <= lb_q;
-            if lb_we = '1' then lb_ram(to_integer(lb_wa)) <= lb_wd; end if;
-        end if;
-    end process p_lb;
-
-    p_kr : process(clk)
-    begin
-        if rising_edge(clk) then
-            kr_q  <= kr_ram(to_integer(kr_a));
-            kr_qf <= kr_q;
-            if kr_we = '1' then kr_ram(to_integer(kr_wa)) <= kr_wd; end if;
-        end if;
-    end process p_kr;
-
-    w_x0 <= to_signed(-1440, 14) when s_xs = 4 else to_signed(-1920, 14);
-
-    ---------------------------------------------------------------------------
-    -- [C] FILLER (vblank): writes the knot table from the right edge to the left.  v0.1.0: the surface is
-    -- the sea level wherever the bed is below it, and the bed itself on the beach.
-    ---------------------------------------------------------------------------
     ---------------------------------------------------------------------------
     -- [C] WET SAND: the RAM (one write statement; the pixel path reads it in active video) and the sweep (in
     -- vblank, after the sky keys): per column a reach in quarter cells from the swash (the engine's envelope and
@@ -1268,7 +1242,7 @@ begin
             end if;
 
             if s_zone = '1' and s_zc = 120 then
-                ws_run <= '1'; ws_rows <= '0'; ws_col <= (others => '0'); ws_p <= "00";
+                ws_run <= '1'; ws_rows <= '0'; ws_col <= (others => '0'); ws_p <= "000";
                 ws_a1 <= c_t(7 downto 0) + (c_t(6 downto 0) & '0');               -- lobes drift: 3 t and -2 t
                 ws_a2 <= to_unsigned(0, 8) - (c_t(6 downto 0) & '0');
                 ws_dp <= o_e(7 downto 3);
@@ -1278,23 +1252,28 @@ begin
             elsif ws_run = '1' then
                 if ws_rows = '0' then
                     case ws_p is
-                        when "00" =>
+                        when "000" =>
                             ws_l <= resize(f_tri7(ws_a1), 8) + resize(f_tri7(ws_a2), 8);
                             if (ws_col & '1') >= o_ks(6 downto 0) and o_ks(7) = '0' then ws_uw <= '1'; else ws_uw <= '0'; end if;
                             ws_dist <= ws_fc - signed(resize(ws_col, 9));
-                            ws_p <= "01";
-                        when "01" =>
+                            ws_sdist <= signed(resize(o_ks(7 downto 1), 9)) - signed(resize(ws_col, 9));   -- columns to the shoreline
+                            ws_p <= "001";
+                        when "001" =>
                             v_l9 := signed(resize(ws_l, 9)) - 128;
                             ws_reach <= signed(resize(ws_dp, 10)) + resize(shift_right(v_l9, 5), 10);
-                            ws_p <= "10";
-                        when "10" =>
+                            ws_cap <= shift_left(resize(ws_sdist, 10), 3) - 4;                  -- thins over the last columns
+                            ws_p <= "010";
+                        when "010" =>
                             if ws_uw = '1' then
                                 ws_reach <= (others => '0');
                             elsif ws_dist > 0 then
                                 ws_reach <= ws_reach - shift_left(resize(ws_dist, 10), 3) - 4;
                             end if;
                             ws_a1 <= ws_a1 + 37; ws_a2 <= ws_a2 + 23;
-                            ws_p <= "11";
+                            ws_p <= "011";
+                        when "011" =>
+                            if ws_reach > ws_cap then ws_reach <= ws_cap; end if;
+                            ws_p <= "100";
                         when others =>
                             ws_rows <= '1'; ws_r0 <= (others => '0');
                     end case;
@@ -1302,7 +1281,7 @@ begin
                     if ws_r0(5) = '0' then
                         ws_r0 <= ws_r0 + 1;
                     else
-                        ws_rows <= '0'; ws_p <= "00";
+                        ws_rows <= '0'; ws_p <= "000";
                         if ws_col = 63 then ws_run <= '0'; else ws_col <= ws_col + 1; end if;
                     end if;
                 end if;
@@ -1314,11 +1293,9 @@ begin
         variable v_op  : integer range 0 to 31;
         variable v_d, v_ra, v_rb : unsigned(3 downto 0);
         variable v_i11 : unsigned(10 downto 0);
-        variable v_res : unsigned(15 downto 0);
         variable v_n   : natural range 0 to 3;
-        variable v_wr  : std_logic;
-        variable v_sub : std_logic;
-        variable v_x, v_y, v_sum : unsigned(16 downto 0);
+        variable v_x, v_y : unsigned(16 downto 0);
+        variable v_res : unsigned(15 downto 0);
     begin
         if rising_edge(clk) then
             -- the program, the scratch RAM (one write statement), the wave shapes: registered reads
@@ -1337,12 +1314,16 @@ begin
                 m_c <= m_c - 1;
             end if;
 
-            v_op := to_integer(unsigned(u_ir(23 downto 19)));
-            v_d  := unsigned(u_ir(18 downto 15));
-            v_ra := unsigned(u_ir(14 downto 11));
-            v_rb := unsigned(u_ir(10 downto 7));
+            v_op  := to_integer(unsigned(u_ir(23 downto 19)));
+            v_d   := unsigned(u_ir(18 downto 15));
+            v_ra  := unsigned(u_ir(14 downto 11));
+            v_rb  := unsigned(u_ir(10 downto 7));
             v_i11 := unsigned(u_ir(10 downto 0));
-            v_n := to_integer(unsigned(u_ir(1 downto 0)));
+            v_n   := to_integer(unsigned(u_ir(1 downto 0)));
+
+            -- (every enable and select below comes from a register decoded two or more clocks earlier: the
+            -- execute paths start at flip-flops, not at the instruction decode; 10 clocks an instruction)
+            p6 <= '0'; p9 <= '0';
 
             -- started at every field start once it has finished (the bank it wrote goes on screen); a
             -- watchdog restarts it if four field starts pass without it finishing
@@ -1359,10 +1340,72 @@ begin
                         u_ph <= to_unsigned(2, 4);
                     when 2 =>
                         sc_ra <= "11111" & v_ra;                         -- operand a
-                        -- the adder's controls, decoded while the operands are read (off the execute path)
+                        -- decode, off the execute paths
                         if v_op = 3 or v_op = 25 or v_op = 26 or v_op = 27 then d_sub <= '1'; else d_sub <= '0'; end if;
                         if v_op = 27 then d_xz <= '1'; d_ya <= '1'; else d_xz <= '0'; d_ya <= '0'; end if;
                         if v_op = 4 then d_yi <= '1'; else d_yi <= '0'; end if;
+                        d_rs <= (others => '0');                         -- phase 6 result: one-hot
+                        case v_op is
+                            when 1      => d_rs(0) <= '1';               -- LDI
+                            when 5      => d_rs(1) <= '1';               -- SHR
+                            when 6      => d_rs(2) <= '1';               -- SHL
+                            when 7      => d_rs(3) <= '1';               -- AND
+                            when 13     => d_rs(4) <= '1';               -- IN
+                            when 16     => d_rs(5) <= '1';               -- TAB
+                            when 23     => d_rs(6) <= '1';               -- TRI
+                            when 27     => d_rs(7) <= '1';               -- ABS (a, negated in 8)
+                            when others => null;
+                        end case;
+                        d_fs <= (others => '0');                         -- phase 8 result: one-hot
+                        case v_op is
+                            when 2 | 3 | 4 => d_fs(0) <= '1';            -- the sum
+                            when 27     => d_fs(1) <= '1';               -- ABS
+                            when 25     => d_fs(2) <= '1';               -- MIN
+                            when 26     => d_fs(3) <= '1';               -- MAX
+                            when 17     => d_fs(4) <= '1';               -- FRD
+                            when 15     => d_fs(5) <= '1';               -- SHP
+                            when 9      => d_fs(6) <= '1';               -- MRD
+                            when others => null;
+                        end case;
+                        d_mrd <= v_i11(1 downto 0);
+                        if v_op = 9 then d_mw <= '1'; else d_mw <= '0'; end if;
+                        if v_op = 8 then d_mul <= '1'; else d_mul <= '0'; end if;
+                        if v_op = 17 then d_frd <= '1'; else d_frd <= '0'; end if;
+                        if v_op = 18 then d_fwr <= '1'; else d_fwr <= '0'; end if;
+                        if v_op = 20 then d_kwr <= '1'; else d_kwr <= '0'; end if;
+                        if v_op = 22 then d_end <= '1'; else d_end <= '0'; end if;
+                        d_kf <= (others => '0'); d_of <= (others => '0');
+                        if v_op = 19 then d_kf(to_integer(v_i11(2 downto 0))) <= '1'; end if;   -- KST field
+                        if v_op = 21 then d_of(to_integer(v_i11(2 downto 0))) <= '1'; end if;   -- OUT port
+                        d_jc <= "000";
+                        case v_op is
+                            when 10     => d_jc <= "100";                -- JMP
+                            when 11     => d_jc <= "101";                -- JN
+                            when 12     => d_jc <= "110";                -- JZ
+                            when 24     => d_jc <= "111";                -- JP
+                            when others => null;
+                        end case;
+                        case v_op is
+                            when 1 | 2 | 3 | 4 | 5 | 6 | 7 | 9 | 13 | 15 | 16 | 17 | 23 | 25 | 26 | 27 =>
+                                if v_d /= 0 then d_wr <= '1'; else d_wr <= '0'; end if;
+                            when others => d_wr <= '0';
+                        end case;
+                        d_dst <= v_d;
+                        d_tgt <= unsigned(u_ir(8 downto 0));
+                        d_imm <= unsigned(resize(signed(u_ir(14 downto 0)), 16));
+                        d_i11 <= v_i11;
+                        d_sh  <= v_n;
+                        -- the input port, fetched now
+                        case to_integer(v_i11(2 downto 0)) is
+                            when 0      => d_in <= resize(s_k1, 16);
+                            when 1      => d_in <= resize(s_k3, 16);
+                            when 2      => d_in <= resize(s_k4, 16);
+                            when 3      => d_in <= resize(s_k5, 16);
+                            when 4      => d_in <= resize(c_sl, 16);
+                            when 5      => d_in <= c_t;
+                            when 6      => d_in <= u_lfsr;
+                            when others => d_in <= (0 => s_croff, others => '0');
+                        end case;
                         u_ph <= to_unsigned(3, 4);
                     when 3 =>
                         sc_ra <= "11111" & v_rb;                         -- operand b
@@ -1372,110 +1415,96 @@ begin
                         u_ph <= to_unsigned(5, 4);
                     when 5 =>
                         if v_rb = 0 then u_b <= (others => '0'); else u_b <= sc_q; end if;
-                        if v_op = 17 then sc_ra <= u_a(8 downto 0); end if;                              -- FRD
+                        if d_frd = '1' then sc_ra <= u_a(8 downto 0); end if;                           -- FRD
+                        -- the table entry, fetched now (from a)
+                        if d_i11(0) = '0' then d_tab <= resize(C_NB_DT2(to_integer(u_a(3 downto 0))), 16);
+                        else d_tab <= resize(C_NB_SIZE(to_integer(u_a(3 downto 0))), 16); end if;
+                        p6 <= '1';
                         u_ph <= to_unsigned(6, 4);
                     when 6 =>
-                        -- execute
-                        -- one 17-bit adder: ADD, SUB, ADDI, ABS (0 - a) and the MIN / MAX compare (a - b), its
-                        -- controls registered in phase 2, its sum registered here; results are picked in phase 7
+                        -- execute: the adder into u_sum; the simple results into u_res; the units (p6-gated)
                         if d_xz = '1' then v_x := (others => '0'); else v_x := unsigned(resize(signed(u_a), 17)); end if;
-                        if d_yi = '1' then v_y := unsigned(resize(signed(v_i11), 17));
+                        if d_yi = '1' then v_y := unsigned(resize(signed(d_i11), 17));
                         elsif d_ya = '1' then v_y := unsigned(resize(signed(u_a), 17));
                         else v_y := unsigned(resize(signed(u_b), 17)); end if;
                         if d_sub = '1' then v_y := not v_y; end if;
                         u_sum <= v_x + v_y + ("" & d_sub);
                         v_res := (others => '0');
-                        u_npc <= u_pc + 1;
-                        case v_op is
-                            when 1  => v_res := unsigned(resize(signed(u_ir(14 downto 0)), 16));           -- LDI
-                            when 5  => v_res := shift_right(u_a, v_n + 1);                                  -- SHR
-                            when 6  => v_res := shift_left(u_a, v_n + 1);                                   -- SHL
-                            when 7  => v_res := u_a and resize(v_i11, 16);                                  -- AND
-                            when 8  =>                                                                      -- MUL
-                                m_p <= (others => '0'); m_x <= resize(u_a(9 downto 0), 18); m_y <= u_b(7 downto 0);
-                                m_c <= to_unsigned(8, 4);
-                            when 10 => u_npc <= unsigned(u_ir(8 downto 0));                                 -- JMP
-                            when 11 => if u_a(15) = '1' then u_npc <= unsigned(u_ir(8 downto 0)); end if;   -- JN
-                            when 12 => if u_a = 0 then u_npc <= unsigned(u_ir(8 downto 0)); end if;         -- JZ
-                            when 24 => if u_a(15) = '0' and u_a /= 0 then u_npc <= unsigned(u_ir(8 downto 0)); end if;  -- JP
-                            when 13 =>                                                                      -- IN
-                                case to_integer(v_i11(2 downto 0)) is
-                                    when 0      => v_res := resize(s_k1, 16);
-                                    when 1      => v_res := resize(s_k3, 16);
-                                    when 2      => v_res := resize(s_k4, 16);
-                                    when 3      => v_res := resize(s_k5, 16);
-                                    when 4      => v_res := resize(c_sl, 16);
-                                    when 5      => v_res := c_t;
-                                    when 6      => v_res := u_lfsr;
-                                    when others => v_res := (0 => s_croff, others => '0');
-                                end case;
-                            when 16 =>                                                                      -- TAB
-                                if v_i11(0) = '0' then v_res := resize(C_NB_DT2(to_integer(u_a(3 downto 0))), 16);
-                                else v_res := resize(C_NB_SIZE(to_integer(u_a(3 downto 0))), 16); end if;
-                            when 18 =>                                                                      -- FWR
-                                sc_we <= '1'; sc_wa <= u_a(8 downto 0); sc_wd <= u_b;
-                            when 19 =>                                                                      -- KST
-                                case to_integer(v_i11(2 downto 0)) is
-                                    when 0      => k_srf <= u_a(9 downto 0);
-                                    when 1      => k_ds  <= u_a(10 downto 0);
-                                    when 2      => k_bed <= u_a(9 downto 0);
-                                    when 3      => k_db  <= u_a(7 downto 0);
-                                    when 4      => k_fm  <= u_a(7 downto 0);
-                                    when others => k_w   <= u_a(0);
-                                end case;
-                            when 20 =>                                                                      -- KWR
-                                kr_we <= '1';
-                                kr_wa <= (not c_dbank) & u_a(6 downto 0);
-                                kr_wd <= std_logic_vector(k_srf) & std_logic_vector(k_ds) & std_logic_vector(k_bed)
-                                         & std_logic_vector(k_db) & std_logic_vector(k_fm) & k_w;
-                            when 21 =>                                                                      -- OUT
-                                case to_integer(v_i11(2 downto 0)) is
-                                    when 0      => o_e  <= u_a(7 downto 0);
-                                    when 1      => o_ks <= u_a(7 downto 0);
-                                    when 2      => o_cx <= u_a(9 downto 0);
-                                    when 3      => o_cy <= u_a(9 downto 0);
-                                    when 4      => o_cs <= u_a(7 downto 0);
-                                    when others => o_ch <= u_a(10 downto 0);
-                                end case;
-                            when 22 => u_run <= '0';                                                        -- END
-                            when 23 => v_res := resize(f_tri7(u_a(15 downto 8)), 16);                      -- TRI
-                            when 27 => v_res := u_a;                                                        -- ABS (negated in 7)
-                            when others => null;
-                        end case;
+                        if d_rs(0) = '1' then v_res := v_res or d_imm; end if;
+                        if d_rs(1) = '1' then v_res := v_res or shift_right(u_a, d_sh + 1); end if;
+                        if d_rs(2) = '1' then v_res := v_res or shift_left(u_a, d_sh + 1); end if;
+                        if d_rs(3) = '1' then v_res := v_res or (u_a and resize(d_i11, 16)); end if;
+                        if d_rs(4) = '1' then v_res := v_res or d_in; end if;
+                        if d_rs(5) = '1' then v_res := v_res or d_tab; end if;
+                        if d_rs(6) = '1' then v_res := v_res or resize(f_tri7(u_a(15 downto 8)), 16); end if;
+                        if d_rs(7) = '1' then v_res := v_res or u_a; end if;
                         u_res <= v_res;
+                        -- branches
+                        u_npc <= u_pc + 1;
+                        if d_jc(2) = '1' then
+                            case d_jc(1 downto 0) is
+                                when "00"   => u_npc <= d_tgt;
+                                when "01"   => if u_a(15) = '1' then u_npc <= d_tgt; end if;
+                                when "10"   => if u_a = 0 then u_npc <= d_tgt; end if;
+                                when others => if u_a(15) = '0' and u_a /= 0 then u_npc <= d_tgt; end if;
+                            end case;
+                        end if;
                         u_ph <= to_unsigned(7, 4);
                     when 7 =>
-                        case v_op is
-                            when 2 | 3 | 4 => u_res <= u_sum(15 downto 0);                                  -- ADD SUB ADDI
-                            when 27 => if u_a(15) = '1' then u_res <= u_sum(15 downto 0); end if;           -- ABS (u_res = a)
-                            when 25 => if u_sum(16) = '1' then u_res <= u_a; else u_res <= u_b; end if;     -- MIN
-                            when 26 => if u_sum(16) = '1' then u_res <= u_b; else u_res <= u_a; end if;     -- MAX
-                            when 17 => u_res <= sc_q;                                                       -- FRD
-                            when 15 => u_res <= unsigned(resize(signed(sh_q), 16));                         -- SHP
-                            when 9  =>                                                                      -- MRD
-                                case to_integer(v_i11(1 downto 0)) is
-                                    when 0      => u_res <= m_p(15 downto 0);
-                                    when 1      => u_res <= resize(m_p(17 downto 6), 16);
-                                    when 2      => u_res <= resize(m_p(17 downto 7), 16);
-                                    when others => u_res <= resize(m_p(17 downto 3), 16);
-                                end case;
-                            when others => null;
-                        end case;
-                        if v_op /= 9 or m_c = 0 then u_ph <= to_unsigned(8, 4); end if;
-                    when others =>
-                        -- write back
-                        if true then
-                            case v_op is
-                                when 1 | 2 | 3 | 4 | 5 | 6 | 7 | 13 | 16 | 23 | 25 | 26 | 27 => v_wr := '1';
-                                when 9 | 15 | 17 => v_wr := '1';
-                                when others => v_wr := '0';
+                        sc_qf <= sc_q; sh_qf <= sh_q;                    -- block RAM data into fabric first
+                        if d_mw = '0' or m_c = 0 then u_ph <= to_unsigned(8, 4); end if;   -- MRD waits
+                    when 8 =>
+                        if d_fs(0) = '1' then u_res <= u_sum(15 downto 0); end if;
+                        if d_fs(1) = '1' and u_a(15) = '1' then u_res <= u_sum(15 downto 0); end if;
+                        if d_fs(2) = '1' then if u_sum(16) = '1' then u_res <= u_a; else u_res <= u_b; end if; end if;
+                        if d_fs(3) = '1' then if u_sum(16) = '1' then u_res <= u_b; else u_res <= u_a; end if; end if;
+                        if d_fs(4) = '1' then u_res <= sc_qf; end if;
+                        if d_fs(5) = '1' then u_res <= unsigned(resize(signed(sh_qf), 16)); end if;
+                        if d_fs(6) = '1' then
+                            case to_integer(d_mrd) is
+                                when 0      => u_res <= m_p(15 downto 0);
+                                when 1      => u_res <= resize(m_p(17 downto 6), 16);
+                                when 2      => u_res <= resize(m_p(17 downto 7), 16);
+                                when others => u_res <= resize(m_p(17 downto 3), 16);
                             end case;
-                            if v_d = 0 then v_wr := '0'; end if;
-                            sc_we <= v_wr; sc_wa <= "11111" & v_d; sc_wd <= u_res;
-                            u_pc <= u_npc;
-                            u_ph <= (others => '0');
                         end if;
+                        p9 <= '1';
+                        u_ph <= to_unsigned(9, 4);
+                    when others =>
+                        u_pc <= u_npc;
+                        u_ph <= (others => '0');
                 end case;
+            end if;
+
+            -- the units, gated by the registered phase strobes and the pre-decoded flags
+            if p6 = '1' then
+                if d_mul = '1' then
+                    m_p <= (others => '0'); m_x <= resize(u_a(9 downto 0), 18); m_y <= u_b(7 downto 0);
+                    m_c <= to_unsigned(8, 4);
+                end if;
+                if d_fwr = '1' then sc_we <= '1'; sc_wa <= u_a(8 downto 0); sc_wd <= u_b; end if;
+                if d_kf(0) = '1' then k_srf <= u_a(9 downto 0); end if;
+                if d_kf(1) = '1' then k_ds  <= u_a(10 downto 0); end if;
+                if d_kf(2) = '1' then k_bed <= u_a(9 downto 0); end if;
+                if d_kf(3) = '1' then k_db  <= u_a(7 downto 0); end if;
+                if d_kf(4) = '1' then k_fm  <= u_a(7 downto 0); end if;
+                if d_kf(5) = '1' then k_w   <= u_a(0); end if;
+                if d_kwr = '1' then
+                    kr_we <= '1';
+                    kr_wa <= (not c_dbank) & u_a(6 downto 0);
+                    kr_wd <= std_logic_vector(k_srf) & std_logic_vector(k_ds) & std_logic_vector(k_bed)
+                             & std_logic_vector(k_db) & std_logic_vector(k_fm) & k_w;
+                end if;
+                if d_of(0) = '1' then o_e  <= u_a(7 downto 0); end if;
+                if d_of(1) = '1' then o_ks <= u_a(7 downto 0); end if;
+                if d_of(2) = '1' then o_cx <= u_a(9 downto 0); end if;
+                if d_of(3) = '1' then o_cy <= u_a(9 downto 0); end if;
+                if d_of(4) = '1' then o_cs <= u_a(7 downto 0); end if;
+                if d_of(5) = '1' then o_ch <= u_a(10 downto 0); end if;
+                if d_end = '1' then u_run <= '0'; end if;
+            end if;
+            if p9 = '1' then                                             -- write back
+                sc_we <= d_wr; sc_wa <= "11111" & d_dst; sc_wd <= u_res;
             end if;
         end if;
     end process p_eng;
@@ -1715,6 +1744,44 @@ begin
             end if;
         end if;
     end process p_mix;
+
+    ---------------------------------------------------------------------------
+    -- [C] FILLER (vblank): writes the knot table from the right edge to the left.  v0.1.0: the surface is
+    -- the sea level wherever the bed is below it, and the bed itself on the beach.
+    ---------------------------------------------------------------------------
+    ---------------------------------------------------------------------------
+    -- ROMs, the ID line store and the knot table (one write statement each; registered reads, re-registered
+    -- in fabric).  The sky's filled pixels take the per-field sky keys in place of the colour table's word.
+    ---------------------------------------------------------------------------
+    p_rom : process(clk)
+    begin
+        if rising_edge(clk) then
+            lr_q   <= C_NB_LROM(to_integer(lr_a));
+            lr_qf  <= lr_q;
+            pal_q  <= C_NB_PAL(to_integer(pal_a));
+            if s19_sky = '1' then pal_qf <= unsigned(l_skyc); else pal_qf <= pal_q; end if;
+        end if;
+    end process p_rom;
+
+    p_lb : process(clk)
+    begin
+        if rising_edge(clk) then
+            lb_q  <= lb_ram(to_integer(b_px));
+            lb_qf <= lb_q;
+            if lb_we = '1' then lb_ram(to_integer(lb_wa)) <= lb_wd; end if;
+        end if;
+    end process p_lb;
+
+    p_kr : process(clk)
+    begin
+        if rising_edge(clk) then
+            kr_q  <= kr_ram(to_integer(kr_a));
+            kr_qf <= kr_q;
+            if kr_we = '1' then kr_ram(to_integer(kr_wa)) <= kr_wd; end if;
+        end if;
+    end process p_kr;
+
+    w_x0 <= to_signed(-1440, 14) when s_xs = 4 else to_signed(-1920, 14);
     data_out.y       <= std_logic_vector(o4_y);
     data_out.u       <= std_logic_vector(o4_u);
     data_out.v       <= std_logic_vector(o4_v);

@@ -7,7 +7,8 @@ NEON BEACH engine: assembler, emulator and the per-field program.
 One small datapath runs once a field (started in vertical blanking, free to run on through the field: the knot
 table is double-buffered): a 16-bit ALU, sixteen 16-bit registers (r0 reads 0) kept in the top of the scratch
 block RAM (496 .. 511, read one operand at a time: no register-file multiplexers), a serial 16 x 8 multiplier,
-the program in block RAM.  Nine clocks an instruction (plus the multiplier's wait in MRD).
+the program in block RAM.  Ten clocks an instruction (plus the multiplier's wait in MRD); every enable and
+select is decoded into a register two or more clocks before it is used.
 
 Instruction, 24 bits:  [23:19] op  [18:15] d  [14:11] a  [10:7] b  [10:0] imm11 (sign-extended where it is a
 value)  LDI: [14:0] imm15 (signed)  jumps: [8:0] target
@@ -413,7 +414,7 @@ class Engine:
             A, B = self.r[a] if a else 0, self.r[b] if b else 0
             npc = pc + 1
             res = None
-            self.clocks += 9
+            self.clocks += 10
             if op == OPS['NOP']: pass
             elif op == OPS['LDI']: res = s15
             elif op == OPS['ADD']: res = A + B

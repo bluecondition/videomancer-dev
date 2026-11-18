@@ -7,8 +7,10 @@ over the rising bed and breaks on the beach; under everything the sand, a mesh o
 wash runs over the sand: the cells it covers turn into triangles in the water's colour, and as it drains they
 revert a triangle at a time. A crab walks the sand and runs from the wash.
 
-**Status: v0.3.0 built 2026-11-18, timing-closed only (not flashed).** Flash `out/rev_b/ron/neonbeach.vmprog`.
-Build plan and design history: `PLAN.md` (side-on version). v0.1.0 (ca04ddf) was the still scene.
+**Status: v0.3.1 built 2026-11-18, timing-closed only (not flashed).** Flash `out/rev_b/ron/neonbeach.vmprog`.
+Build plan and design history: `PLAN.md` (side-on version). v0.1.0 (ca04ddf) was the still scene, v0.3.0
+(e419f45) the first with waves, wash and crab; v0.3.1 tapers the wash toward the shoreline and fixes the
+engine's timing.
 
 ## How it draws
 
@@ -24,7 +26,7 @@ Build plan and design history: `PLAN.md` (side-on version). v0.1.0 (ca04ddf) was
   cells 32 px wide and 32 rows deep with the rows parallel to the sand's surface.
 - **The waves** come from a small microcoded engine (`nbengine.py`: assembler, emulator, program) that fills the
   knot table bank that is not on screen, once a field, starting at the field start and running on through the
-  field (about 170k clocks worst case; an NTSC field is 225k). Per knot from the right edge: the wave phase
+  field (about 188k clocks worst case; an NTSC field is 225k). Per knot from the right edge: the wave phase
   (Rhythm) less a per-knot offset that shortens the waves over the rising bed, the wave's size by its number
   (waves come in sets), a shoaling gain, the depth cap (a wave taller than 3/8 of the depth breaks: the excess
   becomes foam and the profile turns into a breaker), the profile from a shape table (4 classes x 128 phases),
@@ -33,13 +35,15 @@ Build plan and design history: `PLAN.md` (side-on version). v0.1.0 (ca04ddf) was
   run-up's front; a crest reaching the shoreline starts a run-up (fast up, slow drain).
 - The engine: a 16-bit ALU (one adder for add / sub / abs / min / max), sixteen registers kept in the top of its
   scratch block RAM (no register-file multiplexers), a serial 10 x 8 multiplier, the program in block RAM
-  (512 x 24). Nine clocks an instruction. The scratch RAM's initial contents hold the per-knot phase offsets
+  (512 x 24). Ten clocks an instruction; every enable and select is decoded into a register two or more clocks
+  before it is used (v0.3.0's decode-to-result paths missed HD HDMI on three router2 seeds). The scratch RAM's initial contents hold the per-knot phase offsets
   and the bed. Verified: the emulator matches a plain-Python statement of the maths over 600 fields at four knob
   settings (0 mismatches), and the RTL matches the emulator word for word on every knot write (GHDL testbench,
   `.neonbeach_work/tb`).
 - **Wet sand**: a 4-bit counter per sand cell (2048 cells, block RAM). A sweep in vblank works out each column's
   reach from the engine's swash envelope and shoreline (plus two drifting triangle lobes) and rewrites every
   cell: 15 = under the wash, 14 = only its upper triangle, then 13 .. 1 drying one step every 12 fields. The
+  reach thins over the last columns before the shoreline (v0.3.1; it ended in a vertical cut). The
   pixel path draws 15 and 14 as wash triangles; drying cells keep their diagonals (the upper triangle's longer)
   and lose them by a per-cell hash, so the triangles disappear piecemeal. Wet sand fills darker.
 - **The sky** follows the sun's elevation smoothly: in vblank the colour path is run on two made-up pixels
@@ -87,7 +91,22 @@ Spray and stars are overlays.
 
 ## Status
 
-v0.3.0 built 2026-11-18 with router2 (the builder default), `./build_programs.sh ron neonbeach`:
+**v0.3.1** built 2026-11-18 with **router1**: `NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron neonbeach`
+(router2 gave 69 .. 76 MHz on HD HDMI where router1 gave 76 .. 83, as CLAUDE.md predicts for engine designs):
+
+| Config | Seed | Post-route Fmax | LC |
+|---|---|---|---|
+| HD Analog | **2** (seed 1 missed) | 83.17 MHz | 7265 |
+| SD Analog | 1 | 90.22 MHz | 7278 |
+| HD HDMI | 1 | 82.84 MHz | 7263 |
+| SD HDMI | 1 | 83.17 MHz | 7280 |
+| HD Dual | 1 | 77.98 MHz | 7269 |
+| SD Dual | 1 | 86.26 MHz | 7254 |
+
+7,280 / 7,680 LC (94.8 %), 28 / 32 block RAMs. Anything added needs a matching removal; measured candidates:
+the per-object sheen variety (~87 LUT + 26 FF), the stars (~82 LUT + 44 FF).
+
+v0.3.0 (router2, the builder default):
 
 | Config | Seed | Post-route Fmax | LC |
 |---|---|---|---|
