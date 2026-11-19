@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Sinew v0.5.0 -- Heirloom #18, rebuilt from the photo WIN_20230315_00_53_56.
+-- Sinew v0.6.0 (phase-2 diag) -- Heirloom #18, rebuilt from the photo WIN_20230315_00_53_56.
 --
 -- The photo: three horizontal bands.  Top: yellow/orange/green vertical bars.  Bottom: pink/navy/teal
 -- bars with U-shaped teal contours.  Middle: seven orange "ropes" S-curving down the frame, crossed by
@@ -15,24 +15,25 @@
 -- The program: per line, an engine (one serial multiplier, one serial divider) computes the rope
 -- oscillator's two increments (rise / fall halves) and start phase from fitted cubics, the sinew
 -- oscillator's increment 1/P and start phase from the triangle law, the slice blend and the blue
--- ramp, the line tear.  Per pixel: two DDAs, the wiggle (cosine ROM), the video/Osc melt, then the
--- colour tables fitted to the photo (sinew_pkg, by sinew.py): R(theta, Omega), G = three slices along
--- the triangle blended per line, B(theta, Omega) + ramp; top/bottom band curves; grain (the ropes'
--- marbling); palette routing; RGB -> YUV.
+-- ramp, the line tear.  Per pixel: two DDAs, the wiggle (a cosine table rewritten each vblank with the
+-- hook depth), the video/Osc melt, then the colour tables fitted to the photo (sinew_pkg, by sinew.py):
+-- R(theta, Omega), G = three slices along the triangle blended per line, B(theta, Omega) + ramp;
+-- top/bottom band curves; grain (the ropes' marbling); palette routing; RGB -> YUV.
 --
---   K1  Ropes    rope count 0.5x .. 2x (the photo: 7 across), all three bands
---   K2  Sinews   sinew line density 0.5x .. 2x
---   K3  Twist    the ropes' S-curve 0 .. 4x (centre = the photo)
---   K4  Speed    bipolar (centre +-8 = still): the pinch rolls down, the sinews stream, the ropes drift
---   K5  Melt     how far the video (or Osc) bends the sinews and ropes
+--   K1  Ropes    rope oscillator rate 0.25x .. 4x, exponential (the photo: 7 across), all three bands
+--   K2  Sinews   sinew oscillator rate 0.25x .. 4x, exponential (bulge and vertices together)
+--   K3  Twist    the ropes' S-curve -3x .. 0 .. 1x (centre = the photo) .. 4x
+--   K4  Speed    bipolar (centre +-8 = still): the pinch rolls down, the sinews stream, the ropes drift;
+--                the v0.5 law up to the default, x4 steeper beyond (ends ~3.2x faster)
+--   K5  Melt     how far the video (or Osc) bends the sinews (to +-2 cycles) and ropes (to +-0.5 cycle)
 --   K6  Palette  8 channel routings (0 = the photo)
---   S7  Tear     torn strips at the pinch vertices + slips (default On)
---   S8  Grain    the ropes' marbling (default On)
+--   S7  Tear     Photo (torn strips at the pinch vertices + slips) / Storm (every line, x4, frequent slips)
+--   S8  Mirror   Off / On: the right half mirrors the left
 --   S9  Wave     Triangle (the photo) / Saw vertical modulator
 --   S10 Bands    the top and bottom bands (default On)
 --   S11 Source   Video / Osc
---   P12 PINCH    the vertical modulator's depth: 0 = straight evenly spaced sinews, 50 % = the photo,
---                100 % = dense chevrons and knots
+--   P12 PINCH    the sinews' modulation: vertical depth (0 = straight evenly spaced sinews, 50 % = the
+--                photo, 100 % = dense chevrons and knots) and the rope-to-sinew hooks (0 .. 1x .. 3x)
 --
 -- Virtual 1080-line geometry (x stretched to the width at SD).  Generated avid; output conditioning
 -- (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma to ~777) before the blanking gate.  Latency 24
@@ -186,15 +187,21 @@ architecture sinew of program_top is
     signal f_roph  : unsigned(23 downto 0) := (others => '0');    -- rope drift, Q20
     signal f_ta, f_tb : unsigned(15 downto 0) := (others => '0');
     signal f_pal   : unsigned(2 downto 0) := (others => '0');
-    signal f_tear, f_grain, f_saw, f_bands, f_osc : std_logic := '0';
+    signal f_storm, f_mir, f_saw, f_bands, f_osc : std_logic := '0';
+    constant f_tear  : std_logic := '1';   -- v0.6: the tear is always on (S7 = Photo / Storm)
+    constant f_grain : std_logic := '1';   -- v0.6: the grain is always on (S8 = Mirror)
+    signal f_ve    : signed(11 downto 0) := (others => '0');          -- speed, x4 steeper past |128|
     signal f_s1    : unsigned(13 downto 0) := to_unsigned(4096, 14);
-    signal f_rsc   : unsigned(14 downto 0) := to_unsigned(4096, 15);   -- Q12
-    signal f_ta2   : unsigned(13 downto 0) := (others => '0');
-    signal f_x2sq  : unsigned(19 downto 0) := (others => '0');
-    signal f_p0m   : unsigned(13 downto 0) := to_unsigned(4489, 14);   -- Q4 px
-    signal f_tw    : unsigned(9 downto 0) := to_unsigned(256, 10);     -- Q8
+    signal f_rsc   : unsigned(15 downto 0) := to_unsigned(4096, 16);   -- Q12
+    signal f_isc   : unsigned(14 downto 0) := to_unsigned(4096, 15);   -- Q12, sinew period scale (1/rate)
+    signal f_hg    : unsigned(5 downto 0) := to_unsigned(16, 6);       -- Q4, hook depth
+    signal f_tw    : signed(10 downto 0) := to_signed(256, 11);        -- Q8
     signal f_kk    : unsigned(11 downto 0) := to_unsigned(2169, 12);   -- Q12
     signal f_m5    : unsigned(8 downto 0) := (others => '0');          -- Q8
+    signal f_x5d   : unsigned(9 downto 0) := (others => '0');          -- K5 above its default
+    signal f_gpa   : unsigned(5 downto 0) := (others => '0');
+    signal f_gp    : unsigned(5 downto 0) := to_unsigned(2, 6);        -- sinew melt gain
+    signal f_tsh   : std_logic := '0';                                 -- K5 above its default: rope melt x2
 
     -- generated avid
     signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
@@ -203,6 +210,7 @@ architecture sinew of program_top is
     signal g_rsr : std_logic_vector(2 downto 0) := (others => '0');
     signal g_cnt : unsigned(11 downto 0) := (others => '0');
     signal g_wm1 : unsigned(11 downto 0) := to_unsigned(1919, 12);
+    signal g_hm2 : unsigned(11 downto 0) := to_unsigned(958, 12);    -- mirror: half width - 2
     signal g_start : std_logic := '0';
 
     -- engine: sequencer, serial multiplier, serial divider
@@ -220,10 +228,10 @@ architecture sinew of program_top is
     signal m_sb   : signed(18 downto 0) := (others => '0');
     signal m_cnt  : unsigned(4 downto 0) := (others => '0');
     signal m_busy : std_logic := '0';
-    signal d_rem  : unsigned(14 downto 0) := (others => '0');
+    signal d_rem  : unsigned(15 downto 0) := (others => '0');
     signal d_num  : unsigned(16 downto 0) := (others => '0');
     signal d_q    : unsigned(16 downto 0) := (others => '0');
-    signal d_den  : unsigned(13 downto 0) := (others => '0');
+    signal d_den  : unsigned(14 downto 0) := (others => '0');
     signal d_cnt  : unsigned(4 downto 0) := (others => '0');
     signal d_busy : std_logic := '0';
     -- engine registers
@@ -243,19 +251,20 @@ architecture sinew of program_top is
     signal e_tr   : unsigned(13 downto 0) := (others => '0');
     signal e_s    : unsigned(13 downto 0) := (others => '0');
     signal e_P    : unsigned(13 downto 0) := to_unsigned(4489, 14);
+    signal e_Ps   : unsigned(14 downto 0) := to_unsigned(4489, 15);   -- P x the Sinews scale
     signal e_a    : unsigned(16 downto 0) := (others => '0');
     signal e_b    : signed(23 downto 0) := (others => '0');
     signal e_pos  : unsigned(5 downto 0) := (others => '0');
     signal e_px   : signed(16 downto 0) := (others => '0');
     signal e_vb   : signed(8 downto 0) := (others => '0');
-    signal e_off  : signed(7 downto 0) := (others => '0');
+    signal e_off  : signed(9 downto 0) := (others => '0');
     signal e_yq   : unsigned(7 downto 0) := (others => '0');
     signal e_xt   : unsigned(31 downto 0) := x"01234567";
     signal e_xg   : unsigned(31 downto 0) := x"089ABCDE";
     signal e_hold : unsigned(1 downto 0) := (others => '0');
-    signal e_cur  : signed(7 downto 0) := (others => '0');
+    signal e_cur  : signed(9 downto 0) := (others => '0');
     signal e_slen : unsigned(5 downto 0) := (others => '0');
-    signal e_slip : signed(7 downto 0) := (others => '0');
+    signal e_slip : signed(9 downto 0) := (others => '0');
     type t_walk is array(0 to 3) of unsigned(7 downto 0);
     signal e_walk : t_walk := (x"00", x"25", x"4A", x"6F");
     -- next-line results and the current line's values
@@ -273,11 +282,25 @@ architecture sinew of program_top is
     signal b_th : unsigned(23 downto 0) := (others => '0');
     signal b_ps : unsigned(21 downto 0) := (others => '0');
     signal b_pa : unsigned(15 downto 0) := (others => '0');
+    signal b_back : std_logic := '0';
     signal l_pb : unsigned(15 downto 0) := (others => '0');
 
     -- ROM ports
     signal r_cosa : unsigned(7 downto 0) := (others => '0');
     signal r_cosq, r_cosq2 : std_logic_vector(15 downto 0) := (others => '0');
+    -- the wiggle table: C_COS x the hook depth, rewritten by a serial writer in each vblank zone
+    signal r_wig  : t_rom16 := C_COS;
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of r_wig : signal is true;
+    signal w_on, w_we : std_logic := '0';
+    signal w_i    : unsigned(7 downto 0) := (others => '0');
+    signal w_c    : unsigned(3 downto 0) := (others => '0');
+    signal w_wa   : unsigned(7 downto 0) := (others => '0');
+    signal w_wd   : std_logic_vector(15 downto 0) := (others => '0');
+    signal w_cq   : std_logic_vector(15 downto 0) := (others => '0');
+    signal w_m    : signed(21 downto 0) := (others => '0');
+    signal w_acc  : signed(21 downto 0) := (others => '0');
+    signal w_g    : unsigned(5 downto 0) := (others => '0');
     signal r_la : unsigned(10 downto 0) := (others => '0');
     signal r_lrq, r_lg0q, r_lg1q, r_lg2q, r_lbq : std_logic_vector(5 downto 0) := (others => '0');
     signal r_lrq2, r_lg0q2, r_lg1q2, r_lg2q2, r_lbq2 : std_logic_vector(5 downto 0) := (others => '0');
@@ -292,7 +315,7 @@ architecture sinew of program_top is
     signal p1_th, p2_th, p3_th, p4_th : unsigned(23 downto 0) := (others => '0');
     signal p1_ps, p2_ps, p3_ps, p4_ps : unsigned(21 downto 0) := (others => '0');
     signal p1_l  : signed(7 downto 0) := (others => '0');
-    signal p2_pm, p3_pm : signed(12 downto 0) := (others => '0');
+    signal p2_pm, p3_pm : signed(13 downto 0) := (others => '0');
     signal p5_t8, p6_t8 : unsigned(7 downto 0) := (others => '0');
     signal p5_o8, p6_o8 : unsigned(7 downto 0) := (others => '0');
     signal p5_ri : unsigned(1 downto 0) := (others => '0');
@@ -340,7 +363,7 @@ begin
     p_rom : process(clk)
     begin
         if rising_edge(clk) then
-            r_cosq <= C_COS(to_integer(r_cosa));
+            w_cq   <= C_COS(to_integer(w_i));
             r_lrq  <= C_LR(to_integer(r_la));
             r_lg0q <= C_LG0(to_integer(r_la));
             r_lg1q <= C_LG1(to_integer(r_la));
@@ -353,6 +376,48 @@ begin
             r_dq2  <= r_dq;
         end if;
     end process p_rom;
+
+    -- the wiggle RAM (1W1R; written only in the vblank zone, read by the pixel path)
+    p_wram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if w_we = '1' then
+                r_wig(to_integer(w_wa)) <= w_wd;
+            end if;
+            r_cosq <= r_wig(to_integer(r_cosa));
+        end if;
+    end process p_wram;
+
+    -- the wiggle writer: W(i) = C_COS(i) x hook depth / 16 (Q4; 16 = the photo, exact), 12 clocks per
+    -- entry, from vblank zone clock 255 (~3.1k clocks; the shortest zone, SD, is ~16k)
+    p_wig : process(clk)
+        variable v_s : signed(21 downto 0);
+    begin
+        if rising_edge(clk) then
+            w_we <= '0';
+            if s_zone = '1' and s_zc = 255 then          -- after the field program has set f_hg
+                w_on <= '1'; w_i <= (others => '0'); w_c <= (others => '0');
+            elsif w_on = '1' then
+                w_c <= w_c + 1;
+                case to_integer(w_c) is
+                    when 0 | 1 | 2 => null;                   -- ROM read (address w_i) and its register
+                    when 3 =>
+                        w_m <= resize(signed(w_cq), 22); w_acc <= (others => '0'); w_g <= f_hg;
+                    when 4 to 9 =>                            -- shift-add, one gain bit per clock
+                        if w_g(0) = '1' then w_acc <= w_acc + w_m; end if;
+                        w_m <= shift_left(w_m, 1); w_g <= '0' & w_g(5 downto 1);
+                    when 10 =>
+                        v_s := shift_right(w_acc, 4);          -- |C_COS| <= 10874, hg <= 47: fits 16 bits
+                        w_wd <= std_logic_vector(v_s(15 downto 0));
+                        w_wa <= w_i; w_we <= s_zone;
+                    when others =>
+                        w_c <= (others => '0');
+                        w_i <= w_i + 1;
+                        if w_i = 255 or s_zone = '0' then w_on <= '0'; end if;
+                end case;
+            end if;
+        end if;
+    end process p_wig;
 
     ---------------------------------------------------------------------------
     -- Controls: vblank zone, width, glides, field latches and drift phases
@@ -393,6 +458,15 @@ begin
                 s_hcnt <= (others => '0');
             end if;
             g_wm1 <= s_w - 1;
+            g_hm2 <= ('0' & s_w(11 downto 1)) - 2;
+            -- K4 Speed past |128| (the default is 120): x4 steeper
+            if f_v > 128 then
+                f_ve <= shift_left(resize(f_v, 12), 2) - 384;      -- v + 3 (v - 128)
+            elsif f_v < -128 then
+                f_ve <= shift_left(resize(f_v, 12), 2) + 384;
+            else
+                f_ve <= resize(f_v, 12);
+            end if;
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
@@ -402,21 +476,21 @@ begin
                 elsif v_x < -8 then f_v <= resize(v_x + 8, 10);
                 else f_v <= (others => '0'); end if;
                 f_pal   <= unsigned(registers_in(4)(9 downto 7));
-                f_tear  <= registers_in(6)(0);
-                f_grain <= registers_in(6)(1);
+                f_storm <= registers_in(6)(0);
+                f_mir   <= registers_in(6)(1);
                 f_saw   <= registers_in(6)(2);
                 f_bands <= registers_in(6)(3);
                 f_osc   <= registers_in(6)(4);
                 -- drift: the pinch rolls (triangle phase mod 688 lines), the sinews stream, the ropes drift
-                v_t := resize(f_trph, 15) + unsigned(resize(shift_right(f_v, 4), 15));
-                if f_v < 0 then
+                v_t := resize(f_trph, 15) + unsigned(resize(shift_right(f_ve, 4), 15));
+                if f_ve < 0 then
                     if v_t(14) = '1' or v_t >= 11008 then v_t := v_t + 11008; end if;
                 else
                     if v_t >= 11008 then v_t := v_t - 11008; end if;
                 end if;
                 f_trph <= v_t(13 downto 0);
-                f_psph <= f_psph + unsigned(resize(shift_left(resize(f_v, 22), 4), 22));
-                f_roph <= f_roph + unsigned(resize(f_v, 24)) + unsigned(resize(shift_left(resize(f_v, 24), 1), 24));
+                f_psph <= f_psph + unsigned(resize(shift_left(resize(f_ve, 22), 4), 22));
+                f_roph <= f_roph + unsigned(resize(f_ve, 24)) + unsigned(resize(shift_left(resize(f_ve, 24), 1), 24));
                 f_ta <= f_ta + 151; f_tb <= f_tb - 113;
             end if;
 
@@ -515,7 +589,7 @@ begin
         variable v_p    : unsigned(41 downto 0);
         variable v_r    : signed(31 downto 0);
         variable v_s    : unsigned(24 downto 0);
-        variable v_t    : unsigned(15 downto 0);
+        variable v_t    : unsigned(16 downto 0);
         variable v_go   : boolean;
         variable v_c    : signed(23 downto 0);
         variable v_n    : signed(23 downto 0);
@@ -531,6 +605,8 @@ begin
         variable v_sp   : signed(42 downto 0);
         variable v_sa   : signed(24 downto 0);
         variable v_sb   : signed(18 downto 0);
+        variable v_e    : unsigned(10 downto 0);
+        variable v_pd   : unsigned(9 downto 0);
         -- multiply issue: signed operands; the multiplier takes |a|, |b| in its pre-cycle and the
         -- signed product is formed once (v_sp) for every state
         procedure muls(a : signed; b : signed) is
@@ -567,12 +643,12 @@ begin
             end if;
             -- serial divider (restoring), quotient 17 bits
             if d_busy = '1' then
-                v_t := resize(d_rem, 15) & d_num(16);
-                if v_t >= resize(d_den, 16) then
-                    d_rem <= resize(v_t - resize(d_den, 16), 15);
+                v_t := resize(d_rem, 16) & d_num(16);
+                if v_t >= resize(d_den, 17) then
+                    d_rem <= resize(v_t - resize(d_den, 17), 16);
                     d_q <= d_q(15 downto 0) & '1';
                 else
-                    d_rem <= v_t(14 downto 0);
+                    d_rem <= v_t(15 downto 0);
                     d_q <= d_q(15 downto 0) & '0';
                 end if;
                 d_num <= d_num(15 downto 0) & '0';
@@ -583,6 +659,7 @@ begin
             v_sp := m_sp;
 
             v_go := (m_busy = '0') and (d_busy = '0');
+            v_pd := f_p - 512;
             -- kicks, decoded and registered one clock ahead (field program at zone clock 64, line 0 at 600,
             -- then every source avid rise)
             if s_zone = '1' and s_zc = 63 then e_kf <= '1'; else e_kf <= '0'; end if;
@@ -609,28 +686,55 @@ begin
                 case e_st is
                     when 0 => e_st <= 0;   -- idle
                     ---------------- field program ----------------
-                    when 1  => mulu(f_x1, f_x1);
-                    when 2  => f_s1 <= to_unsigned(2048, 14) + shift_left(resize(f_x1, 14), 1) + resize(v_p(19 downto 8), 14);
-                    when 3  => mulu(f_s1, t_sx);
-                    when 4  => f_rsc <= v_p(26 downto 12);
-                    when 5  => mulu(f_x2, to_unsigned(11222, 14));
-                    when 6  => f_ta2 <= v_p(23 downto 10);
-                    when 7  => mulu(f_x2, f_x2);
-                    when 8  => f_x2sq <= v_p(19 downto 0);
-                    when 9  => mulu(f_x2sq, to_unsigned(4489, 13));
-                    when 10 => f_p0m <= to_unsigned(8978, 14) - f_ta2 + resize(v_p(32 downto 20), 14);
-                    when 11 => mulu(f_x3, f_x3);
-                    when 12 => f_tw <= v_p(19 downto 10);
-                    when 13 =>
+                    -- K1 Ropes: 0.25x .. 4x, one octave per quarter turn (linear within it); 512 = 1x exact
+                    when 1 =>
+                        v_e := resize(f_x1, 11) + 512;
+                        case to_integer(v_e(10 downto 8)) is
+                            when 2 => f_s1 <= shift_left(resize(256 + resize(v_e(7 downto 0), 9), 14), 2);
+                            when 3 => f_s1 <= shift_left(resize(256 + resize(v_e(7 downto 0), 9), 14), 3);
+                            when 4 => f_s1 <= shift_left(resize(256 + resize(v_e(7 downto 0), 9), 14), 4);
+                            when others => f_s1 <= shift_left(resize(256 + resize(v_e(7 downto 0), 9), 14), 5);
+                        end case;
+                    when 2  => mulu(f_s1, t_sx);
+                    when 3  => f_rsc <= v_p(27 downto 12);
+                    -- K2 Sinews: the sinew period x 4 .. x 1/4 (rate 0.25x .. 4x); 512 = 1x exact
+                    when 4 =>
+                        v_e := to_unsigned(1024, 11) - resize(f_x2, 11);
+                        case to_integer(v_e(10 downto 8)) is
+                            when 0 => f_isc <= shift_left(resize(256 + resize(v_e(7 downto 0), 9), 15), 2);
+                            when 1 => f_isc <= shift_left(resize(256 + resize(v_e(7 downto 0), 9), 15), 3);
+                            when 2 => f_isc <= shift_left(resize(256 + resize(v_e(7 downto 0), 9), 15), 4);
+                            when 3 => f_isc <= shift_left(resize(256 + resize(v_e(7 downto 0), 9), 15), 5);
+                            when others => f_isc <= to_unsigned(16384, 15);
+                        end case;
+                    -- P12 hooks: 0 .. 16 (the photo, 50 %) .. 47 (Q4)
+                    when 5 =>
+                        if f_p <= 512 then f_hg <= resize(f_p(9 downto 5), 6);
+                        else f_hg <= 16 + resize(v_pd(8 downto 4), 6); end if;
+                    -- K3 Twist: -3x (0) .. 0 (384) .. 1x (512, the photo) .. 4x (1023)
+                    when 6  => mulu(f_x3, f_x3);
+                    when 7 =>
+                        if f_x3 >= 512 then f_tw <= signed(resize(v_p(19 downto 10), 11));
+                        else f_tw <= signed(resize(shift_left(resize(f_x3, 11), 1), 11)) - 768; end if;
+                    when 8 =>
                         if f_p < 512 then mulu(f_p, to_unsigned(4339, 13));
                         else mulu(f_p - 512, to_unsigned(2703, 12)); end if;
-                    when 14 =>
+                    when 9 =>
                         if f_p < 512 then f_kk <= resize(v_p(21 downto 10), 12);
                         else f_kk <= to_unsigned(2170, 12) + resize(v_p(21 downto 10), 12); end if;
-                    -- melt gain 3.75 k6^2 / 8192 (x1.25 the old 3 k6^2; 1023 -> 479: pixel step 14, was 11)
-                    when 15 => mulu(shift_left(resize(f_x5, 12), 2) - resize(shift_right(f_x5, 2), 12), f_x5);
-                    when 16 => f_m5 <= resize(v_p(21 downto 13), 9);
-                    when 17 => e_st <= 0;
+                    -- K5 Melt: v0.5's curve up to the default (420), then steeper: gain 2 .. 32 (sinews
+                    -- to +-2 cycles); above the default the ropes take twice the sinews' share (to +-0.5 cycle)
+                    -- K6 top +25 %: 3.75 k6^2 / 8192 below the default (was 3 k6^2), gain x1.25 above it (2 .. 40)
+                    when 10 => mulu(shift_left(resize(f_x5, 12), 2) - resize(shift_right(f_x5, 2), 12), f_x5);
+                    when 11 =>
+                        f_m5 <= resize(v_p(21 downto 13), 9);
+                        if f_x5 > 420 then f_x5d <= f_x5 - 420; else f_x5d <= (others => '0'); end if;
+                    when 12 => mulu(f_x5d, to_unsigned(51, 6));
+                    when 13 => f_gpa <= 2 + resize(v_p(15 downto 10), 6);
+                    when 14 =>
+                        if f_x5d /= 0 then f_gp <= f_gpa + shift_right(f_gpa, 2); f_tsh <= '1';
+                        else f_gp <= resize(f_m5(8 downto 5), 6); f_tsh <= '0'; end if;
+                    when 15 => e_st <= 0;
 
                     ---------------- line program ----------------
                     when 32 =>
@@ -676,7 +780,7 @@ begin
                     -- Twist (middle band): th0 = c0 + tw (poly - c0) / 256
                     when 38 =>
                         v_c := e_thv - 299018;
-                        muls(v_c, signed(resize(f_tw, 11)));
+                        muls(v_c, f_tw);
                     when 39 =>
                         if e_band = 0 then
                             e_thv <= to_signed(299018, 24) + v_sp(31 downto 8);
@@ -703,38 +807,47 @@ begin
                         if e_tr < 1024 then e_s <= resize(v_p(26 downto 11), 14); else e_s <= e_tr - 512; end if;
                     when 49 => mulu(f_kk, e_s);
                     when 50 =>
-                        v_x := signed(resize(f_p0m, 17)) - signed(resize(v_p(31 downto 12), 17));
+                        v_x := to_signed(4489, 17) - signed(resize(v_p(31 downto 12), 17));
                         if v_x < 384 then e_P <= to_unsigned(384, 14); else e_P <= unsigned(v_x(13 downto 0)); end if;
-                    when 51 =>
+                    -- K2 Sinews: the whole period x isc (bulge and vertices together), then the 24 px floor
+                    when 51 => mulu(e_P, f_isc);
+                    when 52 =>
+                        if v_p(26 downto 12) < 384 then e_Ps <= to_unsigned(384, 15);
+                        else e_Ps <= v_p(26 downto 12); end if;
+                    when 53 =>
                         -- a = (sx << 12) / P  (Q20 cycles per pixel)
-                        d_den <= e_P; d_rem <= resize(t_sx(13 downto 5), 15);
+                        d_den <= e_Ps; d_rem <= resize(t_sx(13 downto 5), 16);
                         d_num <= t_sx(4 downto 0) & "000000000000"; d_q <= (others => '0');
                         d_cnt <= (others => '0'); d_busy <= '1';
-                    when 52 => e_a <= d_q;
-                    when 53 => mulu(e_a, t_kb);
-                    when 54 => e_b <= signed(resize(v_p(32 downto 8), 24)) - 1513095;
-                    when 55 => mulu(e_dvp, to_unsigned(48770, 16));
-                    when 56 => r_da <= v_p(28 downto 21);          -- delta ROM (256 steps over the triangle)
-                    when 57 => null;
-                    when 58 => null;
-                    when 59 =>
+                    when 54 => e_a <= d_q;
+                    when 55 => mulu(e_a, t_kb);
+                    when 56 => e_b <= signed(resize(v_p(32 downto 8), 24)) - 1513095;
+                    when 57 => mulu(e_dvp, to_unsigned(48770, 16));
+                    when 58 => r_da <= v_p(28 downto 21);          -- delta ROM (256 steps over the triangle)
+                    when 59 => null;
+                    when 60 => null;
+                    when 61 =>
                         -- the psi offset along the triangle, the sinew stream; the blue ramp (ROM bits 15..10, +8)
                         e_b <= e_b + shift_left(resize(signed(r_dq2(9 downto 0)), 24), 11) + signed(resize(f_psph, 24));
                         e_vb <= signed(resize(unsigned(r_dq2(15 downto 10)), 9)) - 8;
                     -- G slice position: (dv + 3520) / 110 ~ x/128 + x/1024 + x/2048 (one operation per state)
-                    when 60 => e_px <= resize(e_dv, 17) + 3520;
-                    when 61 =>
+                    when 62 => e_px <= resize(e_dv, 17) + 3520;
+                    when 63 =>
                         if e_px <= 0 then e_px <= (others => '0');
                         else e_px <= shift_right(e_px, 7) + shift_right(e_px, 10) + shift_right(e_px, 11); end if;
-                    when 62 =>
+                    when 64 =>
                         if e_px > 63 then e_pos <= (others => '1'); else e_pos <= unsigned(e_px(5 downto 0)); end if;
                         e_st <= 68;
                     when 68 =>
+                        -- tear: Photo = torn strips inside the vertex zones (middle band); Storm = every line of
+                        -- every band, x4 phase jumps, slips 16x as often and x4 as far
                         v_z := e_xt;
-                        if f_tear = '1' and e_band = 0 and (e_dv > 4800 or e_dv < -4800) then
+                        if f_tear = '1' and ((e_band = 0 and (e_dv > 4800 or e_dv < -4800)) or f_storm = '1') then
                             if e_hold = 0 then
                                 if v_z(8) = '1' then
-                                    e_cur <= resize(signed(resize(v_z(5 downto 0), 8)) - 32 + signed(resize(v_z(13 downto 10), 8)) - 8, 8);
+                                    v_o := resize(signed(resize(v_z(5 downto 0), 9)) - 32 + signed(resize(v_z(13 downto 10), 9)) - 8, 9);
+                                    if f_storm = '1' then e_cur <= shift_left(resize(v_o, 10), 2);
+                                    else e_cur <= resize(v_o, 10); end if;
                                 else
                                     e_cur <= (others => '0');
                                 end if;
@@ -745,9 +858,11 @@ begin
                         else
                             e_cur <= (others => '0'); e_hold <= (others => '0');
                         end if;
-                        if f_tear = '1' and e_band = 0 and e_slen = 0 and v_z(20 downto 12) = 0 then
+                        if f_tear = '1' and e_slen = 0 and ((e_band = 0 and v_z(20 downto 12) = 0) or
+                                                            (f_storm = '1' and v_z(16 downto 12) = 0)) then
                             v_o := signed(resize(v_z(23 downto 20), 9)) + 4;
-                            if v_z(24) = '1' then e_slip <= resize(-v_o, 8); else e_slip <= resize(v_o, 8); end if;
+                            if f_storm = '1' then v_o := shift_left(v_o, 2); end if;
+                            if v_z(24) = '1' then e_slip <= resize(-v_o, 10); else e_slip <= resize(v_o, 10); end if;
                             e_slen <= resize(v_z(29 downto 25), 6) + 7;
                         elsif e_slen > 0 then
                             e_slen <= e_slen - 1;
@@ -786,6 +901,9 @@ begin
     -- Beam: the two line-locked oscillators (rope: two-rate; sinew), Osc phases
     ---------------------------------------------------------------------------
     p_beam : process(clk)
+        variable v_i : unsigned(23 downto 0);
+        variable v_a : unsigned(21 downto 0);
+        variable v_k : unsigned(15 downto 0);
     begin
         if rising_edge(clk) then
             if s_zgo = '1' then
@@ -797,10 +915,17 @@ begin
                 b_th <= c_th0;
                 b_ps <= c_b;
                 b_pa <= f_ta;
+                b_back <= '0';
             elsif g_avid = '1' then
-                if b_th(19) = '1' then b_th <= b_th + resize(c_ilp, 24); else b_th <= b_th + resize(c_ihp, 24); end if;
-                b_ps <= b_ps + resize(c_a, 22);
-                b_pa <= b_pa + resize(t_kax, 16);
+                -- S8 Mirror: from the half width the DDAs run backwards (one's-complement steps: the 1-LSB
+                -- per-pixel error is 2^-20 cycle, invisible), so the right half mirrors the left
+                if f_mir = '1' and g_cnt = g_hm2 then b_back <= '1'; end if;
+                if b_th(19) = '1' then v_i := resize(c_ilp, 24); else v_i := resize(c_ihp, 24); end if;
+                v_a := resize(c_a, 22); v_k := resize(t_kax, 16);
+                if b_back = '1' then v_i := not v_i; v_a := not v_a; v_k := not v_k; end if;
+                b_th <= b_th + v_i;
+                b_ps <= b_ps + v_a;
+                b_pa <= b_pa + v_k;
             end if;
         end if;
     end process p_beam;
@@ -838,7 +963,7 @@ begin
             end if;
             -- 2: cosine ROM; melt product
             p2_th <= p1_th; p2_ps <= p1_ps;
-            p2_pm <= resize(signed('0' & f_m5(8 downto 5)) * p1_l, 13);
+            p2_pm <= resize(signed('0' & f_gp) * p1_l, 14);
             -- 3: fabric copy
             r_cosq2 <= r_cosq;
             p3_th <= p2_th; p3_ps <= p2_ps; p3_pm <= p2_pm;
@@ -846,7 +971,8 @@ begin
             v_pm := shift_left(resize(p3_pm, 23), 9);
             v_ps := p3_ps + unsigned(resize(shift_left(resize(signed(r_cosq2), 22), 4), 22)) + unsigned(resize(v_pm, 22));
             p4_ps <= v_ps;
-            p4_th <= p3_th + unsigned(shift_left(resize(p3_pm, 24), 6));
+            if f_tsh = '1' then p4_th <= p3_th + unsigned(shift_left(resize(p3_pm, 24), 7));
+            else p4_th <= p3_th + unsigned(shift_left(resize(p3_pm, 24), 6)); end if;
             -- 5: table addresses; grain pieces
             r_la <= p4_th(19 downto 14) & p4_ps(20 downto 16);
             r_ca <= c_band(1) & p4_th(19 downto 13);

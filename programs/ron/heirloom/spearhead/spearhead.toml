@@ -1,4 +1,4 @@
-# Spearhead - Heirloom #5 rebuild (2026-10-21), from WIN_20230103_01_29_30.
+# Spearhead - Heirloom #5, phase 2 diag v0.6.0 (2026-11-09); rebuild 2026-10-21 from WIN_20230103_01_29_30.
 # Two spearheads of XOR-coloured outline bands, re-coloured row by row, a mosaic shadow
 # thrown to the right, over pastel rows with V chevrons.  See spearhead.vhd and SUMMARY.md.
 
@@ -6,13 +6,13 @@
 processing_delay_clks = 16
 program_id = "com.czartroniks.spearhead"
 program_name = "Spearhead"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Pixel", "Pattern"]
 program_type = "processing"
-description = "Spearheads of XOR-coloured outline bands, re-coloured row by row, a mosaic shadow at their side. Thrust on the slider."
+description = "XOR-banded spearheads re-coloured row by row, a mosaic shadow at their side; they plunge and face. Thrust on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -79,8 +79,8 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Shadow"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+value_labels = ["Right", "Both"]
+initial_value_label = "Right"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -97,7 +97,7 @@ initial_value_label = "Photo"
 [[parameter]]
 parameter_id = "toggle_switch_10"
 name_label = "Point"
-value_labels = ["Down", "Up"]
+value_labels = ["Down", "Facing"]
 initial_value_label = "Down"
 
 [[parameter]]
@@ -130,12 +130,30 @@ rotary_potentiometer_3 = 600
 linear_potentiometer_12 = 1000
 
 [[preset]]
-name = "Plain Bands"
+name = "Plunge"
+rotary_potentiometer_4 = 900
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Zipper"
+rotary_potentiometer_1 = 700
+toggle_switch_10 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Twin Shadow"
 toggle_switch_7 = 1
-toggle_switch_8 = 1
-rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 620
 
 [[preset]]
 name = "Big Blocks"
 rotary_potentiometer_5 = 900
 rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Spear Rain"
+rotary_potentiometer_1 = 1000
+rotary_potentiometer_2 = 700
+rotary_potentiometer_4 = 80
+toggle_switch_10 = 1
+toggle_switch_7 = 1

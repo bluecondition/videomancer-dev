@@ -1,4 +1,4 @@
-# Sinew - Heirloom #18, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230315_00_53_56.
+# Sinew Diag - Heirloom #18, v0.6.0 phase-2 diag (2026-11-09); v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230315_00_53_56.
 # Seven orange ropes S-curving down the frame, crossed by thin sinew lines that bulge and fan into
 # green shingles, between a yellow/green and a pink/navy bar band.  See sinew.vhd and SUMMARY.md.
 
@@ -6,13 +6,13 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.sinew"
 program_name = "Sinew"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Color", "Signal"]
 program_type = "processing"
-description = "S-curved orange ropes crossed by bulging sinew lines between two bar bands; video bends the sinews."
+description = "Orange ropes crossed by sinew lines that pinch, hook and tear; mirror and storm modes; video melts the sinews and ropes."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -79,14 +79,14 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Tear"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+value_labels = ["Photo", "Storm"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Grain"
+name_label = "Mirror"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -117,26 +117,44 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
 name = "Combed"
 linear_potentiometer_12 = 0
-rotary_potentiometer_3 = 300
+rotary_potentiometer_3 = 384
 
 [[preset]]
-name = "Knotted"
+name = "Hooked"
 linear_potentiometer_12 = 1023
-rotary_potentiometer_2 = 700
-rotary_potentiometer_4 = 760
+rotary_potentiometer_2 = 600
 
 [[preset]]
-name = "Saw Fan"
-toggle_switch_9 = 1
-rotary_potentiometer_5 = 384
+name = "Totem"
+toggle_switch_8 = 1
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_1 = 400
 
 [[preset]]
-name = "Full Patch"
-toggle_switch_10 = 0
+name = "Storm"
+toggle_switch_7 = 1
+rotary_potentiometer_4 = 900
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Molten"
 toggle_switch_11 = 1
-rotary_potentiometer_6 = 700
+rotary_potentiometer_6 = 1023
+
+[[preset]]
+name = "Reverse S"
+rotary_potentiometer_3 = 0
+rotary_potentiometer_2 = 300
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Fine Weave"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_2 = 1023
+linear_potentiometer_12 = 300
+toggle_switch_10 = 0

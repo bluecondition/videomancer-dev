@@ -1,9 +1,90 @@
 # Sinew — ropes and sinews, Heirloom #18
 
-**v0.5.0 (2026-10-27): rebuilt from the photo, built, NOT flashed.** Source photo:
+**v0.6.2 (2026-11-18): phase 2 FINAL — Ron approved the diag and it is merged into production** (`out/rev_b/ron/heirloom/sinew.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; NOT flashed at v0.6.2). v0.6.0 = the phase-2 round (see [Phase 2](#phase-2-v060)), v0.6.1/v0.6.2 = the K6 camera pass (K6 = the camera strength, default 100 %, top end +25 %). The replaced production v0.5.3 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`.
+v0.5.0 (2026-10-27): rebuilt from the photo, built, NOT flashed. Source photo:
 `photos/WIN_20230315_00_53_56_Pro.jpg` (1920×1080 capture, 2023-03-15). Replaces v0.1.0 (the picture wrung
 into S-curves by a vertical sine), which Ron judged too abstract and not like the photo. Presets are
 hand-written placeholders.
+
+## Phase 2 (v0.6.0)
+No notes from Ron for sinew (free hand, 2026-11-09 batch). The v0.5 picture is two patched oscillators (ropes θ,
+sinews ψ) into a colourizer, and most v0.5 knobs were already module parameters. The weak spots were:
+- Melt barely showed in Osc mode (±0.09 rope cycle);
+- S7 Tear and S8 Grain were subtle on/off switches;
+- Ropes / Sinews spanned only ×0.5..×2;
+- the photo's strongest patch cord, the ropes phase-modulating the sinews (the ")" hooks), had no control at all.
+
+The round:
+- puts that patch cord on the headline P12 with the pinch, so the slider changes the sinews' *shape*: from straight
+  combed lines to knots and hooks;
+- widens the two oscillator rates to ×0.25..×4 and makes Twist bipolar (the S-curve reversed);
+- makes Melt bend the ropes as well as the sinews;
+- re-patches the two subtle switches: S7 Tear becomes Photo / Storm, S8 Grain becomes Mirror (the grain stays on).
+
+Every new effect is exactly zero at the default knob value. The default frame is raw-identical to v0.5.1 (checks
+below). Phase-2 working files: `.heirloom_work/rb_sinew/p2/`.
+
+| Was (v0.5) | Now (v0.6.0) | Full sweep, in screen terms (1080p) |
+|---|---|---|
+| P12 Pinch: the vertical modulator's depth (0 = straight evenly spaced sinews, 50 % = the photo, 100 % = vertices pinched to 24 px) | **P12 Pinch**: the same depth, **plus the hooks**: the ropes' phase modulation of the sinews ×0 .. ×1 (50 %, exact) .. ×2.94 | 0 % = dead-straight, evenly spaced sinew lines with no wiggle at all (a combed grid over the ropes). 100 % = the vertices pinched into knots and every sinew swinging ±0.49 cycle (≈ ±137 px at the bulge's 280 px spacing) around each rope: hooks and loops instead of ")" arcs. The photo's wiggle is ±0.166 cycle (≈ ±47 px) |
+| K1 Ropes: rope count ×0.5 .. ×2 | **×0.25 .. ×4**, exponential (an octave per quarter turn), photo at 50 % (exact); all three bands | 1.75 ropes across (rope period ≈ 1090 px) .. 28 ropes (≈ 68 px); the photo's 7 at 50 % |
+| K2 Sinews: the bulge's base period ×0.5 .. ×2 (the fan's depth fixed in px, so the vertices clamped early) | **×0.25 .. ×4**, exponential, photo at 50 % (exact); scales the **whole** sinew period (bulge and vertices together, so the fan keeps its shape), floor 24 px | sinew spacing at the bulge 1122 px (one or two lines across the frame) .. 70 px (a fine comb; the vertices hit the 24 px floor) |
+| K3 Twist: the ropes' S-curve 0 .. ×4 | **×−3 .. 0 .. ×1 .. ×4**: bipolar; below 37.5 % the S-curve reverses (linear 2x − 768 below the default; the v0.5 square law above it, exact) | 0 % = the S swung the other way, ±1.1 cycle (≈ ±300 px top to bottom); 37.5 % = straight leaning ropes; 50 % = the photo (±0.37 cycle ≈ ±100 px); 100 % = ±1.5 cycles (≈ ±400 px) |
+| K4 Speed: bipolar, top ±503 | the v0.5 law up to \|v\| 128 (the default 120 is exact), then **×4 steeper**: ends ≈ 3.2× the v0.5 ends | at the ends the pinch rolls ≈ 380 lines/s (v0.5 116), the sinews stream 1.5 cycles/s (0.46), the ropes drift ≈ 76 px/s (23) |
+| K6 Melt: video / Osc bends the sinews (to ±0.7 cycle) and, at 1/8, the ropes (±0.09) | the v0.5 curve up to the default (420, exact), then gain 2 .. 32: sinews to **±2 cycles**; above the default the ropes take twice the sinews' share, **to ±0.5 cycle** | max: sinew contours displaced ±2 cycles (≈ ±560 px), ropes ±136 px. In Video the camera's luma pushes the ropes visibly sideways; in Osc the two triangle waves fold the ropes into chevrons. The rope bend steps from ≈ 4 to 8 px as K5 passes its default |
+| S7 Tear: Off / On (torn strips at the vertices; subtle) | **S7 Tear: Photo / Storm** (renamed values): Photo = v0.5 On; Storm = every line of every band tears | Storm: phase jumps ×4 (±160/256 cycle ≈ ±170 px) held 1–4 lines on half the lines, slips 16× as often (1 line in 32) and ×4 as far (±17–80 px for 7–38 lines): the whole frame shredded into sliding strips. No Off position any more |
+| S8 Grain: Off / On (the ropes' marbling; subtle) | **S8 Mirror: Off / On** (renamed): the right half mirrors the left; the grain is always on | the S-curves and the sinew fans meet at the centre line as a symmetric totem (> < chevrons); the camera melt is not mirrored |
+
+Unchanged: K6 Palette, S9 Wave (Triangle / Saw), S10 Bands, S11 Source (Video / Osc, default Video).
+
+**Presets** (preset 0 = the defaults): **Photo** (renamed from "Default"); **Combed** (P12 0, Twist at the straight
+point); **Hooked** (P12 100 %, more sinews); **Totem** (Mirror, Twist ×4, fewer ropes); **Storm** (Storm tear,
+fast, P12 68 %); **Molten** (Osc, Melt max: chevron ropes); **Reverse S** (Twist −3×, broad sinews, Saw);
+**Fine Weave** (Ropes and Sinews ×4, Bands off). Dropped: Knotted (→ Hooked), Saw Fan, Full Patch.
+
+**Engine (new).**
+- **Hooks.** The pixel path reads the wiggle from a 256×16 RAM instead of the cosine ROM. In each vblank zone
+  (from zone clock 255, after the field program sets the gain) a serial writer rewrites it as C_COS × hg / 16
+  (hg = P12's hook depth, Q4: 0 .. 16 = the photo .. 47), one shift-add per gain bit, 12 clocks per entry
+  (≈ 3.1k clocks; the shortest zone, SD, is ≈ 16k). The RAM starts as C_COS and hg = 16 reproduces it exactly.
+  No pixel-path change; +1 EBR (the ROM now feeds only the writer). `no_rw_check` (written only in the zone);
+  yosys maps it to one SB_RAM40_4K with no transparency emulation.
+- **Sinews scale.** In the line program the triangle law's P (24 px floor, as v0.5) is multiplied by
+  isc = 4096 · 2^((512 − K2)/256) (exponential by octave, linear within it) and floored at 24 px again before the
+  1/P division: two states and one multiply on the shared multiplier, the divider widened by one bit (P up to
+  1122 px). v0.5's P0 curve is gone (P0 fixed at the photo's 280.6 px).
+- **Ropes curve.** The same exponential (x + 512, octave = bits 10..8) gives the rope scale; f_rsc widened to 16 bits
+  (SD at ×4).
+- **Twist.** Signed gain (−768 .. 1022, Q8).
+- **Melt.** One pixel product (6-bit gain 0..32 × source) at stage 2: ψ += ·2^9 as v0.5; θ += ·2^6 up to the
+  default, ·2^7 above it (a per-field flag).
+- **Speed.** f_ve = 4v ∓ 384 past ±128 (= v + 3(v − 128)), registered every clock, feeds the three drift phases.
+- **Storm.** The tear zone test ORs in the switch, the jump and the slip are ×4 (10-bit offsets), and the slip
+  trigger widens from 9 to 5 zero bits.
+- **Mirror.** From the half width the three beam DDAs (θ two-rate, ψ, Osc x) step backwards by the one's
+  complement of their increment (a 2^-20-cycle error per pixel, invisible); mirror axis at pixel W/2 − 1.
+- Latency 24 in every mode, U/V parity and the output conditioning unchanged.
+
+**Build** (ROUTER1: `NEXTPNR_ROUTER="--router router1" .heirloom_work/diag_build.sh sinew`, 2026-11-09):
+HD Analog s1 80.78, SD Analog s1 86.81, HD HDMI s1 81.86, SD HDMI s1 87.94, HD Dual s1 83.69, SD Dual s1
+72.67 MHz. 7,187–7,215 / 7,680 LC (93.8 %), 23 / 32 EBR (+1: the wiggle RAM); iceunpack OK ×6; the packed config
+carries the new labels and presets. No pin-skew screen.
+**Fit history.** The first build reached 7,578 LC (98.7 %; HD Analog 77.37 MHz). Standalone yosys (`p2/abl/`):
+production 3,740 LUT, first build 4,370, final 3,993. No feature cut; the saving came from one's-complement mirror
+steps (no stored negated increments or hold step), one melt product instead of two, and a leaner writer and
+speed law.
+
+**Checks** (working files in `.heirloom_work/rb_sinew/p2/`):
+- GHDL analyse / elaborate / synth front end: clean (`check.sh`).
+- `sweep.py`: every new knob path at RTL widths over all knob extremes (rope increments over all bands and lines
+  at SD / 720p / 1080p, the sinew period and 1/P quotient, hook table range, Twist, Melt gains, speed): no
+  overflow; the defaults are exact.
+- Fitted tables: the ψ offset table (C_DEL2) has no isolated second-difference spike (its largest second
+  differences are paired, a rounded corner), and no new control magnifies it.
+- Default frame (GHDL 720p60 dec 1, Osc, 2 warm-up + 1 capture, production v0.5.1 simulated the same way): raw
+  10-bit output **byte-identical**, on the first source and again on the final fitted source.
+- Not verified: no extreme render; the hooks at ×3, Mirror, Storm and the Melt extremes are reasoned from the
+  code only.
 
 ## Reading of the photo (measured)
 Working files: `.heirloom_work/rb_sinew/` (`notes.md` has every number).
@@ -163,15 +244,38 @@ Working files: `.heirloom_work/rb_sinew/` (`notes.md` has every number).
 - `sheet_final.py` / `sheet.png` (control sheet), `cmp_proto.png`, `cmp_final.png`.
 - `abl/` (ablations), `synth_sa.sh` (standalone synth), `check_local.sh` (GHDL check including `sinew_pkg.vhd`).
 
+## Open questions for Ron (2026-11-09 batch)
+1. S7 lost its Off position (Photo / Storm). Bring back a clean Tear Off, with Storm elsewhere?
+2. The hooks ride P12 with the pinch. Would you rather have them on their own knob (e.g. in place of K6 Palette)?
+3. Melt's rope bend above the default is twice the sinews' share (a small step at the default). Give the ropes
+   their own gain curve (≈ +60 LC)?
+4. S8 is now Mirror and the grain is always on. Do you miss turning the marbling off?
+
+## Hardware watch list
+- Renamed: S7 Tear values Off / On → Photo / Storm, S8 Grain → Mirror (Off / On); preset "Default" → "Photo",
+  Knotted → Hooked.
+- The grain (marbling) is always on.
+- Mirror axis at pixel W/2 − 1; the camera melt is not mirrored.
+- The hook table is rewritten in each vblank: a P12 move reaches the hooks one field later.
+- K2 Sinews near max with P12 high: the vertices sit on the 24 px floor; may moiré on SD.
+- No cuts. ROUTER1 as v0.5, all seed 1. No pin-skew screen; if HD HDMI shows lines, re-seed that config with router1.
+
+## Next step
+Wait for Ron's preview notes. Rebuild the diag with
+`NEXTPNR_ROUTER="--router router1" .heirloom_work/diag_build.sh sinew`. On approval: `./heirloom_diag.sh merge sinew`,
+then repack the previewed diag bitstreams under the production TOML (copy
+`build/programs/ron/sinew_diag/rev_b/bitstreams/*.bin` into the production build dir, regenerate
+`program_config.bin` from the production TOML, `vmprog_pack.py --no-sign --hardware rev_b`) instead of
+re-routing; update the production SUMMARY / README / PHASE2 row and commit only sinew's files.
+
 ## K6 camera pass (2026-11-15)
 
-Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 85.36 MHz (HD Analog 100.92, HD HDMI 85.36, HD Dual 89.01), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh sinew`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.1, rebuilt with router1: all six seed 1; HD worst 76.12 MHz (HD Analog 76.12, HD HDMI 79.10, HD Dual 82.14), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./heirloom_diag.sh build sinew`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
 
 ## K6 top +25 % and default 100 % (2026-11-15)
 
 Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 % stronger camera effect at the top of K6; the K6 default is now 100 % (1023, set with the version bump).
 
-- **Class:** BEND: K6 (Melt) adds luma x the melt step to psi (and an eighth to theta), bending the sinews and ropes.
-- **Change:** Melt x1.25: the sequencer's `f_m5 = 3.75 K6^2 / 8192` (was 3 K6^2), so the 4-bit pixel step code tops out at 14 (was 11, 1.27x; max +-0.87 sinew cycle). Sequencer operand only (`4a - a/4` in place of `2a + a`).
-- **Build:** Built with router1: all six seed 1; worst HD 76.86 MHz (HD Analog 76.86, HD HDMI 96.10, HD Dual 94.07); max 6906 / 7680 LC.
-- **Check:** GHDL 480p render, bear, K6 = 100 %, old vs new (glides snapped in scratch copies): `.heirloom_work/rb_sinew/k6b/k6b_cmp.png`, the same picture with a stronger bend.
+- **Class:** BEND (as production): K6 (Melt) bends the sinews and ropes.
+- **Change:** Melt x1.25: below the default `f_m5 = 3.75 K6^2 / 8192` (was 3 K6^2; steps 0 .. 2 as before); above it the gain `f_gp = gpa + gpa / 4` (2 .. 40, was 2 .. 32). Max +-2.5 sinew cycles; the 14-bit melt product and psi (bits 20:0 used) have room.
+- **Build:** Built with router1: HD Analog seed 2, the rest seed 1; worst HD 77.91 MHz (HD Analog 77.91, HD HDMI 85.79, HD Dual 77.91); max 7222 / 7680 LC.

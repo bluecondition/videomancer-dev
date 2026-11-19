@@ -1,7 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Spearhead v0.5.0 -- Heirloom #5 rebuild (2026-10-21), from WIN_20230103_01_29_30.
+-- Spearhead v0.6.0 -- Heirloom #5, phase 2 diag (2026-11-09); rebuild v0.5.0 (2026-10-21) from
+-- WIN_20230103_01_29_30.
 --
 -- The photo (measured, see SUMMARY.md): two spearheads side by side (one
 -- horizontal triangle oscillator, period 940 px), each a nest of outline
@@ -16,17 +17,20 @@
 -- slow vertical wave.  Behind: pastel rows (a colour per row code) stepped
 -- by a zigzag of V chevrons centred between the spears.
 --
---   K1  Spears   spears across, 1 .. 5 (2.04 = the photo)
+--   K1  Spears   spears across, 1 .. 2.04 (the photo) .. 8
 --   K2  Taper    spear taper: blunt bullets .. needle tips
 --   K3  Bands    outline band width 0.4x .. 3x
 --   K4  Speed    bipolar: the row colours roll through the spears, the
---                shadow wave and the background chevrons travel (centre = still)
+--                shadow wave and the background chevrons travel (centre = still);
+--                past the photo's speed (either way) every spear also plunges on
+--                its own: a depth wave runs along the row of spears, each spear
+--                3/8 of a cycle behind the last (to +-305 px of core at the ends)
 --   K5  Mosaic   row height = shadow block size, 12 .. 160 lines (41 = photo)
 --   K6  Bend     how hard the source luma (about mid-grey) bends the bands and chevrons
---   S7  Shadow   the mosaic shadow and its holes On / Off
+--   S7  Shadow   Right (the photo) / Both (a mirrored staircase thrown to the left too)
 --   S8  Rows     row re-colouring On / Off (Off = plain nested bands)
 --   S9  Palette  Photo / Alt (channel-rotated)
---   S10 Point    Down (the photo) / Up
+--   S10 Point    Down (the photo) / Facing (every second spear points up)
 --   S11 Source   Video / Osc (an internal triangle-wave oscillator replaces the video)
 --   P12 THRUST   the spears swell and plunge: 0 = short dark needles from the
 --                top, ~41 % = the photo, 100 % = neighbouring spears interlock
@@ -76,12 +80,12 @@ architecture spearhead of program_top is
 
     -- knob curves (64 entries, indexed by knob(9:4))
     type t_i64 is array (0 to 63) of integer;
-    -- K1: tile period, Q.1 virtual px (idx 28 = 940 px, the photo)
+    -- K1: tile period, Q.1 virtual px (idx 28 = 940 px, the photo; 1 across .. 8 across, steeper above the photo)
     constant C_TP : t_i64 := (
         3840, 3743, 3649, 3557, 3467, 3380, 3294, 3211, 3130, 3051, 2974, 2899, 2826, 2755, 2685, 2618,
-        2552, 2487, 2425, 2363, 2304, 2246, 2189, 2134, 2080, 2028, 1976, 1927, 1880, 1831, 1784, 1739,
-        1696, 1653, 1611, 1570, 1531, 1492, 1455, 1418, 1382, 1347, 1313, 1280, 1248, 1216, 1186, 1156,
-        1127, 1098, 1071, 1044, 1017, 992, 967, 942, 918, 895, 873, 851, 829, 808, 788, 768);
+        2552, 2487, 2425, 2363, 2304, 2246, 2189, 2134, 2080, 2028, 1976, 1927, 1880, 1808, 1739, 1672,
+        1608, 1547, 1488, 1431, 1376, 1323, 1273, 1224, 1177, 1132, 1089, 1047, 1007, 969, 932, 896,
+        862, 829, 797, 767, 737, 709, 682, 656, 631, 607, 583, 561, 540, 519, 499, 480);
     -- K2: taper k (2 k y^2 = ((y^2 >> 6) x KY) >> 16 in Q.1 px; idx 32 = the photo)
     constant C_TKY : t_i64 := (
         346, 361, 377, 394, 411, 430, 449, 469, 489, 511, 534, 557, 582, 608, 635, 663,
@@ -173,7 +177,7 @@ architecture spearhead of program_top is
     signal s_p12 : unsigned(9 downto 0) := (others => '0');
     signal s_gdiff : signed(12 downto 0) := (others => '0');
     signal s_gl : unsigned(11 downto 0) := to_unsigned(1696, 12);
-    signal s_shad, s_rows, s_alt, s_up : std_logic := '0';
+    signal s_both, s_rows, s_alt, s_face : std_logic := '0';
 
     -- per-field constants
     signal s_P2 : unsigned(11 downto 0) := to_unsigned(1880, 12);   -- tile period (Q.1)
@@ -190,6 +194,12 @@ architecture spearhead of program_top is
     signal s_C0 : signed(12 downto 0) := to_signed(228, 13);
     signal s_ut : signed(13 downto 0) := (others => '0');
     signal s_u0, s_uA0, s_uG0 : unsigned(11 downto 0) := (others => '0');
+    signal s_tA0 : unsigned(2 downto 0) := (others => '0');          -- tile index of uA at the line start
+    -- per-spear plunge (K4 past the photo speed): depth wave phase, amplitude, one core offset per spear
+    signal s_pth : unsigned(15 downto 0) := (others => '0');
+    signal s_pa : unsigned(9 downto 0) := (others => '0');
+    type t_s12a is array (0 to 7) of signed(11 downto 0);
+    signal s_dl : t_s12a := (others => (others => '0'));
 
     -- serial multiplier (shift-add, 16 steps)
     signal s_ma : unsigned(29 downto 0) := (others => '0');
@@ -197,26 +207,30 @@ architecture spearhead of program_top is
     signal s_macc : unsigned(29 downto 0) := (others => '0');
     signal s_mi : unsigned(4 downto 0) := (others => '0');
     signal s_mrun : std_logic := '0';
-    signal s_jb : unsigned(3 downto 0) := (others => '0');
+    signal s_jb : unsigned(4 downto 0) := (others => '0');
     signal s_js : unsigned(4 downto 0) := (others => '0');
     signal s_jrun : std_logic := '0';
 
     -- per-line engine
     signal s_fall1 : std_logic := '0';
-    signal s_ls : unsigned(5 downto 0) := (others => '0');
+    signal s_ls : unsigned(6 downto 0) := (others => '0');
     signal s_first : std_logic := '0';
     signal s_vy_n : unsigned(19 downto 0) := (others => '0');
     signal s_racc : unsigned(16 downto 0) := (others => '0');
     signal s_nrow : std_logic := '0';
     signal s_thi, s_thd : unsigned(15 downto 0) := (others => '0');
-    signal s_yf : unsigned(10 downto 0) := (others => '0');
+    signal s_yf, s_yu : unsigned(10 downto 0) := (others => '0');
     signal s_m1 : unsigned(21 downto 0) := (others => '0');
     signal s_phi_n, s_phr_n, s_phi, s_phr : signed(12 downto 0) := (others => '0');
+    signal s_phu_n, s_phru_n, s_phu, s_phru : signed(12 downto 0) := (others => '0');   -- Facing: the up spears
     signal s_i_n, s_i : unsigned(2 downto 0) := (others => '0');
     signal s_ib_n, s_ib : unsigned(3 downto 0) := (others => '0');
     signal s_dq : unsigned(8 downto 0) := (others => '0');
     signal s_cb : signed(13 downto 0) := (others => '0');
-    signal s_uB0_n, s_uB0 : unsigned(11 downto 0) := (others => '0');
+    signal s_cbn : std_logic := '0';
+    signal s_cc : unsigned(11 downto 0) := (others => '0');
+    signal s_uB0_n, s_uB0, s_uC0_n, s_uC0 : unsigned(11 downto 0) := (others => '0');
+    signal s_tB0_n, s_tB0, s_tC0_n, s_tC0 : unsigned(2 downto 0) := (others => '0');
     signal s_L_n, s_L : unsigned(9 downto 0) := (others => '0');
 
     -- generated avid
@@ -231,7 +245,8 @@ architecture spearhead of program_top is
     signal s_wcol : unsigned(10 downto 0) := (others => '0');
 
     -- beam
-    signal s_u, s_uA, s_uB, s_uG : unsigned(11 downto 0) := (others => '0');
+    signal s_u, s_uA, s_uB, s_uG, s_uC : unsigned(11 downto 0) := (others => '0');
+    signal s_tu, s_tA, s_tB, s_tC : unsigned(2 downto 0) := (others => '0');   -- tile (spear) index mod 8
     signal s_bc : unsigned(8 downto 0) := (others => '0');
     signal s_nb : std_logic := '0';
     signal s_px : unsigned(10 downto 0) := (others => '0');
@@ -241,10 +256,12 @@ architecture spearhead of program_top is
     signal s_bend3 : signed(18 downto 0) := (others => '0');
     signal s_bend : signed(11 downto 0) := (others => '0');
     signal s1_tq, s1_tqA, s1_dB : unsigned(11 downto 0) := (others => '0');
-    signal s1_rB : signed(12 downto 0) := (others => '0');
+    signal s1_rB, s1_rC : signed(12 downto 0) := (others => '0');
+    signal s1_phU, s1_phA, s1_phB, s1_phC : signed(13 downto 0) := (others => '0');   -- per-spear core
     signal s1_nb : std_logic := '0';
     signal s2_F, s2_FA, s2_Fs : signed(13 downto 0) := (others => '0');
-    signal s2_sd, s2_nb : std_logic := '0';
+    signal s2_sd, s2_sdC, s2_nb : std_logic := '0';
+    signal s2_FsC : signed(13 downto 0) := (others => '0');
     signal s2_Zd : signed(13 downto 0) := (others => '0');
     signal s3_th : std_logic_vector(6 downto 0) := (others => '0');
     signal s3_A, s3_B : std_logic := '0';
@@ -308,7 +325,13 @@ begin
         variable v_cb : signed(13 downto 0);
         variable v_ub : unsigned(12 downto 0);
         variable v_yl : unsigned(12 downto 0);
-        variable v_job : integer range 0 to 15;
+        variable v_job : integer range 0 to 31;
+        variable v_ex : signed(10 downto 0);
+        variable v_e : unsigned(9 downto 0);
+        variable v_t3, v_o3 : unsigned(2 downto 0);
+        variable v_pp : unsigned(15 downto 0);
+        variable v_f : unsigned(9 downto 0);
+        variable v_uc : unsigned(12 downto 0);
     begin
         if rising_edge(clk) then
             s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
@@ -374,15 +397,17 @@ begin
                 v_g := signed(resize(s_gl, 13)) + shift_right(s_gdiff, 3);     -- P12 glide, 1/8 a field
                 s_gl <= unsigned(v_g(11 downto 0));
                 s_w <= s_wmax; s_wmax <= (others => '0');
-                s_shad <= not registers_in(6)(0);
+                s_both <= registers_in(6)(0);
                 s_rows <= not registers_in(6)(1);
                 s_alt  <= registers_in(6)(2);
-                s_up   <= registers_in(6)(3);
+                s_face <= registers_in(6)(3);
                 s_src  <= registers_in(6)(4);
                 -- motion: row-code oscillator, shadow wave, background chevrons
                 s_dri <= s_dri + unsigned(resize(s_spd, 16));
                 s_drd <= s_drd - unsigned(resize(s_spd, 16));
                 s_drz <= s_drz + unsigned(resize(s_spd(9 downto 5), 10));
+                -- plunge wave phase: 1.5 x speed per field (a 1.4 s cycle at the ends)
+                s_pth <= s_pth + unsigned(resize(s_spd, 16)) + unsigned(resize(shift_right(s_spd, 1), 16));
             end if;
             if s_zc = 2 then
                 s_P2 <= to_unsigned(C_TP(to_integer(s_k1l(9 downto 4))), 12);
@@ -391,6 +416,12 @@ begin
                 s_RH <= to_unsigned(C_TRH(to_integer(s_k5l(9 downto 4))), 16);
                 -- Thrust: C0 = -100 .. +420 px (Q.1: p + p/64 - 200)
                 s_C0 <= signed(resize(s_gl(11 downto 2), 13)) + signed(resize(s_gl(11 downto 8), 13)) - 200;
+                -- plunge amplitude: 0 within +-136 of still (the photo's speed is +128), then 1.625 Q.1 per
+                -- count: +-611 Q.1 (305 px of core) at either end
+                v_ex := abs(resize(s_spd, 11)) - 136;
+                if v_ex < 0 then v_ex := (others => '0'); end if;
+                v_e := unsigned(v_ex(9 downto 0));
+                s_pa <= v_e + shift_right(v_e, 1) + shift_right(v_e, 3);
             end if;
             if s_zc = 3 then
                 s_Ph <= '0' & s_P2(11 downto 1);
@@ -411,7 +442,11 @@ begin
             if s_zc = 10 then
                 s_u0 <= unsigned(s_ut(11 downto 0));
                 v_t := s_ut - 30;
-                if v_t < 0 then v_t := v_t + signed(resize(s_P2, 14)); end if;
+                if v_t < 0 then
+                    v_t := v_t + signed(resize(s_P2, 14)); s_tA0 <= "111";   -- uA starts in the tile before
+                else
+                    s_tA0 <= "000";
+                end if;
                 s_uA0 <= unsigned(v_t(11 downto 0));
                 v_t := s_ut + signed(resize(s_Ph, 14)) + 16;          -- chevron centre 8 px left of the midpoint
                 if v_t >= signed(resize(s_P2, 14)) then v_t := v_t - signed(resize(s_P2, 14)); end if;
@@ -427,24 +462,32 @@ begin
                 s_mb <= '0' & s_mb(15 downto 1);
                 if s_mi = 15 then s_mrun <= '0'; else s_mi <= s_mi + 1; end if;
             end if;
-            -- 14 field jobs, 20 clocks each: start at step 0, capture at step 18
+            -- 22 field jobs, 20 clocks each: start at step 0, capture at step 18
+            --   0..9 thresholds x g, 10..13 row-oscillator steps, 14..21 the plunge offset of spear 0..7
             if s_zc = 31 then
                 s_jb <= (others => '0'); s_js <= (others => '0'); s_jrun <= '1';
             elsif s_jrun = '1' then
                 if s_js = 19 then
                     s_js <= (others => '0');
-                    if s_jb = 13 then s_jrun <= '0'; else s_jb <= s_jb + 1; end if;
+                    if s_jb = 21 then s_jrun <= '0'; else s_jb <= s_jb + 1; end if;
                 else
                     s_js <= s_js + 1;
                 end if;
             end if;
+            -- spear t = jb - 14 = (jb + 2) mod 8; its wave phase is 3t/8 of a cycle behind spear 0
+            v_t3 := s_jb(2 downto 0) + 2;
+            v_o3 := v_t3 + (v_t3(1 downto 0) & '0');
+            v_pp := (s_pth(15 downto 13) + v_o3) & s_pth(12 downto 0);
+            if v_pp(15) = '0' then v_f := v_pp(14 downto 5); else v_f := not v_pp(14 downto 5); end if;
             if s_jrun = '1' and s_js = 0 then
                 v_job := to_integer(s_jb);
                 s_macc <= (others => '0'); s_mi <= (others => '0'); s_mrun <= '1';
                 if s_jb < 10 then
                     s_ma <= to_unsigned(C_TC(v_job), 30); s_mb <= resize(s_gq, 16);
-                else
+                elsif s_jb < 14 then
                     s_ma <= resize(s_RH, 30); s_mb <= to_unsigned(C_RK(v_job - 10), 16);
+                else
+                    s_ma <= resize(s_pa, 30); s_mb <= resize(v_f, 16);       -- a x tri, tri 0 .. 1023
                 end if;
             elsif s_jrun = '1' and s_js = 18 then
                 v_job := to_integer(s_jb);
@@ -453,12 +496,15 @@ begin
                 elsif s_jb = 10 then s_Ki <= s_macc(23 downto 8);
                 elsif s_jb = 11 then s_KD <= s_macc(23 downto 8);
                 elsif s_jb = 12 then s_oi <= s_macc(23 downto 8);
-                else s_oD <= s_macc(23 downto 8);
+                elsif s_jb = 13 then s_oD <= s_macc(23 downto 8);
+                else
+                    -- offset = a (tri / 512 - 1): -a .. +a (0 when a = 0, i.e. at the default speed)
+                    s_dl(to_integer(v_t3)) <= signed(resize(s_macc(19 downto 9), 12)) - signed(resize(s_pa, 12));
                 end if;
             end if;
 
             -- field start of the line engine: row -1 covers lines 0 .. 9.4
-            if s_zc = 330 then
+            if s_zc = 490 then
                 s_vy_n <= (others => '0');
                 s_racc <= resize(s_RH, 17) - 2406;
                 s_thi <= to_unsigned(57309, 16) - s_oi + s_dri;
@@ -471,22 +517,19 @@ begin
             -------------------------------------------------------------------
             s_fall1 <= '0';
             if data_in.avid = '0' and s_avq = '1' then s_fall1 <= '1'; end if;
-            if s_zc = 340 then
-                s_ls <= to_unsigned(1, 6); s_first <= '1';
+            if s_zc = 500 then
+                s_ls <= to_unsigned(1, 7); s_first <= '1';
             elsif s_fall1 = '1' then
-                s_ls <= to_unsigned(1, 6); s_first <= '0';
+                s_ls <= to_unsigned(1, 7); s_first <= '0';
                 s_vy_n <= s_vy_n + s_ys;
             elsif s_ls /= 0 then
-                if s_ls = 40 then s_ls <= (others => '0'); else s_ls <= s_ls + 1; end if;
+                if s_ls = 76 then s_ls <= (others => '0'); else s_ls <= s_ls + 1; end if;
             end if;
             if s_ls = 1 then
-                -- spear profile row: y (flipped for Point Up)
-                if s_up = '1' then
-                    if s_vy_n(18 downto 8) > 1079 then s_yf <= (others => '0');
-                    else s_yf <= to_unsigned(1079, 11) - s_vy_n(18 downto 8); end if;
-                else
-                    s_yf <= s_vy_n(18 downto 8);
-                end if;
+                -- spear profile rows: y (down spears) and 1079 - y (Facing: the up spears)
+                s_yf <= s_vy_n(18 downto 8);
+                if s_vy_n(18 downto 8) > 1079 then s_yu <= (others => '0');
+                else s_yu <= to_unsigned(1079, 11) - s_vy_n(18 downto 8); end if;
                 if s_first = '0' then s_racc <= s_racc + s_ys; end if;
                 s_nrow <= s_first;
             elsif s_ls = 2 then
@@ -521,23 +564,51 @@ begin
                 s_dq <= to_unsigned(268, 9) - resize(v_tr(14 downto 7), 9);
             elsif s_ls = 38 then
                 if s_nrow = '1' then s_phr_n <= s_phi_n; end if;
-                -- block-centre sample offset bw/2 - D, wrapped
+                -- block-centre sample offset bw/2 - D, wrapped; Both: the mirrored sample bw/2 + D
                 v_cb := signed(resize(s_BW(8 downto 1), 14)) - signed(resize(s_dq, 14));
-                if v_cb < 0 then v_cb := v_cb + signed(resize(s_P2, 14)); end if;
+                if v_cb < 0 then v_cb := v_cb + signed(resize(s_P2, 14)); s_cbn <= '1'; else s_cbn <= '0'; end if;
                 s_cb <= v_cb;
+                s_cc <= resize(s_BW(8 downto 1), 12) + resize(s_dq, 12);
                 -- background chevron line term: (0.7 y - 950) x 1024/1350 = y (1/2 + 1/32) - 721, + drift
-                if s_up = '1' then v_yl := resize(s_yf, 13); else v_yl := resize(s_vy_n(18 downto 8), 13); end if;
+                v_yl := resize(s_vy_n(18 downto 8), 13);
                 v_yl := resize(v_yl(12 downto 1), 13) + resize(v_yl(12 downto 5), 13) - 721;
                 s_L_n <= v_yl(9 downto 0) + s_drz;
             elsif s_ls = 39 then
+                -- uB / uC start positions and the tile (spear) each starts in, relative to u's tile 0
                 v_ub := resize(s_u0, 13) + unsigned(s_cb(12 downto 0));
-                if v_ub >= resize(s_P2, 13) then v_ub := v_ub - resize(s_P2, 13); end if;
+                if v_ub >= resize(s_P2, 13) then
+                    v_ub := v_ub - resize(s_P2, 13);
+                    if s_cbn = '1' then s_tB0_n <= "000"; else s_tB0_n <= "001"; end if;
+                else
+                    if s_cbn = '1' then s_tB0_n <= "111"; else s_tB0_n <= "000"; end if;
+                end if;
                 s_uB0_n <= v_ub(11 downto 0);
+                v_uc := resize(s_u0, 13) + resize(s_cc, 13);
+                if v_uc >= resize(s_P2, 13) then
+                    v_uc := v_uc - resize(s_P2, 13); s_tC0_n <= "001";
+                else
+                    s_tC0_n <= "000";
+                end if;
+                s_uC0_n <= v_uc(11 downto 0);
+            elsif s_ls = 40 then
+                s_ma <= resize(s_yu, 30); s_mb <= resize(s_yu, 16);
+                s_macc <= (others => '0'); s_mi <= (others => '0'); s_mrun <= '1';
+            elsif s_ls = 57 then
+                s_m1 <= s_macc(21 downto 0);
+            elsif s_ls = 58 then
+                s_ma <= resize(s_m1(21 downto 6), 30); s_mb <= resize(s_KY, 16);
+                s_macc <= (others => '0'); s_mi <= (others => '0'); s_mrun <= '1';
+            elsif s_ls = 75 then
+                s_phu_n <= s_C0 - signed(resize(s_macc(28 downto 16), 13));
+            elsif s_ls = 76 then
+                if s_nrow = '1' then s_phru_n <= s_phu_n; end if;
             end if;
 
             -- load the line's values at the source avid rise
             if data_in.avid = '1' and s_avq = '0' then
                 s_phi <= s_phi_n; s_phr <= s_phr_n; s_i <= s_i_n; s_ib <= s_ib_n; s_uB0 <= s_uB0_n; s_L <= s_L_n;
+                s_phu <= s_phu_n; s_phru <= s_phru_n;
+                s_uC0 <= s_uC0_n; s_tB0 <= s_tB0_n; s_tC0 <= s_tC0_n;
             end if;
 
             s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
@@ -623,16 +694,20 @@ begin
     begin
         if rising_edge(clk) then
             if g_start = '1' then
-                s_u <= s_u0; s_uA <= s_uA0; s_uG <= s_uG0; s_uB <= s_uB0;
+                s_u <= s_u0; s_uA <= s_uA0; s_uG <= s_uG0; s_uB <= s_uB0; s_uC <= s_uC0;
+                s_tu <= (others => '0'); s_tA <= s_tA0; s_tB <= s_tB0; s_tC <= s_tC0;
                 s_bc <= (others => '0'); s_nb <= '1'; s_px <= (others => '0');
             elsif g_avid = '1' then
+                -- tile DDAs; each counts the tiles (spears) it crosses, mod 8
                 v_n := resize(s_u, 13) + s_xs;
-                if v_n >= resize(s_P2, 13) then s_u <= resize(v_n - s_P2, 12); v_wr := '1';
+                if v_n >= resize(s_P2, 13) then s_u <= resize(v_n - s_P2, 12); v_wr := '1'; s_tu <= s_tu + 1;
                 else s_u <= v_n(11 downto 0); v_wr := '0'; end if;
                 v_n := resize(s_uA, 13) + s_xs;
-                if v_n >= resize(s_P2, 13) then s_uA <= resize(v_n - s_P2, 12); else s_uA <= v_n(11 downto 0); end if;
+                if v_n >= resize(s_P2, 13) then s_uA <= resize(v_n - s_P2, 12); s_tA <= s_tA + 1; else s_uA <= v_n(11 downto 0); end if;
                 v_n := resize(s_uB, 13) + s_xs;
-                if v_n >= resize(s_P2, 13) then s_uB <= resize(v_n - s_P2, 12); else s_uB <= v_n(11 downto 0); end if;
+                if v_n >= resize(s_P2, 13) then s_uB <= resize(v_n - s_P2, 12); s_tB <= s_tB + 1; else s_uB <= v_n(11 downto 0); end if;
+                v_n := resize(s_uC, 13) + s_xs;
+                if v_n >= resize(s_P2, 13) then s_uC <= resize(v_n - s_P2, 12); s_tC <= s_tC + 1; else s_uC <= v_n(11 downto 0); end if;
                 v_n := resize(s_uG, 13) + s_xs;
                 if v_n >= resize(s_P2, 13) then s_uG <= resize(v_n - s_P2, 12); else s_uG <= v_n(11 downto 0); end if;
                 v_b := resize(s_bc, 10) + s_xs;
@@ -660,9 +735,11 @@ begin
         variable v_sy : unsigned(11 downto 0);
         variable v_sc : unsigned(14 downto 0);
         variable v_dl : unsigned(9 downto 0);
+        variable v_p : signed(12 downto 0);
+        variable v_bb : std_logic;
     begin
         if rising_edge(clk) then
-            -- bend: source luma about mid-grey (a few pixels early) x K6 x 1.25, Q.1 px, +-636 at most (|bend3| < 2^17)
+            -- bend: source luma about mid-grey (a few pixels early) x K6, Q.1 px, +-440 at most
             s_lb_ra <= s_px;
             s_yv2 <= unsigned(s_lb_q);
             s_bend3 <= (signed(resize(s_yv2, 9)) - 128) * signed('0' & s_bendk);
@@ -676,13 +753,25 @@ begin
             v_a := signed(resize(s_uG, 14)) - signed(resize(s_Ph, 14));
             v_a := abs(v_a); s1_dB <= unsigned(v_a(11 downto 0));
             s1_rB <= signed(resize(s_uB, 13)) - signed(resize(s_Ph, 13));
+            s1_rC <= signed(resize(s_uC, 13)) - signed(resize(s_Ph, 13));
             s1_nb <= s_nb;
+            -- each spear's core: its line profile (down, or up for the odd spears when Facing) + its plunge
+            if s_face = '1' and s_tu(0) = '1' then v_p := s_phu; else v_p := s_phi; end if;
+            s1_phU <= resize(v_p, 14) + resize(s_dl(to_integer(s_tu)), 14);
+            if s_face = '1' and s_tA(0) = '1' then v_p := s_phu; else v_p := s_phi; end if;
+            s1_phA <= resize(v_p, 14) + resize(s_dl(to_integer(s_tA)), 14);
+            if s_face = '1' and s_tB(0) = '1' then v_p := s_phru; else v_p := s_phr; end if;
+            s1_phB <= resize(v_p, 14) + resize(s_dl(to_integer(s_tB)), 14);
+            if s_face = '1' and s_tC(0) = '1' then v_p := s_phru; else v_p := s_phr; end if;
+            s1_phC <= resize(v_p, 14) + resize(s_dl(to_integer(s_tC)), 14);
 
             -- 2: spear field F = |x| - phi - bend; key field 15 px earlier; ring sample
-            s2_F  <= signed(resize(s1_tq, 14)) - resize(s_phi, 14) - resize(s_bend, 14);
-            s2_FA <= signed(resize(s1_tqA, 14)) - resize(s_phi, 14) - resize(s_bend, 14);
-            s2_Fs <= signed(resize(unsigned(abs(s1_rB)), 14)) - resize(s_phr, 14);
+            s2_F  <= signed(resize(s1_tq, 14)) - s1_phU - resize(s_bend, 14);
+            s2_FA <= signed(resize(s1_tqA, 14)) - s1_phA - resize(s_bend, 14);
+            s2_Fs <= signed(resize(unsigned(abs(s1_rB)), 14)) - s1_phB;
             if s1_rB > 0 then s2_sd <= '1'; else s2_sd <= '0'; end if;
+            s2_FsC <= signed(resize(unsigned(abs(s1_rC)), 14)) - s1_phC;
+            if s1_rC > 0 then s2_sdC <= '1'; else s2_sdC <= '0'; end if;
             s2_nb <= s1_nb;
             s2_Zd <= signed(resize(s1_dB, 14)) + resize(s_bend, 14);
 
@@ -693,13 +782,19 @@ begin
             end loop;
             if s2_FA < signed(resize(s_T(6), 14)) then s3_A <= '1'; else s3_A <= '0'; end if;
             if s2_nb = '1' then
+                v_bb := '0';
                 if s2_Fs >= signed(resize(s_T(7), 14)) and
                    ((s2_sd = '1' and s2_Fs < signed(resize(s_T(9), 14))) or
                     (s2_sd = '0' and s2_Fs < signed(resize(s_T(8), 14)))) then
-                    s3_B <= s_shad;
-                else
-                    s3_B <= '0';
+                    v_bb := '1';
                 end if;
+                -- Both: the mirrored ring (wide flank on the left) thrown to the left
+                if s_both = '1' and s2_FsC >= signed(resize(s_T(7), 14)) and
+                   ((s2_sdC = '1' and s2_FsC < signed(resize(s_T(8), 14))) or
+                    (s2_sdC = '0' and s2_FsC < signed(resize(s_T(9), 14)))) then
+                    v_bb := '1';
+                end if;
+                s3_B <= v_bb;
             end if;
             s3_Zs <= unsigned(resize(shift_right(s2_Zd, 2), 12) + resize(shift_right(s2_Zd, 3), 12));   -- x 1024/2700 (wraps)
 
