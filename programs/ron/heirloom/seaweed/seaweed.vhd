@@ -106,10 +106,27 @@ architecture seaweed of program_top is
     -- line buffer: (luma >> 2) - 16, clipped at 0
     type t_lb is array (0 to 2047) of std_logic_vector(7 downto 0);
     signal lb : t_lb := (others => x"00");
-    -- written at the source column, read at the beam column, which trails it by 4-5 pixels: never the
+    -- written at the source column, read at the beam column, which trails it by 3-4 pixels: never the
     -- address being written
     attribute no_rw_check : boolean;
     attribute no_rw_check of lb : signal is true;
+    -- v0.1.3: vertically smoothed camera luma, 8.4 fixed point, one entry per column (the previous line's
+    -- value).  Read-modify-write at the beam column: read at stage 1, s = s + (luma - s) >> 3 (>> 2 at SD)
+    -- formed at stage 3 -> 4, written back at the end of stage 4 (the read is then 3 columns ahead: never
+    -- the address being written).  Without it every row bends the bands by its own camera luma, and at
+    -- K6 = 100 % (3.75 cycles per full luma, ~3 px per luma step) row-to-row differences tear every band
+    -- edge into thin horizontal streaks (Ron, 2026-11-19).
+    type t_sb is array (0 to 2047) of std_logic_vector(11 downto 0);
+    signal sb : t_sb := (others => x"000");
+    attribute no_rw_check of sb : signal is true;
+    signal s_sb_q  : std_logic_vector(11 downto 0) := x"000";
+    signal s_sb_wa : unsigned(10 downto 0) := (others => '0');
+    signal s_sb_wd : std_logic_vector(11 downto 0) := x"000";
+    signal s_sb_we : std_logic := '0';
+    signal s_sa2, s_sa3 : unsigned(10 downto 0) := (others => '0');
+    signal p3_lm  : unsigned(7 downto 0) := (others => '0');
+    signal p3_sp  : unsigned(11 downto 0) := (others => '0');
+    signal s_vf1, s_vf1p, s_vsh2 : std_logic := '0';
     signal s_lb_wa, s_lb_ra : unsigned(10 downto 0) := (others => '0');
     signal s_lb_wd : std_logic_vector(7 downto 0) := x"00";
     signal s_lb_we : std_logic := '0';
@@ -339,6 +356,20 @@ begin
             if s_lb_we = '1' then lb(to_integer(s_lb_wa)) <= s_lb_wd; end if;
         end if;
     end process p_lb;
+
+    p_sb_rd : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_sb_q <= sb(to_integer(s_lb_ra));
+        end if;
+    end process p_sb_rd;
+
+    p_sb_wr : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_sb_we = '1' then sb(to_integer(s_sb_wa)) <= s_sb_wd; end if;
+        end if;
+    end process p_sb_wr;
 
     p_rom : process(clk)
     begin
@@ -837,7 +868,18 @@ begin
                 if b_dn = '1' then b_g <= b_g - resize(l_ginc, 26); else b_g <= b_g + resize(l_ginc, 26); end if;
                 if b_px = c_nc1 then b_dn <= '0'; end if;
             end if;
-            s_lb_ra <= b_px;
+            -- both line stores are read at stage 1 (s_lb_ra = b_px, its own copy): data at 2, fabric at 3
+            if g_start = '1' then
+                s_lb_ra <= (others => '0');
+            elsif g_avid = '1' then
+                s_lb_ra <= s_lb_ra + 1;
+            end if;
+            -- the first line of a field loads the smoothed store directly
+            if s_zone = '1' then
+                s_vf1p <= '1';
+            elsif g_start = '1' then
+                s_vf1 <= s_vf1p; s_vf1p <= '0';
+            end if;
         end if;
     end process p_beam;
 
@@ -855,6 +897,8 @@ begin
         variable v_use : std_logic;
         variable v_h   : signed(10 downto 0);
         variable v_w   : signed(11 downto 0);
+        variable v_sd, v_st : signed(12 downto 0);
+        variable v_sn  : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             -- 2..6: carry the phase (bits 30..14) while the bend is formed
@@ -864,8 +908,27 @@ begin
             if b_g > K_G1 then c_st1(2) <= '1'; else c_st1(2) <= '0'; end if;
             if b_g > K_G2 then c_st2(2) <= '1'; else c_st2(2) <= '0'; end if;
             for i in 3 to 10 loop c_st1(i) <= c_st1(i - 1); c_st2(i) <= c_st2(i - 1); end loop;
-            -- 4: luma from the line buffer (EBR data at 3, fabric copy)
-            p4_lm <= unsigned(s_lb_q);
+            -- 3: luma and the previous line's smoothed luma (EBR data at 2, fabric copies)
+            p3_lm <= unsigned(s_lb_q);
+            p3_sp <= unsigned(s_sb_q);
+            s_sa2 <= s_lb_ra; s_sa3 <= s_sa2;
+            -- 4: vertical one-pole smoothing (first line of a field and the Osc load directly); write back
+            v_sd := signed(resize(p3_lm & to_unsigned(0, 4), 13)) - signed(resize(p3_sp, 13));
+            if s_vf1 = '1' or s_src = '1' then
+                v_sn := p3_lm & to_unsigned(0, 4);
+            else
+                if s_vsh2 = '1' then
+                    v_st := signed(resize(p3_sp, 13)) + shift_right(v_sd, 2);
+                else
+                    v_st := signed(resize(p3_sp, 13)) + shift_right(v_sd, 3);
+                end if;
+                v_sn := unsigned(v_st(11 downto 0));
+            end if;
+            if s_xs = 4 then s_vsh2 <= '1'; else s_vsh2 <= '0'; end if;
+            p4_lm   <= v_sn(11 downto 4);
+            s_sb_wd <= std_logic_vector(v_sn);
+            s_sb_wa <= s_sa3;
+            s_sb_we <= s_gav_sr(1);
             -- 5: bend partials (luma nibbles x gain)
             p5_ea <= resize(p4_lm(3 downto 0) * c_bg, 24);
             p5_eb <= resize(p4_lm(7 downto 4) * c_bg, 24);

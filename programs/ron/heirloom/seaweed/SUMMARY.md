@@ -1,6 +1,6 @@
 # Seaweed — wavy green curtain bands swaying in a travelling wave, with brown cores, violet lines and black pebble blobs
 
-**v0.1.0 built 2026-11-10, not flashed.** Heirloom phase 3 (video clips), from the still
+**v0.1.3 built 2026-11-19 (camera streak fix, Ron's v0.1.x flash note), awaiting HW.** v0.1.0 built 2026-11-10. Heirloom phase 3 (video clips), from the still
 `photos/vid/WIN_20230402_23_03_06_t0p5.png`: clip WIN_20230402_23_03_06 at 0.5 s (the clip is 9.1 s long). The
 alternative look is the same patch in WIN_20230402_23_06_55 (16.5 s). Presets are hand-written placeholders.
 
@@ -272,3 +272,33 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 - **Change.** Slot 266: the camera gain c_bg = k6^2 x 821 / 4096 + k6^2 x 821 / 16384, max 262212 (was 209770). That is 3.75 cycles per full luma (was 3). The Osc keeps its 4x level: x1.25 there would overflow c_bg. Per-field arithmetic only; the latency is unchanged.
 - **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_seaweed/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
 - **Build (v0.1.2):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom seaweed`). Post-route Fmax: HD Analog 89.34, HD HDMI 81.35, HD Dual 84.33 (worst HD 81.35), SD Analog 88.89, SD HDMI 88.68, SD Dual 82.48 MHz. Up to 7107 / 7680 LC.
+
+## v0.1.3: camera streak fix (2026-11-19)
+
+- **Ron (preview page, on the v0.1.x flash):** "There are horizontal thin streaky color lines over the entire
+  screen, they are subtle but there, takes away from the clean look."
+- **Cause (program-side).** Each row bent the band phase by its own camera luma, and nothing smoothed it
+  vertically. The 11-15 K6 pass raised the default bend from 150 to 1023 (3.75 cycles per full luma, so one luma
+  step moves a band edge ~3 px at 1080p). Row-to-row luma differences therefore tore every band edge into one-row
+  horizontal hairs, and the thin rims and edge lines into slivers. The vertical-step guard only knows the FM's own
+  per-line drift, not the camera's. In the integer model with the selfie at 720p, 40 % of pixels were one-row
+  peaks or dips at K6 = 100 % (0.6 % at the v0.1.0 default of 150, 0.07 % with black input).
+- **Fix.** A one-pole vertical low-pass on the camera luma before the bend: s = s + (luma - s) / 8 per line
+  (/ 4 at SD, whose rows are 2-4x taller), kept in 8.4 fixed point in a second 2048 x 12 line store.
+  - It is a read-modify-write at the beam column: both line stores are now read at stage 1 (one clock earlier, on
+    a counter copy of the beam column), the smoothing add sits in the old stage-4 fabric copy, and the write-back
+    lands at the end of stage 4, 3 columns behind the read. `no_rw_check`; yosys 0 emulate_transparency.
+  - No pipeline stage added: C_LAT 32 and the pixel-depth parity are unchanged.
+  - The first line of each field loads directly, and the Osc bypasses the smoothing (Osc picture unchanged).
+  - The camera image sits ~7 lines lower (the filter's delay) and its horizontal edges soften over ~8 rows.
+    Invisible against 200-px bands. Strong camera detail still bends the bands hard at full Bend, as intended.
+- **Checked.** Model with the selfie at K6 = 100 %: one-row pixels 366k -> 82k (/8). The rest are in busy detail
+  like hair; the television still went 249k -> 44k. GHDL 720p60 dec 1:
+  - vertical-bar input (random column luma), K6 1023: raw output byte-identical to v0.1.2, so the write-back column
+    alignment is exact;
+  - the selfie: clean band edges, 205 one-row pixels.
+- **Build (v0.1.3):** router1, all six configs on seed 1. Post-route Fmax: HD Analog 81.99, HD HDMI 81.17,
+  HD Dual 78.41, SD Analog 84.13, SD HDMI 80.79, SD Dual 81.86 MHz. 7,208 - 7,220 / 7,680 LC (94 %), 29 / 32 EBR
+  (+6 for the smoothed store). The v0.1.2 vmprog is kept at `.heirloom_work/rb_seaweed/seaweed_v0.1.2.vmprog`.
+- **Hardware watch.** If thin lines persist with the camera unplugged or on Osc, they are not this mechanism.
+  Next suspect: the HD HDMI hsync placement lottery (re-seed, memory `hdmi_tx_placement_skew`).
