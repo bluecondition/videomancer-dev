@@ -1,40 +1,133 @@
 # Ticker — camera video through a sample-and-hold mosaic (Heirloom #20)
 
-**v0.5.2 (2026-11-15): K6 camera pass, built, NOT flashed** (see [K6 camera pass](#k6-camera-pass-2026-11-15-v052)).
+**v0.6.2 (2026-11-19): phase 2 FINAL — Ron prefers the diag in every case, so it is merged into production** (`out/rev_b/ron/heirloom/ticker.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; this exact build not flashed). It is the phase-2 round plus the K6 camera pass; status lines below that say "diag" or "production untouched" are history. The replaced v0.5.3 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`.
+
+**v0.6.1 (2026-11-15): K6 camera pass on the diag copy, built, NOT flashed** (see [K6 camera pass](#k6-camera-pass-2026-11-15-v061-diag)).
+**v0.6.0 (2026-11-09, phase 2): diag preview built, awaiting Ron's preview** (see [Phase 2](#phase-2-v060);
+`Ticker Diag`, `out/rev_b/ron/_diag/ticker_diag_v0.6.0.vmprog`, copy in `out/rev_b/ron/heirloom/_diag/`).
+Production v0.5.1 (`programs/ron/heirloom/ticker/`) is untouched.
 **v0.5.0 (2026-10-21): rebuilt from the photo, built, NOT flashed.** Source: `photos/WIN_20230319_01_27_56_Pro.jpg`.
 v0.1.0 (hashed bar columns scrambled sideways) was judged too abstract. This version runs the camera
 through the photo's processing, and Osc mode substitutes a generator with the photo's statistics.
 Working files: `.heirloom_work/rb_ticker/` (`notes.md`, `proto2.py`, `imodel.py`, `sheet.png`, `cmp_final.png`).
 
-## K6 camera pass (2026-11-15, v0.5.2)
-- **K6 = Camera** (Ron's rule for the Heirloom / Kinetic / Patchbay sets: K6 is the camera strength, default
-  50 %). Ticker is a picture OF the camera (a sample-and-hold mosaic), so K6 sets how strongly the camera shows.
-- **Law:** the source value (camera L, or the Osc greys and highlights) becomes
-  320 + (v − 320) · k / 512 before it is written to the cell RAM (320 L = a mid grey), clamped to black .. 1.0.
-  One 10 × 9-bit product stage and one add / clamp stage; they took v0.5's two output pad stages, so the latency
-  stays 36. The Osc wedge (its stripes and dashes) is exempt, so the wedge stays when the camera fades.
-  - 0 % = every cell flat grey (B halves darker, so the cell grid still shows): the camera faded out to a
-    neutral ground. Osc keeps its dark wedge on the grey.
-  - 25 % = half the v0.5 contrast. 50 % (default) = exactly the v0.5 look (gain 1, nothing clamps).
-  - 100 % = 2× contrast: darks crush to black, many more cells reach the cyan window and white; the selfie
-    still reads (no washout).
-  - S11 Osc goes through the same law (wedge exempt).
-- **K6's old function (Shadow)** moved to **S8**, the weakest control (Roll / Lock left a still unchanged on the
-  control sheet; phase 2's notes say the same): S8 Shadow = Photo (the old K6 at 512) / Deep (the old K6 at
-  800: wedge 1.56×, Video crush below 0.20 L). Rows is fixed at Roll. No preset used K6 or S8.
-- Working files: `.heirloom_work/rb_ticker/k6/` (`k6sheet.png` = K6 0 / 256 / 512 / 1023, Osc at 512, Osc + S8
-  Deep, Osc at 0; 720p dec 2 with the selfie).
-- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh heirloom ticker`): **router1**; HD Analog s1 95.38, SD
-  Analog s1 88.21, HD HDMI s1 81.56, SD HDMI s1 85.98, **HD Dual seed 2** 94.07 (router1 stalled on seed 1 and
-  timed out), SD Dual s1 88.92 MHz. Worst HD 81.56. 6,831–6,872 / 7,680 LC (89 %), 2 / 32 EBR.
-  `out/rev_b/ron/heirloom/ticker.vmprog` (400,918 bytes); the packed config carries the new labels. Not flashed.
-  - The S8 Shadow constants are per-state constants, not shift-adds on the two-valued setting: as adds, its bits
-    were copies of the one switch flag and gave 3 SB_CARRY cells with I0 == I1 (the router1 self-add hang, which
-    stalled HD Dual seed 1 on the first build). Fixed (0 now, dupin.py), and 75 LUTs smaller. HD Dual seed 1
-    still stalled once afterwards; the netlist keeps 4 pre-existing LUTs with a duplicated input (sign bits of
-    s_incv / s_sp / s_tba / s_trib), so stay on router1 with seed retries, or router2.
-- The pending diag copy (`.heirloom_work/rb_ticker/diag/ticker_diag/`, v0.6.1) got the same design with S9 Edges
-  as its weak control (see its SUMMARY); router1, all seed 1, worst HD 81.96 MHz, 7,174 LC, 7 EBR.
+## K6 camera pass (2026-11-15, v0.6.1 diag)
+The same K6 camera design as production v0.5.2 (see `programs/ron/heirloom/ticker/SUMMARY.md`, "K6 camera
+pass"): K6 = Camera, the source value becomes 320 + (v − 320) · k / 512 before the cell RAM (Osc wedge exempt):
+0 % = flat grey cells, 50 % = exactly the v0.6.0 look, 100 % = 2× contrast.
+- **Weak control here:** S9 Edges (Soft / Hard: the smallest change of this copy's controls; S8 is already
+  Grid and S10 Mirror, both bold). K6's old Shadow moved to **S9 Shadow**: Photo (old K6 at 512) / Deep (old
+  K6 at 800: the Osc wedge 1.56×, and this copy's steeper Video crush, below 0.36 L). Edges is fixed at Soft
+  (which also keeps the Hard option's crisp moving edges, an HD HDMI bar risk, out).
+- Presets: Kaleido's K6 700 (bigger wedge) became S9 Deep; Slits lost Hard edges.
+- **Latency 34 → 36** in every mode (`processing_delay_clks` 36; even, so U/V parity is unchanged): v0.6.0
+  had already spent v0.5's two pad stages on its delay rings, so the two K6 stages (product, add / clamp)
+  needed two more. The cell-RAM read address, the mirror replay and every later stage index moved two later.
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh diag ticker`): **router1**, all six on seed 1: HD Analog
+  83.71, SD Analog 87.80, HD HDMI 81.96, SD HDMI 87.37, HD Dual 83.80, SD Dual 87.94 MHz (worst HD 81.96).
+  7,139–7,174 / 7,680 LC (93 %), **7 / 32 EBR** (was 8: with Edges fixed at Soft the 9-back luma ring for Hard
+  edges is unread and gets pruned). `out/rev_b/ron/_diag/ticker_diag_v0.6.1.vmprog`.
+  - The S9 Shadow constants are per-state constants: written as shift-adds on the two-valued setting, its bits
+    were copies of one switch flag (SB_CARRY I0 == I1, the router1 self-add hang; the first build's SD Dual
+    stalled on seed 1). The rebuild above is the fixed netlist.
+
+## Phase 2 (v0.6.0)
+No notes from Ron for ticker (free hand, 2026-11-09 batch). Most v0.5 knobs were already bold (Cells, Rows, Gaps,
+Shadow and Hold all restructure the picture), but two switches barely showed: S8 Roll/Lock only stopped the rows
+rolling, and S10 Two/One clocks only changed the row slivers. The mosaic was also one rigid grid: every row had
+the same cells, on the same phase, standing still. The round:
+- makes the **rows modules**: a per-row engine gives every row its own cell clock (S8 Mixed), its own scroll rate
+  (the ticker tape, K4 past its default) and its own grid phase, hash-key base and highlight offset;
+- re-patches the two weak switches into look-flips: S8 Grid Mixed (rows of different mosaic resolutions) and S10
+  Mirror (the right half replays the left half's cells: a kaleidoscope of the camera);
+- widens K1 to an exponential ×0.25..×4 and gives K3, K5 and K6 a second, bigger half.
+
+Every new effect is exactly zero at the default knob values; the default frame is byte-identical to v0.5.1
+(checks below). Phase-2 working files: `.heirloom_work/rb_ticker/p2/`.
+
+| Was (v0.5) | Now (v0.6.0) | Full sweep, in screen terms (1080p) |
+|---|---|---|
+| K1 Cells: 12 .. 100 cells across, linear (41.8 = the photo at 346) | **K1 Cells**: the H clock, **×0.25 .. ×1 .. ×4, exponential** (an octave per quarter turn); default moved **346 → 512** (same picture); readout 0–100 % | 10.4 cells across (184 px cells, a few huge blocks) → 41.8 (the photo's 46 px) → 167 (11.5 px: fine grain, which Soft blurs into streaks) |
+| K3 Cyan: window 0.30 .. 0.85 | **K3 Cyan**: unchanged at and above 50 %; **below it the window drops one for one and widens by half the distance** | 0 % = window 0.13–0.55: nearly every grey A cell turns cyan (about 45 % of the frame; in Video the camera becomes a cyan silhouette). 50 % = the photo (11 % cyan). 100 % = only the brightest cells, no white |
+| K4 Speed: bipolar ±512, still in the centre | **K4 Speed**: unchanged within ±128 of the centre (the default 640 = +128 exactly); **beyond, the slope triples** (ends ≈ ±1280, 10× the default) **and every row scrolls sideways at its own rate** 1..4 (row hash; K4 sets the direction), none in 384..640 | the ticker tape: at the ends rows slide at 440 px/s (rate 1) .. 1770 px/s (rate 4, about a screen width a second); rows roll ~4.5 rows/s, highlights hop, held bands drift. Back in 384..640 the rows snap back into alignment |
+| K5 Gaps: B-half gain 0 .. 0.87 | **K5 Gaps**: the same gain **plus the A/B duty**: A = 25 % (k5 0) .. 53 % (the photo) .. 81 % (k5 max) of the cell | 0 % = thin 12 px slits on black (a barcode). 100 % = 37 px A blocks with near-full-level 9 px B halves (almost seamless) |
+| K6 Shadow: Osc wedge 0 .. 2×; Video crush to 0.23 luma | Osc unchanged; **Video crush steeper above the default** | Video: 50 % = crush below 0.15 (the photo's law); 100 % = **below 0.51**: the camera's darker half goes black (a hard silhouette poster) |
+| S8 Rows: Roll / Lock (the rows stop rolling; subtle in stills) | **S8 Grid: Even / Mixed** (renamed) | Mixed: every row gets its own cell size, ×0.5 .. ×2 of K1's (8 sizes from a row hash), centre-anchored: rows of 92 px blocks beside rows of 23 px grain. The sizes travel with their rows as they roll |
+| S10 Clocks: Two / One (the row slivers; subtle) | **S10 Mirror: Off / On** (renamed) | the right half replays the left half's cells mirrored about the screen-centre cell, every line including tick lines: a symmetric mosaic. Video = a kaleidoscope of the camera's left half; Osc = a symmetric V wedge; scroll runs in mirror image |
+
+Unchanged: K2 Rows (8..263 rows, square law, already ×0.15..×4.8), S7 Picks, S9 Edges, S11 Source (Video / Osc,
+default Video), P12 Hold (0 = no held bars, 50 % = the photo's three bands, 100 % = the lower frame melts into tall
+bars). Lock and the single-clock option are gone: K4 at its centre stands the rows still.
+
+**Presets** (preset 0 = the defaults): **Photo** (renamed from "Default"); **Readout** (Osc); **Ticker Tape** (Osc,
+K4 960: rows scrolling, light hold); **Mixed Rows** (Grid Mixed, finer, faster roll); **Kaleido** (Mirror, Osc,
+bigger wedge); **Meltdown** (as before); **Slits** (K5 9 %: barcode slits, finer, Magenta, Hard); **Cyan Flood**
+(K3 6 %, Mixed). Dropped: Fine Grain, Magenta Hard (→ Slits).
+
+**Engine (new).**
+- **K1 curve.** The zone's serial-multiplier slot that computed (w/2)·inc now computes 1427·(256 + k1[7:0]),
+  shifted by the octave k1[9:8]: 356 .. 1427 (k1 = 512, exactly the v0.5 photo value) .. 5696 per virtual px.
+- **One shared serial multiplier**, in the line engine: the vblank zone slots (k2², rows × ysc, yth × m10, the K1
+  curve) and the per-row engine load it at disjoint times; it steps every clock until its operand is used up.
+- **Row index.** The line engine counts clock-1 wraps (ticked or held, so P12 doesn't re-number rows) from a
+  per-field base that follows clock 1's phase wraps, so a row keeps its size and rate as it rolls. A 256 × 8
+  row-hash ROM (1 EBR) gives the size factor (bits 2..0) and the scroll rate (bits 4..3).
+- **Per-row engine** (tick lines only; ~58 clocks after the avid fall, inside SD's 138-clock hblank and the image
+  tester's 64, and after the beam has finished the line):
+  1. inc_v × m/8 with m ∈ {4,5,6,8,10,12,14,16} (8 when Even), clamped at 8191;
+  2. the mode scale;
+  3. A = (w/2 − 17)·inc_row, giving the start phase C_PHC − A (centre-anchored, as v0.5 did per field);
+  4. o = rate·T, where T is the scroll time: Q4 virtual px, 24 bits, +5/16 of the K4 excess per field, reset in
+     the photo zone. B = o·inc_v / 16 moves the grid phase, and the hash-key base moves by 2·⌊S0 − B⌋ cells, so
+     Osc content scrolls rigidly;
+  5. G = o·851 / 16 moves the highlight gate with it.
+
+  The row registers feed the beam directly; they change only in hblank. All of them reduce to the v0.5
+  per-field values when S8 is Even and T = 0.
+- **Cell RAM** 256 → **512 entries** (2 EBR, `no_rw_check`): the entry counter is 9 bits (482 entries at most,
+  with the 8191 clamp at 1080p). The hash key is entry[7:0] + the row base, with entry bit 8 in a key bit that is 0
+  at the default.
+- **A/B duty**: stage 1 compares the beam phase with a per-field register, 34996 + 36·(k5 − 512).
+- **Mirror**:
+  - stage 2 latches the entry at the first pixel right of the screen centre;
+  - from stage 7, pixels right of it read entry 2·e_c − e, clamped at 0;
+  - stage 12 takes the RAM value for them, also on tick lines. Their source entries were written at least a
+    half cell earlier in the same line, so there is no read/write collision.
+- **Fit**:
+  - the luma 16-px box (taps 16 and 9) and the chroma 8-sum delay ride three block-RAM rings (one write address,
+    `no_rw_check`, read = write − (delay − 3), plus a fabric register; 4 EBR), replacing 330 FF of shift registers;
+  - the two output pad stages are gone, so latency is **36 → 34** in every mode (even, so U/V parity is unchanged).
+
+**Build** (router2, `.heirloom_work/diag_build.sh ticker`, 2026-11-09): HD Analog **s2** 81.84 (s1 missed), SD Analog
+s1 76.66, HD HDMI s1 76.89, SD HDMI s1 79.11, HD Dual s1 83.32, SD Dual s1 85.57 MHz. 7,098–7,140 / 7,680 LC
+(92.6 %), 8 / 32 EBR; no RAM transparency emulation; iceunpack OK ×6; the packed config carries the new labels and
+presets. No pin-skew screen.
+**Fit history.** The first build reached 7,631 LC (99.4 %; HD Analog 76.52, SD Analog 75.42, HD HDMI 83.97 MHz on
+seed 1 before it was stopped). Standalone-yosys ablation (`p2/abl/`) ranked the per-row scroll at ~270 LUT and
+Mirror at ~40, the rest spread out. Fitted:
+- the multiplier and its loads moved into the line engine (no operand staging registers);
+- the row registers feed the beam directly;
+- the scroll offset is one adder used twice;
+- every row scrolls in K4's direction (no per-row reverse);
+- rows snap home instead of easing;
+- the delay rings and the pad removal above.
+
+**Checks** (working files in `.heirloom_work/rb_ticker/p2/`):
+- GHDL analyse / elaborate / synth front end: clean (`check.sh`).
+- `sweep.py`, every new knob path at RTL widths:
+  - defaults exact (incv 1427, key window 643 / 817, speed 128 with zero scroll, A/B split 34996, crush 157);
+  - at most 482 entries per line in all modes;
+  - the row products fit;
+  - mirror addresses in range.
+- Default frame (GHDL 720p60 dec 1, Osc, 2 warm-up + 1 capture; production v0.5.1 simulated the same way): raw 10-bit
+  output **byte-identical** (0 of 921,600 px), on the first version and again on the final source (rings and
+  latency 34).
+- One extreme frame (Osc, Mixed + Mirror + K5 200 + K4 1000; `v4_ext.png`): symmetric V wedge, rows of mixed cell
+  sizes, slit duty.
+- Not verified:
+  - Video mode with a real camera (Mirror kaleidoscope, crush, flood);
+  - scroll motion over time (3 sim fields give only 15–60 px of offset);
+  - SD / 720p visuals.
 
 ## Reading of the photo (measured)
 The frame is camera video through a sample-and-hold, not a generated pattern:
@@ -94,10 +187,10 @@ The frame is camera video through a sample-and-hold, not a generated pattern:
 | K3 Cyan | the cyan picks | key window position: low = cyan floods the greys, 50 % = the photo, high = only the brightest cells turn cyan and white disappears |
 | K4 Speed | the drift of the patch | bipolar, still in the centre ±8: rows roll, the held bands drift, Osc highlights hop sideways and values boil |
 | K5 Gaps | the dark B half of every cell | B gain 0 (black seams) .. 0.87 (seamless); 0.44 = the photo |
-| K6 Camera | the camera itself | camera strength (K6 camera pass, v0.5.2): the source's contrast about a mid grey before the cell hold. 0 % = flat grey cells (the camera faded out; the Osc wedge stays), 50 % (default) = the v0.5 look, 100 % = 2× contrast (more black, cyan and white cells) |
+| K6 Camera | the camera itself | camera strength (K6 camera pass, v0.6.1): the source's contrast about a mid grey before the cell hold; 0 % = flat grey cells (Osc wedge stays), 50 % = the v0.6.0 look, 100 % = 2× contrast |
 | S7 Picks | the key colour | Cyan / Magenta |
-| S8 Shadow | the dark triangle | the old K6 Shadow (v0.5.2): Photo (the old K6 at 512: the photo's wedge in Osc, crush below 0.15 in Video) / Deep (the old K6 at 800: a 1.56× wedge, crush below 0.20). The old Rows switch is fixed at Roll |
-| S9 Edges | the soft analog edges | Soft / Hard blocks |
+| S8 Rows | the rolling rows | Roll / Lock (the clocks stop rolling; Osc still drifts) |
+| S9 Shadow | the dark triangle | the old K6 Shadow (v0.6.1): Photo (old K6 512) / Deep (old K6 800: wedge 1.56×, Video crush below 0.36 L). Edges is fixed at Soft |
 | S10 Clocks | the row slivers | Two clocks (the photo) / One (regular rows) |
 | S11 Source | the camera | Video (default) / Osc |
 | **P12 Hold** | the tall held bars | 0 = none (fine rows everywhere); 50 % = the photo's three bands; 100 % = the lower frame melts into tall bars under a few bands of rows |
@@ -113,7 +206,7 @@ The camera goes through exactly the processing in the photo:
 - the soft edges, fringe and warm tint.
 
 Its chroma is dropped, because the photo is luma plus the key colour. Osc substitutes the generator
-described above. Every control acts in both modes; S8 Shadow (K6 until v0.5.1) is the wedge in Osc and the dark-crush in Video.
+described above. Every control acts in both modes; K6 is the wedge in Osc and the dark-crush in Video.
 
 ## Engine
 - **Zone sequencer** (vblank = "no avid for 1024 clocks").
@@ -169,6 +262,30 @@ described above. Every control acts in both modes; S8 Shadow (K6 until v0.5.1) i
 - The grey ROM is an inline constant in `ticker.vhd`, not a build-hook package, because there is only
   one 256-entry table.
 
-## K6 top +25 % and default 100 % (2026-11-15)
+## Open questions for Ron (2026-11-09 batch)
+1. Every row scrolls in K4's direction at its own speed. The first build also sent half the rows the other way;
+   it was cut for fit (~60 LUT). Bring it back?
+2. When K4 returns to the photo zone (384..640) the rows snap back into alignment. Would you prefer a glide back
+   (a short rewind)?
+3. Mixed sizes are a switch. Would a knob amount be better, or sizes that re-roll over time?
+4. S8 Lock and S10's single clock are gone (K4's centre still stands the rows still). Do you miss either?
 
-Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).
+## Hardware watch list
+- Renamed: S8 Rows Roll/Lock → **Grid Even / Mixed**, S10 Clocks Two/One → **Mirror Off / On**; preset "Default" →
+  "Photo". K1 Cells' default moved 346 → 512 (same picture; readout now 0–100 %).
+- Latency changed 36 → 34. There are three new block-RAM delay rings (luma box, chroma box): wrong or posterized
+  colours, or a smeared box edge, would point there.
+- HD HDMI 76.89 MHz (3.5 % margin); HD Analog needed seed 2.
+- In Video the ticker scroll moves the S&H grid over a still camera image (the camera content can't scroll without
+  a frame store); in Osc the content scrolls.
+- K1 near max with S9 Soft blurs into streaks; at SD, K5 extremes plus K1 max can give 1-px half cells that
+  occasionally merge.
+- Scroll time wraps after ~19 min at full speed (one jump).
+- Cut for fit: per-row reverse scroll direction; the ease-home (rows snap back).
+
+## Next step
+Wait for Ron's preview notes. On approval: `./heirloom_diag.sh merge ticker`, then repack the previewed diag
+bitstreams under the production TOML (copy `build/programs/ron/ticker_diag/rev_b/bitstreams/*.bin` into the
+production build dir, regenerate `program_config.bin` from the production TOML, `vmprog_pack.py --no-sign
+--hardware rev_b`) instead of re-routing (router2 is nondeterministic; HD Analog was seed 2); update the production
+SUMMARY / README / PHASE2 row and commit only ticker's files.

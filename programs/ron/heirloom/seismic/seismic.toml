@@ -1,4 +1,4 @@
-# Seismic - Heirloom #44 (2026-10-27 rebuild, v0.5.0), from WIN_20230610_00_10_54.
+# Seismic - Heirloom #44 (2026-10-27 rebuild; v0.6.0 phase-2 diag), from WIN_20230610_00_10_54.
 # An FM chirp against five clipped vertical ribbons, keyed per channel, in 24 staircase strips.
 # See seismic.vhd and SUMMARY.md.
 
@@ -6,22 +6,22 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.seismic"
 program_name = "Seismic"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Signal", "Render"]
 program_type = "processing"
-description = "A chirped oscillator across five ribbons with lobed gaps, torn into 24 staircase strips. Quake on the slider."
+description = "A chirped oscillator across five ribbons with lobed gaps, torn into staircase strips. Heights warps rows; Quake on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Rows"
+name_label = "Heights"
 control_mode = "linear"
-display_min_value = 50
-display_max_value = 200
+display_min_value = -100
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
@@ -30,11 +30,11 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Sweep"
 control_mode = "linear"
-display_min_value = 42
-display_max_value = 234
+display_min_value = -100
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -60,11 +60,11 @@ suffix_label = ""
 parameter_id = "rotary_potentiometer_5"
 name_label = "Width"
 control_mode = "linear"
-display_min_value = 55
-display_max_value = 145
+display_min_value = -100
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -117,7 +117,7 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
 name = "Calm"
@@ -135,3 +135,25 @@ name = "Blue Ribbons"
 toggle_switch_9 = 1
 rotary_potentiometer_1 = 700
 rotary_potentiometer_3 = 800
+
+[[preset]]
+name = "Perspective"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_5 = 680
+
+[[preset]]
+name = "Lens"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_2 = 380
+
+[[preset]]
+name = "Shatter"
+toggle_switch_10 = 1
+linear_potentiometer_12 = 900
+rotary_potentiometer_4 = 700
+
+[[preset]]
+name = "Threads"
+rotary_potentiometer_5 = 0
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 1023

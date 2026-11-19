@@ -1,7 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Triplicate v0.5.2 -- Heirloom #53 (2026-10-21), rebuilt from selfie.jpg (a paper collage).
+-- Triplicate v0.6.1 -- Heirloom #53 phase 2 diag (2026-11-09); v0.5.0 (2026-10-21) rebuilt from selfie.jpg
+-- (a paper collage).
 --
 -- The collage: a bear with a skull for a face and a TI home computer on its lap, photocopied in
 -- red, green and blue ink at three enlargements and cascaded diagonally down to the right over a
@@ -16,17 +17,18 @@
 -- a wall of square greyscale prints of the store, each a different window (head-biased), with
 -- per-print exposure, thin paper seams and per-row misalignment.
 --
---   K1  Recede   size step between the copies (equal .. the collage .. strong)
---   K2  Size     figure size
+--   K1  Recede   size step between the copies (reverse: front biggest .. equal .. the collage .. front tiny)
+--   K2  Size     figure size (x0.33 .. x1 .. x1.58)
 --   K3  Ink      photocopy contrast (faint prints .. the collage .. solid silhouettes)
 --   K4  Tiles    print size on the wall
---   K5  Speed    bipolar: the cascade breathes and the wall scrolls (centre = still)
+--   K5  Speed    bipolar: the cascade breathes and the wall scrolls (centre = still); past the default
+--                speed either way each copy circles on its own quarter-phase of the LFO and the wall races
 --   K6  Camera   how strongly the picture shows: the store's luma contrast about level 9 and its
---                chroma, 0 = a flat mid grey (flat silhouettes, blank prints), 50 % = v0.5,
+--                chroma, 0 = a flat mid grey (flat silhouettes, blank prints), 50 % = v0.6.0,
 --                100 % = 1.94x contrast and saturation
 --   S7  Order    RGB / BGR (which ink is at the back)
---   S8  Inks     RGB / CMY
---   S9  Front    Colour / Ink (a fourth, black plate)
+--   S8  Inks     RGB / CMYK (CMY copies, the front a black plate)
+--   S9  Print    Positive / Negative (the photocopies printed as negatives; the original stays)
 --   S10 Flip     Off / On (the 2nd and 4th copies mirrored)
 --   S11 Source   Video / Osc
 --   P12 CASCADE  0 = the copies nested on one spot, 50 % = the collage, 100 % = fanned across
@@ -38,8 +40,8 @@
 -- Generated avid; output conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma to
 -- ~777) before the blanking gate.  Latency 21, all modes.  Colours: hardware convention (u = Cr).
 
--- K6 camera pass 2026-11-15 (v0.5.2): K6 = Camera (camera strength, new); K5 = Speed (was K6); K5 Wall
--- (the weakest control) fixed at 512 (C_KFIX_5).  The gain acts on the store writes (one Q4 gain on
+-- K6 camera pass 2026-11-15 (v0.6.1 diag): K6 = Camera (camera strength, new); K5 = Speed (was K6); K5
+-- Wall (the weakest control) fixed at 512 (C_KFIX_5).  The gain acts on the store writes (one Q4 gain on
 -- the 4-bit store level about 9 and on the 4-bit chroma, two small product stages), so the display latency
 -- is unchanged.
 library ieee;
@@ -116,13 +118,19 @@ architecture triplicate of program_top is
     constant RF_717 : integer := 18;   constant RF_512 : integer := 19;
     constant RF_DH : integer := 20;    constant RF_DB : integer := 24;   constant RF_DX : integer := 28;
     constant RF_M290 : integer := 32;
+    constant RF_686 : integer := 33;   constant RF_338 : integer := 34;  constant RF_599 : integer := 35;
+    constant RF_425 : integer := 36;   constant RF_THREE : integer := 37; constant RF_M512 : integer := 38;
+    constant RF_2056 : integer := 39;  constant RF_ELEVEN : integer := 49;
     -- live inputs (loaded each field)
     constant RF_T12 : integer := 40;   constant RF_T1 : integer := 41;   constant RF_T2 : integer := 42;
     constant RF_T4 : integer := 43;    constant RF_K3 : integer := 44;   constant RF_K5 : integer := 45;
     constant RF_W : integer := 46;     constant RF_TRI : integer := 47;  constant RF_SC : integer := 48;
+    constant RF_SPD : integer := 54;
     -- glide state (knob * 4, persists)
     constant RF_G12 : integer := 50;   constant RF_G1 : integer := 51;   constant RF_G2 : integer := 52;
     constant RF_G4 : integer := 53;
+    -- orbit depth (per field), per-copy orbit phase (scratch)
+    constant RF_AMP : integer := 55;   constant RF_TV : integer := 79;
     -- scratch
     constant RF_D : integer := 56;     constant RF_CLO : integer := 57;  constant RF_C : integer := 58;
     constant RF_CV : integer := 59;    constant RF_CP : integer := 60;   constant RF_SLO : integer := 61;
@@ -152,6 +160,8 @@ architecture triplicate of program_top is
         set(RF_230, 230); set(RF_220, 220); set(RF_4496, 4496); set(RF_FIVE, 5); set(RF_256, 256);
         set(RF_410, 410); set(RF_115, 115); set(RF_688, 688); set(RF_BM, 15686); set(RF_307, 307);
         set(RF_M717, -717); set(RF_614, 614); set(RF_717, 717); set(RF_512, 512); set(RF_M290, -290);
+        set(RF_686, 686); set(RF_338, 338); set(RF_599, 599); set(RF_425, 425); set(RF_THREE, 3);
+        set(RF_M512, -512); set(RF_2056, 2056); set(RF_ELEVEN, 11);
         set(RF_DH, 0); set(RF_DH + 1, 1936); set(RF_DH + 2, 2972); set(RF_DH + 3, 6445);       -- size drop
         set(RF_DB, -1585); set(RF_DB + 1, -480); set(RF_DB + 2, 1007); set(RF_DB + 3, 1058);  -- bottoms
         set(RF_DX, -2890); set(RF_DX + 1, -989); set(RF_DX + 2, 1102); set(RF_DX + 3, 2778);  -- ear-centre x
@@ -168,6 +178,7 @@ architecture triplicate of program_top is
     constant L_T12 : integer := 0; constant L_T1 : integer := 1; constant L_T2 : integer := 2;
     constant L_T4 : integer := 3;  constant L_K3 : integer := 4; constant L_K5 : integer := 5;
     constant L_W : integer := 6;   constant L_TRI : integer := 7; constant L_SC : integer := 8;
+    constant L_SPD : integer := 9; constant L_TRC : integer := 10;    -- orbit depth; copy's LFO phase (+b quarters)
     -- output registers
     constant O_NONE : integer := 0; constant O_HI : integer := 1; constant O_LO : integer := 2;
     constant O_KTR : integer := 3;  constant O_KU : integer := 4; constant O_T : integer := 5;
@@ -197,14 +208,14 @@ architecture triplicate of program_top is
         r := mu(a, n, 0, '0', RF_ZERO, d); r.op := 1;
         return r;
     end function;
-    function ld(l, d : integer) return t_uc is
+    function ld(l, d : integer; q : integer := 0) return t_uc is    -- q: L_TRC phase offset in quarters
         variable r : t_uc;
     begin
-        r := mu(l, 0, 0, '0', RF_ZERO, d); r.op := 2;
+        r := mu(l, q, 0, '0', RF_ZERO, d); r.op := 2;
         return r;
     end function;
-    constant ST_COPY : integer := 43;      -- first per-copy step
-    constant ST_LAST : integer := 53;
+    constant ST_COPY : integer := 45;      -- first per-copy step
+    constant ST_LAST : integer := 60;
     function f_uc(st : unsigned(5 downto 0)) return t_uc is
     begin
         case to_integer(st) is
@@ -212,58 +223,67 @@ architecture triplicate of program_top is
             when 2  => return ld(L_T2, RF_T2);     when 3  => return ld(L_T4, RF_T4);
             when 4  => return ld(L_K3, RF_K3);     when 5  => return ld(L_K5, RF_K5);
             when 6  => return ld(L_W, RF_W);       when 7  => return ld(L_TRI, RF_TRI);
-            when 8  => return ld(L_SC, RF_SC);
+            when 8  => return ld(L_SC, RF_SC);     when 9  => return ld(L_SPD, RF_SPD);
             -- glides: G += (T - G) / 8
-            when 9  => return mu(RF_G12, RF_ONE, 0, '1', RF_T12, RF_D);
-            when 10 => return mu(RF_D, RF_ONE, 3, '0', RF_G12, RF_G12);
-            when 11 => return mu(RF_G1, RF_ONE, 0, '1', RF_T1, RF_D);
-            when 12 => return mu(RF_D, RF_ONE, 3, '0', RF_G1, RF_G1);
-            when 13 => return mu(RF_G2, RF_ONE, 0, '1', RF_T2, RF_D);
-            when 14 => return mu(RF_D, RF_ONE, 3, '0', RF_G2, RF_G2);
-            when 15 => return mu(RF_G4, RF_ONE, 0, '1', RF_T4, RF_D);
-            when 16 => return mu(RF_D, RF_ONE, 3, '0', RF_G4, RF_G4);
+            when 10 => return mu(RF_G12, RF_ONE, 0, '1', RF_T12, RF_D);
+            when 11 => return mu(RF_D, RF_ONE, 3, '0', RF_G12, RF_G12);
+            when 12 => return mu(RF_G1, RF_ONE, 0, '1', RF_T1, RF_D);
+            when 13 => return mu(RF_D, RF_ONE, 3, '0', RF_G1, RF_G1);
+            when 14 => return mu(RF_G2, RF_ONE, 0, '1', RF_T2, RF_D);
+            when 15 => return mu(RF_D, RF_ONE, 3, '0', RF_G2, RF_G2);
+            when 16 => return mu(RF_G4, RF_ONE, 0, '1', RF_T4, RF_D);
+            when 17 => return mu(RF_D, RF_ONE, 3, '0', RF_G4, RF_G4);
             -- mode: X0G = W xs / 4 - 290 (print grid origin), WV16 = W xs * 4 (Q.4 half width)
-            when 17 => return mu(RF_W, RF_XS, 2, '0', RF_M290, RF_X0G, bm => M_TID);
-            when 18 => return mu(RF_W, RF_XS4, 0, '0', RF_ZERO, RF_WV16, bm => M_TID);
+            when 18 => return mu(RF_W, RF_XS, 2, '0', RF_M290, RF_X0G, bm => M_TID);
+            when 19 => return mu(RF_W, RF_XS4, 0, '0', RF_ZERO, RF_WV16, bm => M_TID);
             -- cascade c (Q.10) = max(2 g, 3.4 g - 717); breathing; clamps
-            when 19 => return mu(RF_G12, RF_ONE, 1, '0', RF_ZERO, RF_CLO);
-            when 20 => return mu(RF_G12, RF_3482, 12, '0', RF_M717, RF_C);
-            when 21 => return mu(RF_C, RF_ONE, 0, '0', RF_CLO, RF_C, post => 4);
-            when 22 => return mu(RF_TRI, RF_205, 15, '0', RF_C, RF_C);
-            when 23 => return mu(RF_C, RF_ONE, 0, '0', RF_ZERO, RF_CV, post => 1);
-            when 24 => return mu(RF_C, RF_ONE, 0, '0', RF_ZERO, RF_CP, post => 2);
-            -- size S (Q.10) = min(614 + 0.8 k2, 717 + 0.6 k2); recession R = min(2 k1, k1 + 512)
-            when 25 => return mu(RF_G2, RF_410, 11, '0', RF_614, RF_SLO);
-            when 26 => return mu(RF_G2, RF_307, 11, '0', RF_717, RF_S);
-            when 27 => return mu(RF_S, RF_ONE, 0, '0', RF_SLO, RF_S, post => 3);
-            when 28 => return mu(RF_G1, RF_ONE, 1, '0', RF_ZERO, RF_RLO);
-            when 29 => return mu(RF_G1, RF_ONE, 2, '0', RF_512, RF_R);
-            when 30 => return mu(RF_R, RF_ONE, 0, '0', RF_RLO, RF_R, post => 3);
-            when 31 => return mu(RF_S, RF_13115, 10, '0', RF_ZERO, RF_SH);
-            when 32 => return mu(RF_S, RF_R, 10, '0', RF_ZERO, RF_SR);
+            when 20 => return mu(RF_G12, RF_ONE, 1, '0', RF_ZERO, RF_CLO);
+            when 21 => return mu(RF_G12, RF_3482, 12, '0', RF_M717, RF_C);
+            when 22 => return mu(RF_C, RF_ONE, 0, '0', RF_CLO, RF_C, post => 4);
+            when 23 => return mu(RF_TRI, RF_205, 15, '0', RF_C, RF_C);
+            when 24 => return mu(RF_C, RF_ONE, 0, '0', RF_ZERO, RF_CV, post => 1);
+            when 25 => return mu(RF_C, RF_ONE, 0, '0', RF_ZERO, RF_CP, post => 2);
+            -- size S (Q.10) = min(338 + 1.34 k2, 425 + 1.17 k2): x0.33 .. x1 (k2 = 512) .. x1.58;
+            -- recession R = min(3 k1 - 512, 2 k1): -0.5 (front biggest) .. 1 (k1 = 512) .. 2
+            when 26 => return mu(RF_G2, RF_686, 11, '0', RF_338, RF_SLO);
+            when 27 => return mu(RF_G2, RF_599, 11, '0', RF_425, RF_S);
+            when 28 => return mu(RF_S, RF_ONE, 0, '0', RF_SLO, RF_S, post => 3);
+            when 29 => return mu(RF_G1, RF_THREE, 2, '0', RF_M512, RF_RLO);
+            when 30 => return mu(RF_G1, RF_ONE, 1, '0', RF_ZERO, RF_R);
+            when 31 => return mu(RF_R, RF_ONE, 0, '0', RF_RLO, RF_R, post => 3);
+            when 32 => return mu(RF_S, RF_13115, 10, '0', RF_ZERO, RF_SH);
+            when 33 => return mu(RF_R, RF_S, 10, '0', RF_ZERO, RF_SR);           -- R signed in A
             -- ink threshold, wall offset
-            when 33 => return mu(RF_K3, RF_230, 10, '0', RF_115, 0, O_HI);
-            when 34 => return mu(RF_K5, RF_220, 10, '0', RF_ZERO, 0, O_LO);
+            when 34 => return mu(RF_K3, RF_230, 10, '0', RF_115, 0, O_HI);
+            when 35 => return mu(RF_K5, RF_220, 10, '0', RF_ZERO, 0, O_LO);
             -- prints: T = 43 + 281 k^2 lines (Q.4), KT = 64 cols / T, row/column steps, origin
-            when 35 => return mu(RF_G4, RF_G4, 14, '0', RF_ZERO, RF_TQ);
-            when 36 => return mu(RF_TQ, RF_4496, 10, '0', RF_688, RF_T, O_T);
-            when 37 => return dv(RF_T, 22, RF_KT);
-            when 38 => return mu(RF_KT, RF_YS5, 11, '0', RF_ZERO, RF_KTV, bm => M_TID);
-            when 39 => return mu(RF_KT, RF_XS512, 10, '0', RF_ZERO, 0, O_KTR, bm => M_TID);
-            when 40 => return mu(RF_KT, RF_FIVE, 0, '0', RF_ZERO, RF_KT5);
-            when 41 => return mu(RF_X0G, RF_KT, 2, '1', RF_ZERO, RF_G0);
-            when 42 => return mu(RF_SC, RF_KT5, 9, '0', RF_ZERO, RF_VT0);
-            -- per copy
-            when 43 => return mu(RF_DH, RF_SR, 10, '1', RF_SH, RF_H, am => M_CI);
-            when 44 => return dv(RF_H, 26, RF_G);
-            when 45 => return mu(RF_G, RF_YS, 10, '0', RF_ZERO, RF_KV, bm => M_TID, dci => '1');
-            when 46 => return mu(RF_G, RF_KX, 11, '0', RF_ZERO, RF_KUC, O_KU, bm => M_TID);
-            when 47 => return mu(RF_DB, RF_CV, 10, '0', RF_BM, RF_TOP, am => M_CI);
-            when 48 => return mu(RF_H, RF_ONE, 0, '1', RF_TOP, RF_TOP);
-            when 49 => return mu(RF_TOP, RF_G, 5, '1', RF_ZERO, RF_V0, dci => '1', wide => '1');
-            when 50 => return mu(RF_H, RF_256, 10, '1', RF_WV16, RF_LEFT);
-            when 51 => return mu(RF_DX, RF_CP, 10, '0', RF_LEFT, RF_LEFT, am => M_CI);
-            when 52 => return mu(RF_LEFT, RF_RX, 12, '0', RF_ZERO, RF_LR, bm => M_TID);
+            when 36 => return mu(RF_G4, RF_G4, 14, '0', RF_ZERO, RF_TQ);
+            when 37 => return mu(RF_TQ, RF_4496, 10, '0', RF_688, RF_T, O_T);
+            when 38 => return dv(RF_T, 22, RF_KT);
+            when 39 => return mu(RF_KT, RF_YS5, 11, '0', RF_ZERO, RF_KTV, bm => M_TID);
+            when 40 => return mu(RF_KT, RF_XS512, 10, '0', RF_ZERO, 0, O_KTR, bm => M_TID);
+            when 41 => return mu(RF_KT, RF_FIVE, 0, '0', RF_ZERO, RF_KT5);
+            when 42 => return mu(RF_X0G, RF_KT, 2, '1', RF_ZERO, RF_G0);
+            when 43 => return mu(RF_SC, RF_KT5, 9, '0', RF_ZERO, RF_VT0);
+            -- orbit depth A = 11/8 max(|speed| - 128, 0) (0 at the default speed)
+            when 44 => return mu(RF_SPD, RF_ELEVEN, 3, '0', RF_ZERO, RF_AMP);
+            -- per copy: height (floored at 128.5 lines so 2^26 / H stays a signed 16-bit step)
+            when 45 => return mu(RF_SR, RF_DH, 10, '1', RF_SH, RF_H, bm => M_CI);
+            when 46 => return mu(RF_H, RF_ONE, 0, '0', RF_2056, RF_H, post => 4);
+            when 47 => return dv(RF_H, 26, RF_G);
+            when 48 => return mu(RF_G, RF_YS, 10, '0', RF_ZERO, RF_KV, bm => M_TID, dci => '1');
+            when 49 => return mu(RF_G, RF_KX, 11, '0', RF_ZERO, RF_KUC, O_KU, bm => M_TID);
+            when 50 => return mu(RF_DB, RF_CV, 10, '0', RF_BM, RF_TOP, am => M_CI);
+            when 51 => return mu(RF_H, RF_ONE, 0, '1', RF_TOP, RF_TOP);
+            -- orbit: top += A tri(phase + (ci + 1) quarters) / 4096, left += A tri(phase + ci quarters) / 1024
+            when 52 => return ld(L_TRC, RF_TV, 1);
+            when 53 => return mu(RF_TV, RF_AMP, 12, '0', RF_TOP, RF_TOP);
+            when 54 => return mu(RF_TOP, RF_G, 5, '1', RF_ZERO, RF_V0, dci => '1', wide => '1');
+            when 55 => return mu(RF_H, RF_256, 10, '1', RF_WV16, RF_LEFT);
+            when 56 => return mu(RF_DX, RF_CP, 10, '0', RF_LEFT, RF_LEFT, am => M_CI);
+            when 57 => return ld(L_TRC, RF_TV, 0);
+            when 58 => return mu(RF_TV, RF_AMP, 10, '0', RF_LEFT, RF_LEFT);
+            when 59 => return mu(RF_LEFT, RF_RX, 12, '0', RF_ZERO, RF_LR, bm => M_TID);
             when others => return mu(RF_LR, RF_KUC, 4, '1', RF_ZERO, RF_U0, dci => '1', wide => '1');
         end case;
     end function;
@@ -349,10 +369,10 @@ architecture triplicate of program_top is
     signal s_w : unsigned(10 downto 0) := to_unsigned(1920, 11);
     signal s_xc, s_xca : unsigned(10 downto 0) := to_unsigned(622, 11);
     signal s_spr, s_sp : signed(9 downto 0) := (others => '0');
-    signal s_order, s_cmy, s_fink, s_flip, s_osc : std_logic := '0';
     -- K6 camera (glided Q3); gain Q4 = k / 32 (16 = 1x): store level q -> 9 + (q - 9) cn, chroma c4 cn
     signal s_gk  : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_cn  : unsigned(4 downto 0) := to_unsigned(16, 5);
+    signal s_order, s_cmy, s_neg, s_flip, s_osc : std_logic := '0';
 
     ---------------------------------------------------------------------------
     -- register machine
@@ -374,6 +394,9 @@ architecture triplicate of program_top is
     signal r_t : unsigned(12 downto 0) := to_unsigned(1618, 13);
     signal r_ktr : unsigned(13 downto 0) := to_unsigned(2592, 14);
     signal r_tri : signed(15 downto 0) := (others => '0');
+    signal r_trc : signed(15 downto 0) := (others => '0');          -- tri(phase + (ci + b) quarters)
+    signal r_spd : unsigned(8 downto 0) := (others => '0');         -- max(|speed| - 128, 0)
+    signal r_sstep : signed(7 downto 0) := (others => '0');         -- wall scroll per field, Q.4 lines
     signal r_sc : signed(15 downto 0) := (others => '0');          -- wall scroll, Q.4 lines
     signal r_wb, r_sp : unsigned(15 downto 0) := (others => '0');
     signal r_ls : unsigned(12 downto 0) := (others => '0');
@@ -457,11 +480,17 @@ architecture triplicate of program_top is
         ts : std_logic;
     end record;
     constant C_SIDE0 : t_side := ("100", '0', '0', "0000", "0000", "00", '0');
-    type t_sidev is array (4 to 13) of t_side;
+    type t_sidev is array (4 to 9) of t_side;
     signal p_sd : t_sidev := (others => C_SIDE0);
     signal p_q0, p_q1, p_q2, p_q3 : unsigned(3 downto 0) := (others => '0');
-    type t_cq is array (6 to 13) of std_logic_vector(7 downto 0);
-    signal p_cq : t_cq := (others => (others => '0'));
+    signal p_cq6 : std_logic_vector(7 downto 0) := (others => '0');
+    -- S6 -> S13 fields through one block-RAM ring (delay 7): {ly, ts, cq} of stage 6 and tg of stage 5
+    -- come back as stage 13's {ly, ts, cq} and stage 12's tg
+    type t_ring is array (0 to 255) of std_logic_vector(15 downto 0);
+    signal r_pr : t_ring := (others => (others => '0'));
+    attribute no_rw_check of r_pr : signal is true;
+    signal s_prp : unsigned(7 downto 0) := (others => '0');
+    signal r_pr_q, r_pr_f : std_logic_vector(15 downto 0) := (others => '0');
     signal p_tl : unsigned(3 downto 0) := (others => '0');
     signal p_dt, p_dtl, p_ddt : signed(5 downto 0) := (others => '0');
     signal p_top8, p_dv8 : signed(10 downto 0) := (others => '0');
@@ -479,7 +508,11 @@ architecture triplicate of program_top is
     signal p_y15 : unsigned(9 downto 0) := to_unsigned(64, 10);
     -- conditioning
     type t_u8 is array (natural range <>) of unsigned(7 downto 0);
-    signal s_csu, s_csv : t_u8(0 to 8) := (others => to_unsigned(128, 8));
+    -- the chroma filter's 8-back tap through a block-RAM ring (delay 8)
+    signal r_cr : t_ring := (others => (others => '0'));
+    attribute no_rw_check of r_cr : signal is true;
+    signal s_crp : unsigned(7 downto 0) := (others => '0');
+    signal r_cr_q, r_cr_f : std_logic_vector(15 downto 0) := (others => '0');
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(10 downto 0) := to_unsigned(1024, 11);
     signal s_gsr : std_logic_vector(0 to 12) := (others => '0');   -- generated avid delayed 1..13 (s_gsr(12): stage-14 pixel)
     signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
@@ -595,6 +628,20 @@ begin
             s_dly(to_integer(s_dwp)) <= data_in.hsync_n & data_in.vsync_n & data_in.field_n & g_avid;
         end if;
     end process;
+    p_rpr : process(clk)
+    begin
+        if rising_edge(clk) then
+            r_pr_q <= r_pr(to_integer(s_prp));
+            r_pr(to_integer(s_dwp)) <= "00" & std_logic_vector(p_sd(6).ly) & p_sd(6).ts & p_cq6 & std_logic_vector(p_sd(5).tg);
+        end if;
+    end process;
+    p_rcr : process(clk)
+    begin
+        if rising_edge(clk) then
+            r_cr_q <= r_cr(to_integer(s_crp));
+            r_cr(to_integer(s_dwp)) <= std_logic_vector(p_u15(9 downto 2)) & std_logic_vector(p_v15(9 downto 2));
+        end if;
+    end process;
     p_orom : process(clk)
     begin
         if rising_edge(clk) then
@@ -664,7 +711,7 @@ begin
                 s_sp <= s_spr;
                 s_order <= registers_in(6)(0);
                 s_cmy   <= registers_in(6)(1);
-                s_fink  <= registers_in(6)(2);
+                s_neg   <= registers_in(6)(2);
                 s_flip  <= registers_in(6)(3);
                 s_osc   <= registers_in(6)(4);
                 if s_wmax /= 0 then s_w <= s_wmax(10 downto 0); end if;
@@ -678,6 +725,8 @@ begin
             -- then two registers (delay 20, 21 = C_LAT)
             s_dwp <= s_dwp + 1;
             s_drp <= s_dwp - 17;
+            s_prp <= s_dwp - 4;                 -- reads 5 back: RAM register + fabric register = 7
+            s_crp <= s_dwp - 5;                 -- reads 6 back: = 8
             s_dg <= s_dq; s_do <= s_dg;
         end if;
     end process p_ctrl;
@@ -696,16 +745,39 @@ begin
         variable v_sc : signed(16 downto 0);
         variable v_end : std_logic;
         variable v_d : unsigned(7 downto 0);
+        variable v_qd : unsigned(1 downto 0);
+        variable v_a : signed(15 downto 0);
+        variable v_ab : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             if r_sp(15) = '1' then v_tri := r_sp - 32768; else v_tri := 32768 - r_sp; end if;
             r_tri <= signed(v_tri) - 16384;
+            -- the copy's orbit phase: the same triangle, (ci + b) quarter-cycles on
+            -- (by quadrant: 16384 - a, -a, a - 16384, a with a = the phase within the quadrant)
+            v_qd := r_sp(15 downto 14) + q_ci;
+            if q_uc.b mod 2 = 1 then v_qd := v_qd + 1; end if;
+            v_a := signed(resize(r_sp(13 downto 0), 16));
+            case v_qd is
+                when "00"   => r_trc <= 16384 - v_a;
+                when "01"   => r_trc <= -v_a;
+                when "10"   => r_trc <= v_a - 16384;
+                when others => r_trc <= v_a;
+            end case;
+            if s_sp(9) = '1' then v_ab := unsigned(-resize(s_sp, 10)); else v_ab := unsigned(s_sp); end if;
+            if v_ab > 128 then r_spd <= resize(v_ab - 128, 9); else r_spd <= (others => '0'); end if;
+            -- the wall's scroll step (speed / 64, plus the race past the default speed), registered ahead
+            if s_sp(9) = '1' then
+                r_sstep <= resize(shift_right(s_sp, 6), 8) - signed(resize(r_spd(8 downto 3), 8));
+            else
+                r_sstep <= resize(shift_right(s_sp, 6), 8) + signed(resize(r_spd(8 downto 3), 8));
+            end if;
             q_done <= '0'; rf_we <= '0'; m_wr <= '0'; m_wr2 <= m_wr and q_uc.wide;
 
             if s_zgo = '1' then
                 q_run <= '1'; q_st <= (others => '0'); q_ci <= (others => '0'); q_cnt <= (others => '0');
-                -- motion: wall scroll (Q.4 lines, wraps one print), breathing phase, Osc logo
-                v_sc := resize(r_sc, 17) + resize(shift_right(s_sp, 6), 17);
+                -- motion: wall scroll (Q.4 lines, wraps one print; past the default speed it races, up to
+                -- ~3 lines a field more), breathing phase, Osc logo
+                v_sc := resize(r_sc, 17) + resize(r_sstep, 17);
                 if v_sc >= signed(resize(r_t, 17)) then
                     r_sc <= resize(v_sc - signed(resize(r_t, 17)), 16); r_wb <= r_wb + C_KR;
                 elsif v_sc < 0 then
@@ -721,7 +793,8 @@ begin
                 if q_cnt = 0 then
                     q_uc <= f_uc(q_st);
                 elsif q_uc.op = 2 then
-                    if q_cnt = 1 then
+                    -- (written at cnt 2: r_trc follows this step's phase offset one clock after cnt 0)
+                    if q_cnt = 2 then
                         case q_uc.a is
                             when L_T12 => v_l := signed(resize(unsigned(registers_in(7)) & "00", 16));
                             when L_T1  => v_l := signed(resize(unsigned(registers_in(0)) & "00", 16));
@@ -731,6 +804,8 @@ begin
                             when L_K5  => v_l := signed(resize(unsigned(C_KFIX_5), 16));
                             when L_W   => v_l := signed(resize(s_w, 16));
                             when L_TRI => v_l := r_tri;
+                            when L_SPD => v_l := signed(resize(r_spd, 16));
+                            when L_TRC => v_l := r_trc;
                             when others => v_l := r_sc;
                         end case;
                         rf_we <= '1'; rf_wa <= to_unsigned(q_uc.d, 8); rf_wd <= std_logic_vector(v_l);
@@ -1143,11 +1218,11 @@ begin
             b_ra3 <= p_r03(6 downto 1) & p_c03(6 downto 1);
             c_ra <= p_r03(6 downto 2) & p_c03(6 downto 2);
             p_sd(4) <= (ly => p_ly3, cp => p_c03(0), rp => p_r03(0), fx => p_fx3, fy => p_fy3, tg => p_tg3, ts => p_tsm3);
-            for k in 5 to 13 loop p_sd(k) <= p_sd(k - 1); end loop;
+            for k in 5 to 9 loop p_sd(k) <= p_sd(k - 1); end loop;
             -- S5: RAM output registers.  S6: fabric copies
             p_q0 <= unsigned(b_q0); p_q1 <= unsigned(b_q1); p_q2 <= unsigned(b_q2); p_q3 <= unsigned(b_q3);
-            p_cq(6) <= c_q;
-            for k in 7 to 13 loop p_cq(k) <= p_cq(k - 1); end loop;
+            p_cq6 <= c_q;
+            r_pr_f <= r_pr_q; r_cr_f <= r_cr_q;
 
             -- S7: corners by parity; differences for both lerps
             if p_sd(6).rp = '0' then
@@ -1169,7 +1244,12 @@ begin
             if v_d < 0 then p_l9 <= (others => '0'); else p_l9 <= unsigned(v_d(11 downto 4)); end if;
             -- S10: density 2 (HI - L8) clamped; palette index
             if p_lfsr(0) = '1' then p_lfsr <= shift_right(p_lfsr, 1) xor x"B400"; else p_lfsr <= shift_right(p_lfsr, 1); end if;
-            v_dx := signed(resize(r_hi, 11)) - signed(resize(p_l9, 11));
+            -- (Print Negative: the copies' density from the inverted luma; the original stays positive)
+            if s_neg = '1' then
+                v_dx := signed(resize(r_hi, 11)) - signed(resize(not p_l9, 11));
+            else
+                v_dx := signed(resize(r_hi, 11)) - signed(resize(p_l9, 11));
+            end if;
             if v_dx < 0 then p_dd10 <= (others => '0');
             elsif v_dx >= 128 then p_dd10 <= (others => '1');
             else p_dd10 <= unsigned(v_dx(6 downto 0)) & '0'; end if;
@@ -1177,7 +1257,7 @@ begin
                 when "000" => if s_order = '1' then v_ix := "010"; else v_ix := "000"; end if;
                 when "001" => v_ix := "001";
                 when "010" => if s_order = '1' then v_ix := "000"; else v_ix := "010"; end if;
-                when "011" => if s_fink = '1' then v_ix := "110"; else v_ix := "111"; end if;
+                when "011" => if s_cmy = '1' then v_ix := "110"; else v_ix := "111"; end if;   -- CMYK: black plate
                 when others => v_ix := "111";
             end case;
             if s_cmy = '1' and v_ix(2 downto 1) /= "11" then v_ix := v_ix + 3; end if;
@@ -1197,19 +1277,19 @@ begin
             p_ph12 <= C_PALH(to_integer(p_pa11)); p_pl12 <= C_PALL(to_integer(p_pa11));
             p_ph13 <= p_ph12; p_pl13 <= p_pl12;
             -- (S13) the wall's luma offset: Wall + print exposure - 24
-            p_wo13 <= signed(resize(r_lo, 12)) + signed(resize(shift_left(resize(p_sd(12).tg, 6), 4), 12)) - 24;
+            p_wo13 <= signed(resize(r_lo, 12)) + signed(resize(shift_left(resize(unsigned(r_pr_f(1 downto 0)), 6), 4), 12)) - 24;
             -- S14: compose. Wall = 7/8 of the luma ramp + the offset; chroma final (front colour
             -- 512 + 32 cq stays inside 256..736, palette entries are in range: no clamps)
             v_y := signed(resize(unsigned(p_ph13(15 downto 6)), 21));
             p_yr14 <= unsigned(p_ph13(15 downto 6));
             p_yw14 <= resize(v_y - shift_right(v_y, 3), 12) + p_wo13;
-            p_ts14 <= p_sd(13).ts;
-            if p_sd(13).ly = "100" then p_wl14 <= '1'; else p_wl14 <= '0'; end if;
-            if p_sd(13).ly = "100" then
+            p_ts14 <= r_pr_f(10);
+            if r_pr_f(13 downto 11) = "100" then p_wl14 <= '1'; else p_wl14 <= '0'; end if;
+            if r_pr_f(13 downto 11) = "100" then
                 p_u14 <= to_unsigned(512, 10); p_v14 <= to_unsigned(512, 10);
-            elsif p_sd(13).ly = "011" and s_fink = '0' then
-                v_u := to_signed(512, 21) + shift_left(resize(signed(p_cq(13)(7 downto 4)), 21), 5);
-                v_v := to_signed(512, 21) + shift_left(resize(signed(p_cq(13)(3 downto 0)), 21), 5);
+            elsif r_pr_f(13 downto 11) = "011" and s_cmy = '0' then
+                v_u := to_signed(512, 21) + shift_left(resize(signed(r_pr_f(9 downto 6)), 21), 5);
+                v_v := to_signed(512, 21) + shift_left(resize(signed(r_pr_f(5 downto 2)), 21), 5);
                 p_u14 <= unsigned(v_u(9 downto 0)); p_v14 <= unsigned(v_v(9 downto 0));
             else
                 p_u14 <= unsigned(p_ph13(5 downto 0)) & unsigned(p_pl13(15 downto 12));
@@ -1235,13 +1315,11 @@ begin
 
             -- 16..21: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent 8-sums
             -- on 8-bit chroma, luma [1 2 1]); 22: luma toward black (white 940 -> 777), the gate
-            s_csu(0) <= p_u15(9 downto 2); s_csv(0) <= p_v15(9 downto 2);
-            for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
             if s_bxh = "00000000" then
                 s_boxu <= to_unsigned(1024, 11); s_boxv <= to_unsigned(1024, 11);
             else
-                s_boxu <= s_boxu + resize(p_u15(9 downto 2), 11) - resize(s_csu(7), 11);
-                s_boxv <= s_boxv + resize(p_v15(9 downto 2), 11) - resize(s_csv(7), 11);
+                s_boxu <= s_boxu + resize(p_u15(9 downto 2), 11) - resize(unsigned(r_cr_f(15 downto 8)), 11);
+                s_boxv <= s_boxv + resize(p_v15(9 downto 2), 11) - resize(unsigned(r_cr_f(7 downto 0)), 11);
             end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 12) + s_boxud; s_u21x <= v_sc(11 downto 2);

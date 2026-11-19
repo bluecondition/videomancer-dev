@@ -2,18 +2,20 @@
 # A four-fold mirror kaleidoscope of a fitted source pattern: white and grey bowties,
 # CMYK chevrons, diamond rings, sawtooth teeth, a feathered grey X and a yellow starburst.
 # See starburst.vhd and SUMMARY.md.
+# v0.6.0 (phase-2 diag): exponential Cells / Bands / Teeth, K4 swings the mirrors past the
+# photo speed, K5 bends the mirrors past 50 %, S7 Teeth Saw / Square, Source moved to S11.
 
 [program]
 processing_delay_clks = 36
 program_id = "com.czartroniks.starburst"
 program_name = "Starburst"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mirror", "Pattern", "Illusion"]
 program_type = "processing"
-description = "Mirror kaleidoscope of grey bowties and CMYK chevrons with sawtooth teeth and a yellow starburst; the picture bends the bands."
+description = "Mirror kaleidoscope of grey bowties and CMYK chevrons with sawtooth teeth; the picture bends the bands and the mirrors."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -21,31 +23,31 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Cells"
 control_mode = "linear"
-display_min_value = 2
-display_max_value = 8
-initial_value = 477
-display_float_digits = 1
+display_min_value = -100
+display_max_value = 100
+initial_value = 570
+display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 name_label = "Bands"
 control_mode = "linear"
-display_min_value = 50
-display_max_value = 300
-initial_value = 667
+display_min_value = -100
+display_max_value = 100
+initial_value = 791
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Teeth"
 control_mode = "linear"
-display_min_value = 50
-display_max_value = 200
-initial_value = 290
+display_min_value = -100
+display_max_value = 100
+initial_value = 483
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -75,9 +77,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Centre"
-value_labels = ["Grey X", "White X"]
-initial_value_label = "Grey X"
+name_label = "Teeth"
+value_labels = ["Saw", "Square"]
+initial_value_label = "Saw"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -87,9 +89,9 @@ initial_value_label = "Grey"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Source"
-value_labels = ["Video", "Osc"]
-initial_value_label = "Video"
+name_label = "Mirror"
+value_labels = ["Fold", "Tile"]
+initial_value_label = "Fold"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -99,9 +101,9 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Mirror"
-value_labels = ["Fold", "Tile"]
-initial_value_label = "Fold"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -129,10 +131,29 @@ rotary_potentiometer_4 = 760
 [[preset]]
 name = "Drifting Glass"
 toggle_switch_10 = 1
-rotary_potentiometer_1 = 200
+rotary_potentiometer_1 = 417
 rotary_potentiometer_5 = 384
 
 [[preset]]
 name = "Carved Face"
-rotary_potentiometer_6 = 900
-rotary_potentiometer_2 = 330
+rotary_potentiometer_6 = 880
+rotary_potentiometer_2 = 610
+
+[[preset]]
+name = "Giant X"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 380
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Kaleido Swing"
+rotary_potentiometer_4 = 990
+toggle_switch_10 = 1
+rotary_potentiometer_1 = 600
+
+[[preset]]
+name = "Castle"
+toggle_switch_7 = 1
+rotary_potentiometer_3 = 160
+linear_potentiometer_12 = 820
+rotary_potentiometer_1 = 380

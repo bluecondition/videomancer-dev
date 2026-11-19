@@ -1,18 +1,20 @@
-# Vesica - Heirloom #13, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230307_01_04_17.
+# Vesica - Heirloom #13, v0.6.0 (2026-11-09, phase-2 diag): rebuilt from the photo WIN_20230307_01_04_17.
 # An orange vesica eye, flame-torn on its right edge, with crescents above and below, a brown plate
-# joining its side copies, on a pastel X lattice.  See vesica.vhd and SUMMARY.md.
+# joining its side copies, on a pastel X lattice.  Phase 2: wider element ranges (lattice axes,
+# bands, stripes, crescent width + distance), copies crowding at a low Eye, the camera pushing the
+# eye above the default Etch.  See vesica.vhd and SUMMARY.md.
 
 [program]
 processing_delay_clks = 24
 program_id = "com.czartroniks.vesica"
 program_name = "Vesica"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Pattern", "Glitch"]
 program_type = "processing"
-description = "Orange vesica eye with flame-torn edges and crescents on a pastel X lattice; the camera bends the bands."
+description = "Orange vesica eye, flame-torn, with crescents on a pastel X lattice; knobs reshape each element, the camera bends it."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -120,30 +122,40 @@ suffix_label = "%"
 name = "Photo"
 
 [[preset]]
+name = "Row of Slits"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 700
+
+[[preset]]
 name = "Wide Eye"
 linear_potentiometer_12 = 1023
 rotary_potentiometer_5 = 720
 
 [[preset]]
-name = "Slit"
-linear_potentiometer_12 = 0
-rotary_potentiometer_3 = 220
-rotary_potentiometer_4 = 820
+name = "Hairlines"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 150
 
 [[preset]]
-name = "Azure Osc"
+name = "Fat Bands"
+rotary_potentiometer_1 = 120
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 900
+
+[[preset]]
+name = "Embrace"
+rotary_potentiometer_4 = 1023
+linear_potentiometer_12 = 620
+
+[[preset]]
+name = "Camera Eye"
+rotary_potentiometer_6 = 1023
+rotary_potentiometer_5 = 600
+
+[[preset]]
+name = "Azure Storm"
 toggle_switch_10 = 1
-toggle_switch_11 = 1
-rotary_potentiometer_6 = 700
-
-[[preset]]
-name = "Storm"
 rotary_potentiometer_5 = 1000
-rotary_potentiometer_2 = 820
 rotary_potentiometer_6 = 800
-
-[[preset]]
-name = "Twins"
-toggle_switch_8 = 1
-rotary_potentiometer_1 = 300
-rotary_potentiometer_3 = 700
+rotary_potentiometer_3 = 120

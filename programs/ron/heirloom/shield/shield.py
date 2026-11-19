@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-SHIELD v0.5.0 - build hook.  Writes shield_pkg.vhd next to this file (pure python: the builder runs it
+SHIELD v0.6.0 (phase-2 diag; tables unchanged from v0.5) - build hook.  Writes shield_pkg.vhd next to this file (pure python: the builder runs it
 with the system python3).
 
 Fitted to the photo WIN_20230529_22_56_41 (see .heirloom_work/rb_shield/notes.md and gfit.json):

@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-VESICA v0.5.0 - build hook.  Writes vesica_pkg.vhd next to this file.
+VESICA v0.6.0 (phase-2 diag) - build hook.  Writes vesica_pkg.vhd next to this file.
 
 Fitted to the photo WIN_20230307_01_04_17 (see SUMMARY.md):
   * pastel lattice  F = A(x) + 1.03 B(y) - 1.05,  A = |1 - 2 frac((x - 971.96) / 966.03)| with a soft
@@ -24,9 +24,9 @@ Package contents:
   C_VES_KNEE  256 x 12: the A-ramp top knee: corrected A (Q12) over its top 9 %.
   C_VES_GLT   1024 x 8: lattice glitch notches over two vertical periods (depth x 256).
   C_VES_ROWS  1024 x 12: line-row phase n(a) + 64, Q4 (a = |y - cy| in virtual lines).
-  C_VES_CRES  128 x 24: crescent colour by {bottom, a / 8}.
+  C_VES_CRES  256 x 24: crescent colour by {bottom, a / 8}; entries 128.. the K4 words (k4_word).
   C_VES_KH    256 x 16: K1 lattice phase step; C_VES_IL 256 x 16: K3 1 / stripe pitch;
-  C_VES_K26   512 x 8: K2 palette gain {shift, mantissa} | K6 video gain;
+  C_VES_K26   512 x 8: K2 palette gain {shift, mantissa} | K6 {lens etch (2), video gain exp (3), mantissa (3)};
   C_VES_EYE0..4  5 x 256 x 16: P12 lens geometry (R^2, tip, half-height, plate, fold period).
   C_VES_KQ    the crescent shoulder (56 - t)^2 / 224; C_VES_TV_* / TC_* edge and zone thresholds on
               (rho^2 - R^2) at the photo's radii; C_VES_RC2 the crescent circle's R^2; C_VES_<colour>
@@ -180,6 +180,15 @@ def cres_rom():
     return out
 
 
+def k4_word(g4):
+    """K4 Crescents (read in vblank from the crescent ROM's upper half, entry 128 + g4 / 8):
+    width cs = 0 .. 256 (the photo, 50 %) linear, then to 3x; the crescent family's distance
+    dC (Q4 lines, the photo 15645): out 96 px at 0 .. in 192 px at 100 %.  Word {dC (15), cs / 2 (9)}."""
+    cs = (g4 >> 1) if g4 <= 512 else g4 - 256
+    dC = 15645 + 6 * (g4 - 512) if g4 >= 512 else 15645 - 1536 + 3 * g4
+    return (dC << 9) | (cs >> 1)
+
+
 def exp_rom():
     return [int(round(32768 * 2 ** (-i / 256.0))) for i in range(256)]
 
@@ -221,9 +230,10 @@ def kq_rom():
 
 # ------------------------------------------------------------------ knob ROMs (glided knob >> 2)
 def e2v(x):
+    """32768 x 2^(-x / 256) for x in -768 .. 767."""
     e = exp_rom()[x & 255]
     n = x >> 8
-    return e >> 1 if n == 1 else (e << 1 if n == -1 else (e << 2 if n == -2 else e))
+    return e << -n if n < 0 else e >> n
 
 
 def s10(v):
@@ -232,8 +242,10 @@ def s10(v):
 
 
 def kh_rom():
-    """K1 Lattice: the lattice phase step per half-pixel, 2^24 / (966 px x scale) / 2."""
-    return [(e2v(s10((4 * i - 512) >> 1)) * 8684 >> 15) & 0x7FFF for i in range(256)]
+    """K1 Lattice: the lattice phase step per half-pixel, 2^24 / (966 px x scale) / 2, scale x4 .. x1/4
+    (two octaves each way).  The horizontal oscillator reads entry i (glided K1 >> 2); the vertical one
+    reads entry 64 + i / 2, i.e. the same curve at half the rate (x2 .. x1/2, the v0.5 K1)."""
+    return [(e2v(4 * i - 512) * 8684 >> 15) & 0xFFFF for i in range(256)]
 
 
 def invl_rom():
@@ -241,8 +253,8 @@ def invl_rom():
     out = []
     for i in range(256):
         u3 = 4 * i - 512
-        x3 = (u3 * 150) >> 8 if u3 >= 0 else (u3 * 200) >> 8
-        out.append((e2v(s10(x3)) * 923 >> 15) & 0xFFF)
+        x3 = u3 if u3 >= 0 else (u3 * 657) >> 9          # pitch 12 .. 71 (the photo, 50 %) .. 281 px
+        out.append((e2v(x3) * 923 >> 15) & 0x1FFF)
     return out
 
 
@@ -251,17 +263,24 @@ def k26_rom():
     out = []
     for i in range(256):
         g2 = 4 * i
-        gq = (e2v(s10((((g2 - 512) << 7) + ((g2 - 512) << 4) + ((g2 - 512) << 1)) >> 8)) * 1600 >> 15) & 0xFFF
-        if gq >= 2048: m, e = gq >> 7, 2
+        gq = e2v(g2 - 512) * 1600 >> 15                    # x4 (hairlines) .. x1 (50 %) .. x1/4 (fat)
+        if gq >= 4096: m, e = gq >> 8, 3
+        elif gq >= 2048: m, e = gq >> 7, 2
         elif gq >= 1024: m, e = gq >> 6, 1
         else: m, e = gq >> 5, 0
         out.append((e << 5) | (m & 31))
     for i in range(256):
         g6 = 4 * i
-        ge = (g6 * g6 * 230 >> 20) & 0xFF
+        if i <= 100:                                        # 0 .. 400 (the default): the v0.5 curve
+            ge = (g6 * g6 * 230 >> 20) & 0xFF
+        else:                                               # above: steeper, to 900 (x25 the default)
+            ge = 35 + (865 * (i - 100) ** 2) // (155 ** 2)
         e = 0
         while ge >> e > 7: e += 1
-        out.append((e << 3) | (ge >> e))
+        # above the default the camera also pushes the eye's outline: (luma - 128) << (lens + 0) in
+        # (rho^2 - R^2) / 128 units, lens 0 = off, 1 .. 3 = +-20 / 40 / 81 px at the photo's radius
+        lens = 0 if i <= 100 else 1 + min(2, (i - 101) * 3 // 155)
+        out.append((lens << 6) | (e << 3) | (ge >> e))
     return out
 
 
@@ -271,7 +290,7 @@ def eye(gp):
     Rv16 = 10645 + h16
     Rv2 = (Rv16 * Rv16 >> 8) & 0xFFFFF
     tipX = math.isqrt(max(Rv2 - 442624, 0))
-    m = max(79, ((tipX + 25) * 10923 >> 16) & 0x1FF)
+    m = max(M_MIN, ((tipX + 25) * 10923 >> 16) & 0x1FF)   # v0.5 floored this at 79 (period 948 px)
     ch2 = (((h16 * h16) >> 2) * 670 >> 22) & 0x3FF
     wh16 = (h16 + ch2 + (((ch2 * h16) * 1340 >> 24) & 0x1FF)) & 0x1FFF
     bar16 = (wh16 * 113 >> 8) & 0xFFF
@@ -280,15 +299,18 @@ def eye(gp):
     return dict(h16=h16, Rv2=Rv2, tipX=tipX, m=m, wh16=wh16, bar16=bar16, D016=D016, AX2=AX2)
 
 
+M_MIN = 35          # the lens fold period 24 (mq + 35) half-px: 420 px at P12 0 % .. 948 (the photo) .. 1416
+
+
 def eye_roms():
     w = [[], [], [], [], []]
     for i in range(256):
-        e = eye(4 * i); mq = e['m'] - 79
+        e = eye(4 * i); mq = e['m'] - M_MIN
         w[0].append(e['Rv2'] & 0xFFFF)
         w[1].append(((e['Rv2'] >> 16) << 12) | (e['AX2'] << 1) | (mq & 1))
         w[2].append((e['wh16'] << 3) | ((mq >> 1) & 7))
         w[3].append((e['bar16'] << 4) | (((mq >> 4) & 3) << 2))
-        w[4].append(e['D016'] << 1)
+        w[4].append((e['D016'] << 1) | ((mq >> 6) & 1))
     return w
 
 
@@ -313,7 +335,7 @@ def write_pkg():
     arr("C_VES_KNEE", knee12_rom(), 12, 256)
     arr("C_VES_GLT", glitch_rom(), 8, 1024)
     arr("C_VES_ROWS", rows_rom(), 12, 1024)
-    arr("C_VES_CRES", [(y << 16) | (u << 8) | v for (y, u, v) in cres_rom()], 24, 128)
+    arr("C_VES_CRES", [(y << 16) | (u << 8) | v for (y, u, v) in cres_rom()] + [k4_word(8 * j) for j in range(128)], 24, 256)
     arr("C_VES_KH", kh_rom(), 16, 256)
     arr("C_VES_IL", invl_rom(), 16, 256)
     arr("C_VES_K26", k26_rom(), 8, 512)

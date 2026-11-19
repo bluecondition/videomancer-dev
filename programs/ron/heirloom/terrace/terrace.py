@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-TERRACE v0.5.0 - build hook.  Emits terrace_pkg.vhd (pure Python, no dependencies).
+TERRACE v0.6.0 (phase-2 diag) - build hook.  Emits terrace_pkg.vhd (pure Python, no dependencies).
 
 The tables were fitted to the source photo (WIN_20230305_23_38_39) in .heirloom_work/rb_terrace
 (fit_fb.py / shape.py / gen_tables.py) and are carried here as data:

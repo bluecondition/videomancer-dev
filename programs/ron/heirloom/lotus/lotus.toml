@@ -1,12 +1,14 @@
-# Lotus - Heirloom #33, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230515_23_23_36.
+# Lotus - Heirloom #33, v0.6.0 (2026-11-02, phase 2 diag): rebuilt from the photo WIN_20230515_23_23_36.
 # Two orange/green contour eyes over a zigzag band and pink-white cushions on green, a stuttering
-# sync staircase at the left edge.  See lotus.vhd and SUMMARY.md.
+# sync staircase at the left edge.  Phase 2: Lobes sets the eyes only (the cushions keep their own
+# oscillator), Stutter to 4x, Ripple spreads over the field, the camera swells the cushions, S8 Pair,
+# Rings to 4x.  See lotus.vhd and SUMMARY.md.
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.lotus"
 program_name = "Lotus"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -85,7 +87,7 @@ initial_value_label = "Photo"
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Mirror"
-value_labels = ["Off", "On"]
+value_labels = ["Off", "Pair"]
 initial_value_label = "Off"
 
 [[parameter]]
@@ -117,7 +119,7 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Lotus"
+name = "Photo"
 
 [[preset]]
 name = "Broad Petals"
@@ -138,3 +140,19 @@ name = "Night Eyes"
 rotary_potentiometer_1 = 760
 toggle_switch_7 = 1
 toggle_switch_10 = 1
+
+[[preset]]
+name = "Facing Eyes"
+rotary_potentiometer_1 = 380
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Ripple Field"
+rotary_potentiometer_5 = 960
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Sync Storm"
+rotary_potentiometer_1 = 820
+rotary_potentiometer_2 = 1000
+rotary_potentiometer_4 = 820

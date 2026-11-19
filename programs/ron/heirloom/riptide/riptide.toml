@@ -4,16 +4,16 @@
 # See riptide.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 28
+processing_delay_clks = 26
 program_id = "com.czartroniks.riptide"
 program_name = "Riptide"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mirror", "Glitch", "Color"]
 program_type = "processing"
-description = "Mirrored psychedelic swirl band torn into sliding strips between blue fingerprint textures; Rip on the slider."
+description = "Mirrored swirl band torn into sliding strips between blue fingerprint columns; Rip on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -29,7 +29,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Ridges"
+name_label = "Columns"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -92,7 +92,7 @@ initial_value_label = "Off"
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Palette"
-value_labels = ["Photo", "Opposite"]
+value_labels = ["Photo", "Prism"]
 initial_value_label = "Photo"
 
 [[parameter]]
@@ -118,7 +118,7 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Riptide"
+name = "Photo"
 
 [[preset]]
 name = "Calm Water"
@@ -140,3 +140,21 @@ name = "Twin Rivers"
 toggle_switch_10 = 1
 rotary_potentiometer_1 = 420
 rotary_potentiometer_3 = 340
+
+[[preset]]
+name = "Prism Slide"
+toggle_switch_9 = 1
+rotary_potentiometer_4 = 860
+rotary_potentiometer_1 = 760
+
+[[preset]]
+name = "Pinstripes"
+rotary_potentiometer_2 = 1000
+rotary_potentiometer_5 = 680
+rotary_potentiometer_4 = 380
+
+[[preset]]
+name = "Broad Tide"
+rotary_potentiometer_2 = 40
+rotary_potentiometer_4 = 1000
+linear_potentiometer_12 = 600

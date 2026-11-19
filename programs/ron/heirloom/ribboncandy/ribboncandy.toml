@@ -7,13 +7,13 @@
 processing_delay_clks = 16
 program_id = "com.czartroniks.ribboncandy"
 program_name = "Ribboncandy"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Curve", "Pattern", "Pixel"]
 program_type = "processing"
-description = "Twisted green/blue ribbons S-curving down a sample-and-hold cell mosaic, with magenta/red thin ribbons. Wave on the slider."
+description = "Twisted green/blue ribbons S-curving down a sample-and-hold cell mosaic; ribbon widths, weave, mirror. Wave on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -76,7 +76,7 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Faces"
-value_labels = ["Twist", "Solid"]
+value_labels = ["Twist", "Cells"]
 initial_value_label = "Twist"
 
 [[parameter]]
@@ -88,14 +88,14 @@ initial_value_label = "Cells"
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Kinks"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+value_labels = ["Photo", "All"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Flip"
-value_labels = ["Down", "Up"]
-initial_value_label = "Down"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -114,19 +114,41 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
+
+[[preset]]
+name = "Wrapper"
+toggle_switch_10 = 1
+linear_potentiometer_12 = 720
+
+[[preset]]
+name = "Weave"
+rotary_potentiometer_4 = 960
+toggle_switch_11 = 1
+
+[[preset]]
+name = "Scatter"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_5 = 820
+
+[[preset]]
+name = "Zigzag"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Mosaic Faces"
+toggle_switch_7 = 1
+toggle_switch_8 = 1
 
 [[preset]]
 name = "Straight"
 linear_potentiometer_12 = 0
+rotary_potentiometer_1 = 200
 
 [[preset]]
 name = "Whiplash"
 linear_potentiometer_12 = 1023
-rotary_potentiometer_4 = 800
-
-[[preset]]
-name = "Candy Shop"
-rotary_potentiometer_1 = 760
-rotary_potentiometer_5 = 300
-toggle_switch_11 = 1
+rotary_potentiometer_4 = 1000
+toggle_switch_9 = 1
+toggle_switch_10 = 1

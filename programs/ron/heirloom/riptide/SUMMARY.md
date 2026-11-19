@@ -1,8 +1,67 @@
 # Riptide — a torn, mirrored swirl band, Heirloom #15
 
-**v0.5.0 (2026-10-27): rebuilt from the photo, built, NOT flashed.** Source photo:
-`photos/WIN_20230309_00_28_35_Pro.jpg` (1920×1080 capture, 2023-03-09). Replaces v0.1.0 (a smeared band over
-speckles), which Ron judged too abstract. Presets are hand-written placeholders.
+**v0.6.2 (2026-11-19): phase 2 FINAL — Ron prefers the diag in every case, so it is merged into production** (`out/rev_b/ron/heirloom/riptide.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; this exact build not flashed). It is the phase-2 round plus the K6 camera pass; status lines below that say "diag" or "production untouched" are history. The replaced v0.5.3 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`.
+
+**v0.6.0 (2026-11-03, phase 2): diag preview built, awaiting Ron's preview** (`Riptide Diag`,
+`out/rev_b/ron/_diag/riptide_diag_v0.6.0.vmprog`, copy in `out/rev_b/ron/heirloom/_diag/`). Production v0.5.1
+(`programs/ron/heirloom/riptide/`) is untouched. Phase-2 working files: `.heirloom_work/rb_riptide/p2/`.
+v0.5.0 (2026-10-27): rebuilt from the photo `photos/WIN_20230309_00_28_35_Pro.jpg` (1920×1080 capture,
+2023-03-09), built, NOT flashed.
+
+## Phase 2 (v0.6.0)
+Ron left no notes for riptide (free hand, 2026-11-03 batch). This round follows the phase-2 brief:
+- groups of shapes get their own parameters;
+- the near-dead K6 is re-assigned and the redundant S9 replaced;
+- nothing new moves at the defaults.
+
+v0.5.1 was 99 % LC. The new features are paid for by moving per-field arithmetic and pixel delay chains into
+existing machinery, and the diag ends ~150 LC smaller than production. The defaults draw the v0.5 picture.
+
+| Was (v0.5) | Now (v0.6.0) | Full sweep in screen terms |
+|---|---|---|
+| K4 Speed: bipolar, still at the centre: hue drift, ridge crawl, column drift. The strips slid only when P12 was above 50 % | **+ past its default the strips slide apart by themselves.** Each of the seven mirrored strips swings on its own triangle oscillator (v0.5's), at its own rate and phase, with amplitude \|speed\| − 128 px. This adds to Rip's slide | No slide anywhere in 376..648 (default 640 = the photo). 52 px at 700, 152 at 800, 252 at 900, ±376 px (±20 % of the width) at either end. Strip periods are 0.2..0.45 s at full speed and 0.5..1.25 s at 700. With P12 at 100 %, up to ±675 px |
+| K2 Ridges: ridge spacing 0.37..2.4× in 16 steps (0 % and 50 % looked almost the same) | **K6 Columns: the period of the texture's crimson-beaded columns.** Exponential, 4× wider .. ¼, smooth (0.4 % steps, glided), scaled about the screen centre. 50 % = the photo's 375 px, bit-exact. The ridges stay at 10.8 lines | 0 % = 1.3 columns (1,500 px), 25 % = 2.6, 50 % = 5.1, 75 % = 10.2, 100 % = 20.4 (94 px pinstripes). Covers the whole texture, 64 % of the screen |
+| S9 Palette: Photo / Opposite (hue + 180°, the same as K3 at 50 %) | **S9 Palette: Photo / Prism.** Strip k of the band, and the glitch zone below it, turns k/7 round the colour wheel (0, 52, 103, 155, 205, 257, 308°). Mirror pairs match. The texture stays blue | Seven distinct colour strips, rainbow-stepped from each edge to the axis. K3 still turns everything. Torn-edge lines take the hue of the band row they reflect |
+
+Unchanged: K1 Band, K2 Etch, K3 Hue, K5 Gain, S7 Mirror, S8 Quad, S10 Twin, S11 Source, P12 Rip (its strip slide
+now adds to K4's). Renamed: **K6 Ridges → Columns**, and S9's second label **Opposite → Prism**.
+
+Presets:
+- **Photo** (the defaults; was "Riptide").
+- Calm Water, Kaleidoscope, Twin Rivers: unchanged.
+- Shredded: K4 900 now also slides the strips ±252 px.
+- **Prism Slide** (new): S9 Prism, K4 860, K1 760.
+- **Pinstripes** (new): K6 1000 ≈ 19 columns, K5 680, K4 380 (slow reverse).
+- **Broad Tide** (new): K6 40 ≈ 1.4 columns, K4 1000, P12 600.
+
+Fit (no feature lost, defaults bit-exact):
+- Per-field shift-add chains moved onto the serial multiplier (9 → 14 slots): the band column of the first pixel
+  (4369 × xsu / 16), the stripe phase (337 × xcol), the gain (134 × k5q) and Rip's slide (300 × h).
+- K2, K3 and K5 are read directly; K1, K6 and P12 keep the glide.
+- The gain's leading-one float is computed per field.
+- Latency is 28 → 26: the output pads are removed (an even change, so U/V pairing is kept). The sync ring follows
+  `C_LAT`, and the TOML `processing_delay_clks` is 26.
+- One 256 × 32 block-RAM ring at delay 4 (read 2 behind the chroma ring's write pointer) carries the luma to the
+  box centre, the column fraction, the band flags and the value. The value pipeline is re-timed one stage later.
+- Result: 7,615 → 7,462 LC (hd_hdmi pack) with all three features.
+
+Build (ROUTER1, 2026-11-03, `NEXTPNR_ROUTER="--router router1" .heirloom_work/diag_build.sh riptide`):
+- HD Analog s1 88.51, SD Analog s1 82.54, HD HDMI s2 92.77 (router stall on seed 1), SD HDMI s1 78.03, HD Dual s1
+  86.15, SD Dual s1 87.47 MHz.
+- 7,457–7,472 / 7,680 LC (97.2 %), 29 / 32 EBR.
+- dupin: 0 self-add carries. All six bitstreams unpack cleanly. No pin-skew screen; the builder's seeds are kept.
+
+Checks (work files in `.heirloom_work/rb_riptide/p2/`):
+- The GHDL front end is clean (`check.sh`).
+- `sweep.py` swept the new or moved arithmetic at RTL widths: 0 failures (moved products bit-exact with v0.5, K6
+  default exact, centre column fixed, slide ≤ 675 px, |e_off| ≤ 803 px, band column stays inside the mirrored field).
+- The default frame is **bit-exact** with production v0.5.1: GHDL 720p60, decimation 1, Osc, 2 warm-up frames, 0 of
+  921,600 pixels (`r_prod_def.npy` vs `r_diag_def.npy`).
+- One extreme render (`r_diag_ext.png`: Prism, K6 1023, K4 1023) shows Prism strips, sliding and ~20 columns, with
+  no wraps.
+- Not simulated: Video mode, SD and 1080p, motion over time, Twin / Repeat / Quad with Prism.
+
+The sections below are the production (v0.5.1) SUMMARY, unchanged.
 
 ## Reading of the photo (measured)
 Working files: `.heirloom_work/rb_riptide/` (`notes.md` has every number).
@@ -152,15 +211,37 @@ pixel, so faces and edges show up as hue contours flowing through the swirl and 
 - At SD the picture is the centre 4:3 crop of the 16:9 composition (same scale, about 3.8 of the 5.1 columns
   visible); 720p and 1080p are identical.
 
+## Open questions for Ron
+1. K4's slide gets wider AND faster together, and is frantic at the ends. Should the slide amplitude get its own
+   knob instead of K3 Hue?
+2. Should the ridges come back on K6, scaled together with the columns, or stay fixed?
+3. For Prism, would you prefer every other strip at +180°, or a Prism that also turns the texture?
+4. Should the strips slide a little at the default speed (now 0, which keeps the photo)?
+
+## Hardware watch list
+- **Renamed controls:** K6 Ridges → Columns, and S9's second label Opposite → Prism.
+- **Latency 28 → 26.** If the diag shows U/V-swapped colour that production doesn't, suspect this first.
+- **The new block-RAM ring** (29 EBR). Suspect it for any flicker that production doesn't have.
+- **K4 at the ends:** the strips whip ±376 px several times a second.
+- **K6 at 100 %:** 94 px columns made of 8 px cells; check they still read as columns.
+- Timing is comfortable everywhere: every HD config routes at ≥ 86 MHz.
+- Nothing was cut for fit.
+
+## Next step
+On approval:
+1. Run `./heirloom_diag.sh merge riptide`.
+2. Repack the previewed diag bitstreams under the production TOML instead of re-routing: copy
+   `build/programs/ron/riptide_diag/rev_b/bitstreams/*.bin` into a scratch dir together with the production
+   `program_config.bin`, then run `vmprog_pack.py --no-sign --hardware rev_b --toml-path
+   programs/ron/heirloom/riptide/riptide.toml <dir> out/rev_b/ron/heirloom/riptide.vmprog`.
+3. Update the README and PHASE2 rows, and commit riptide's files only.
+
 ## K6 camera pass (2026-11-15)
 
-Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K2 (Etch), so K2 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K2 = Ridges** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: HD HDMI seed 3, HD Dual seed 2; HD worst 78.16 MHz (HD Analog 85.65, HD HDMI 86.48, HD Dual 78.16), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh riptide`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K2 (Etch), so K2 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K2 = Columns** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.1, rebuilt with router1: SD HDMI seed 2; HD worst 84.73 MHz (HD Analog 84.76, HD HDMI 84.73, HD Dual 84.92), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./heirloom_diag.sh build riptide`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
 
 ## K6 top +25 % and default 100 % (2026-11-15)
 
-**Element type**: K6 Etch recolours the drawing by rotating the hue by the camera (or Osc), so the gain was raised 25 %. The K6 default is now 100 % (orchestrator).
-- The design is at 99.5 % LC, so the change is one per-field add.
-- The hue code s_eh = (K6 / 16 + K6 / 64) / 2 gives 0 .. 39 (still 6 bits). The pixel path applies it at >> 1 instead of >> 2: the hue add takes the slice p9_he(12:1), which is exact mod 4096. This replaces resize(), which would fold at |etch / 2| >= 2048.
-- The top swing is +-219 degrees (was +-176). The steps are half as fine (40 instead of 64).
-- Check: `.heirloom_work/rb_riptide/k6b/k6b_cmp.png`. The hue turns further: same picture, no garbage.
-- Build: v0.5.3, router1, all six on seed 1; worst HD 79.81 MHz (HD Analog 85.27, HD HDMI 90.49, HD Dual 79.81); 7,643 / 7,680 LC (99.5 %, +4 vs v0.5.2). `.kinetic_work/k6_builds.txt`: heirloom riptide OK router1 worst-HD 79.81 LC 7643.
+**Element type**: K6 Etch rotates the hue by the camera. The change is the same as in the main program: s_eh = (K6 / 16 + K6 / 64) / 2 (0 .. 39), applied >> 1 through the slice p9_he(12:1). The top swing is +-219 degrees (was +-176). The K6 default is now 100 % (orchestrator).
+- Not rendered; checked by GHDL analysis and the build.
+- Build: v0.6.2, router1; SD Dual seed 2 (seed 1 stalled router1 at the 600 s timeout under machine load), seed 1 elsewhere; worst HD 80.60 MHz (HD Analog 80.60, HD HDMI 86.04, HD Dual 86.19); 7,498 / 7,680 LC. `.kinetic_work/k6_builds.txt`: diag riptide OK router1 worst-HD 80.6 LC 7498.

@@ -1,12 +1,119 @@
 # Waterfall — a curtain of chirped lines falling through four bands
 
+**v0.6.2 (2026-11-19): phase 2 FINAL — Ron prefers the diag in every case, so it is merged into production** (`out/rev_b/ron/heirloom/waterfall.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; this exact build not flashed). It is the phase-2 round plus the K6 camera pass; status lines below that say "diag" or "production untouched" are history. The replaced v0.5.3 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`.
+
+**v0.6.0 (2026-11-09, phase 2): diag preview built, awaiting Ron's preview** (see [Phase 2](#phase-2-v060);
+`Waterfall Diag`, `out/rev_b/ron/_diag/waterfall_diag_v0.6.0.vmprog`, copy in `out/rev_b/ron/heirloom/_diag/`).
+Production v0.5.1 (`programs/ron/heirloom/waterfall/`) is untouched.
 **v0.5.0 (2026-10-27): built, NOT flashed.** Heirloom #45, rebuilt from the photo
 `photos/WIN_20230610_00_51_13_Pro.jpg` (same patch session as seismic). A bank of fine vertical
 lines (dark navy cores above, red below) fans out going down and sweeps hard left at the foot,
 through four horizontal colour bands: rainbow cycles with "(" hue arcs at the top, light cyan,
 lavender-to-blue, and orange/yellow/red. A torn chevron seam separates the lavender and orange
 bands, and a block area of olive, lavender, pink, cyan, green and a blue blob sits on the left.
-Presets are hand-written placeholders.
+
+## Phase 2 (v0.6.0)
+No notes from Ron for waterfall (free hand, 2026-11-09 batch). In v0.5:
+- K1 Strings, P12 Fall and K5 Seam only reached 2x;
+- K3 Fade was a colour nudge on the right half of bands B / C;
+- S7 Beads (+-0.8 px) and S10 Lines Soft barely showed;
+- the curtain's edge (line 0, where the long first cycle ends and the strings begin) had no control at all.
+
+The round:
+- widens the oscillator and shape knobs;
+- gives the oscillator's **phase offset** its own knob (K3 Curtain), so the curtain draws back across the
+  screen or sweeps over the block area;
+- adds a curtain **swing** to K4 past the photo's speed;
+- re-patches the two subtle switches: S7 Beads gets a slow +-32 px zigzag of every row, and S10 turns the
+  string geometry upside down.
+
+New motion is zero at the default knob values. With v0.5's sway formula substituted, the default frame is
+byte-identical to v0.5.1 (checks below). Phase-2 working files: `.heirloom_work/rb_waterfall/p2/`.
+
+| Was (v0.5) | Now (v0.6.0) | Full sweep, in screen terms (1080p) |
+|---|---|---|
+| P12 Fall: 0 .. 1x (50 %) .. 2x | **P12 Fall** 0 .. 1x (50 %, exact) .. **3x** (p12 / 2 below the middle, p12 - 256 above) | 0 % = straight hanging strings. 100 % = 3x the fan and the foot sweep: the left strings whip out through the left edge at the foot, and the right strings fan wide (2x was v0.5's top) |
+| K1 Strings: 0.5x .. 2x, square law | **0.25x .. 1x (50 %, exact) .. 4x**, exponential (an octave per quarter turn) | right-edge line spacing 144 px (about 8 broad strings) .. 36 px (the photo, 31 lines) .. 9 px hairlines (about 120 across; SD aliases above ~3x) |
+| K2 Bands: vertical roll | unchanged | the four bands roll through the full height |
+| K3 Fade: red-VCA slope 0 .. 2x (a colour nudge on the right half of bands B / C) | **K3 Curtain** (renamed): the oscillator's phase offset, 4 (k3 - 512) Q7 photo lines (-16 .. 0 at 50 % .. +16), applied to every knot before the Strings gain, so it moves the curtain the same screen distance at any K1. The red fade is now fixed at the photo's slope | left: the curtain draws back; line 0 moves from x ~560 to ~1430-1670 (the block area fills 75-87 % of the width). Right: the curtain sweeps over the block area (line 0 reaches the left edge at about 66 %), then the strings keep sliding left, about 11 more lines by 100 % |
+| K4 Speed: hue flow, the fall sway (meant as +-12 %), seam chevrons roll | same, **plus a curtain swing** past the photo's speed: in 376..648 it is exactly 0 (the default 640 is inside); beyond, it grows by 2 Q7 per step to +-6 photo lines at the ends, on a triangle a quarter cycle from the sway, at the sway's rate. The sway itself is now a smooth +-3 %, see Engine | at the ends, line 0 swings about +-400 px and every string slides +-6 lines; the period runs from ~2 s just past the photo's speed to ~0.5 s at the ends |
+| K5 Seam: height 0 .. 1x .. 2x | **0 .. 1x (50 %, exact) .. 4x** (two-slope) | the torn chevron band from a clean edge (0) through the photo's 72 rows to ~288 rows (y 656..944): chevrons across the block area and "<" smears through most of bands C and D |
+| K6 Melt | unchanged | |
+| S7 Beads: On / Off (+-0.8 px jitter, invisible) | **S7 Beads: Fine / Zigzag**: Fine = the photo's beading (default); Zigzag = a triangle shift of each row's strings, +-32 px, period ~84 lines, travelling down ~60 lines/s | every string and the curtain edge become a zigzag ("<" chevrons over the whole curtain) |
+| S8 Wind | unchanged | |
+| S9 Dusk | unchanged | |
+| S10 Lines: Sharp / Soft (subtle) | **S10 Sweep: Bottom / Top** (renamed): the string geometry read upside down (the psi row is 1079 - y), the bands staying put. Line cores are now always Sharp | the hard left sweep and the widest fan move to the top (through the rainbow band), and the strings hang straight in the orange at the bottom |
+| S11 Source | unchanged | |
+
+**Presets** (preset 0 = the defaults): **Photo** (renamed from "Default"); **Hanging** (P12 0); **Whipped**
+(P12 100 %, faster); **Open Curtain** (K3 12 %); **Fountain** (S10 Top, P12 78 %); **Dense Rain** (Strings 88 %,
+Seam 88 %); **Zigzag Storm** (S7 Zigzag, K4 near max, Seam 4x, P12 74 %); **Dusk Sweep** (S9 Dusk, few strings,
+curtain forward). Dropped: the old "Dusk" (its K3 was the Fade).
+
+**Engine (new).**
+- **Strings curve.** g8 = 64 2^(k1 / 256), linear inside each octave, set in the per-field sequencer (the v0.5
+  k1^2 multiply is gone).
+- **Block float.** The engine MAC's coefficient operand is 12-bit signed (was 11). In K1's top octave g8 stays
+  256..511 and `s_ex` makes the knot store shift 7 instead of 8. With Fall up to 3x, gf <= 1708 always fits;
+  ca = g (1 -+ f) is clipped at 2047 only with Wind, Fall above ~2.6x and Strings near 2x or 4x. (v0.5
+  clipped ca at 1023 over a wider corner.)
+- **Curtain.** A per-field offset `s_cof` (K3 + the swing, 13-bit) is added to the MAC's knot operand in the
+  psi loop. ca + cb + cc = g at any Fall and Wind, so the stored knot gains g x offset. The root search,
+  x0 and the first-cycle DDA all follow it. One 14-bit adder; adding it at the knot store instead had cost
+  132 LUT.
+- **Swing.** depth = 2 (|v| - 128) when |v| > 128; triangle = the sway phase + a quarter cycle; depth x
+  |triangle| on the field multiplier (one more sequencer state).
+- **Sway fix.** v0.5's sway, `shift_left(f_acc(17 downto 0), 5)`, kept 18 bits, so the intended +-12 % wrapped
+  to a 0..7 sawtooth with small jumps (the CLAUDE.md shift_left trap). The diag uses a smooth +-3 %:
+  (fb |tri|) >> 12, a plain shift. That is what v0.5 showed, minus the jumps.
+- **Seam.** k5e = k5 + 2 k5(8:0) above the middle; h36 = 9 k5e / 128 (8 bits); inv = 131071 / max(k5e, 64).
+- **Zigzag.** n_jit = a triangle from the bead phase (10 bits, +-512 Q4); bead step / 8.
+- **Sweep.** The engine decodes the psi row-knot from 1079 - y; the colour row keeps y.
+- **Fade fixed.** n_s = clamp(s) straight from the slope lerp (the K3 product state is gone; the same numbers
+  at K3 = 512).
+- **Fit:**
+  - the chroma box filter's 8-back tap moved from two 9 x 10-bit FF chains into a 256 x 20 block-RAM
+    ring (`no_rw_check`, read 6 behind the write + a fabric register);
+  - the hsync / vsync / field 24-clock delays moved into a 256 x 3 ring (read 22 behind + a fabric register);
+  - the line-start-only registers l_g0 / l_cnt0 / l_jit were dropped: the beams load straight from the
+    engine's n_* registers, which the engine rewrites 45+ clocks after the avid rise;
+  - the unused l_s register was dropped.
+  No pipeline stage was added or removed: latency 24 in every mode, U/V parity unchanged.
+
+**Build** (ROUTER1: `NEXTPNR_ROUTER="--router router1" .heirloom_work/diag_build.sh waterfall`, 2026-11-09):
+HD Analog s1 79.74, SD Analog s1 73.51, HD HDMI s1 80.41, SD HDMI s1 76.71, **HD Dual s2** 78.03 (s1 missed),
+SD Dual s1 77.93 MHz. 7,273-7,299 / 7,680 LC (95 %; v0.5.1 7,210-7,228), 27 / 32 EBR (+3: chroma ring 2,
+sync ring 1); no RAM transparency emulation; iceunpack OK x6; the packed config carries the new labels and
+presets. No pin-skew screen. **Fit history.** The first design was +149 packed LC over v0.5.1 (about 96 %), so:
+- the curtain moved from the knot store (132 LUT) onto the MAC operand;
+- the 3-level block float became a K1-octave flag with a ca clip;
+- the K3 curve became a single slope (an MSB flip) and K5's a single adder;
+- the sway lost its adders.
+Standalone pack after these: 5,888 vs v0.5.1's 5,835 LC (`p2/abl/`).
+
+**Checks** (working files in `.heirloom_work/rb_waterfall/p2/`):
+- GHDL analyse / elaborate / synth front end: clean (`check.sh`).
+- `sweep.py`: every new path at RTL widths over all knob extremes, no overflow:
+  - gf max 1708 and ca max 2219 before the clip;
+  - the curtain operand stays within the 14-bit m_a (psi ROM -700..3831);
+  - the defaults are exact (g8 256, fb 256, k5e 512 -> h36 36, inv 255).
+- `spikes.py`: the C_PSI knots along x and along rows and the seam shift words. No single-entry spike. Small
+  row-direction kinks (|d2| ~0.2 line) sit at rows 17 and 28, where the row-knot pitch changes (32 -> 16 -> 8
+  rows), by construction.
+- Default frame (GHDL 720p60, decimation 1, Osc, 2 warm-up + 1 capture, production v0.5.1 simulated the same
+  way). With v0.5's sway line substituted (`p2/wfexact_prog`), the raw 10-bit output.txt is **byte-identical**
+  (0 of 2,764,800 samples). This proves the rings, the dropped registers, the fade bypass, the new curves and
+  the block float at their defaults. The real diag differs only by the sway: a smooth +-3 % instead of the
+  wrapped 0..7.
+- One extreme frame (`p2/r06_extreme.png`: Strings 88 %, Curtain 20 %, Seam 100 %, Fall 88 %, Zigzag,
+  Sweep Top, Osc; rendered while the sway was briefly +-12 %): no wraps. The curtain is drawn back past
+  half the width, the strings are dense zigzag hairlines, the curtain edge zigzags, and the seam band is 4x
+  tall.
+- Not verified:
+  - Video mode (unchanged paths);
+  - Wind with the new ranges;
+  - the swing in motion;
+  - Sweep Top on its own (only in the combined extreme frame).
 
 ## Reading of the photo (measured)
 Working files are in `.heirloom_work/rb_waterfall/` (notes.md has the full log).
@@ -179,9 +286,41 @@ slow 2-D triangle (half amplitude) through the same path, so Melt stays live.
   lines are ~13.5 real px apart and the dither texture is coarser; the per-line engine has ~10 %
   headroom in SD's 858-clock line.
 
-## K6 camera pass (2026-11-15)
+## Open questions for Ron (2026-11-09 batch)
+1. K3 Fade (the red VCA toward the right) became K3 Curtain, and the fade is fixed at the photo's slope. Do you
+   want the fade back, e.g. as a Fade / Deep option on a switch, or in place of the curtain swing on K4?
+2. The curtain swing on K4 past the photo's speed is quick at the ends (~0.5 s a cycle, +-6 lines). Slower and
+   wider instead (e.g. its own slower LFO)?
+3. S7 Zigzag is a +-32 px triangle with an ~84-line period. Smoother (a sine) or bigger? And do you miss the
+   Beads Off position?
+4. S10 Sweep Top flips only the strings, not the bands. Would a whole-picture flip (bands too), or a horizontal
+   mirror (the old S8 Mirror idea, block area on the right) be the better look-flip?
 
-Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+## Hardware watch list
+- Renamed controls:
+  - K3 Fade -> **Curtain** (bipolar, the photo at 50 %);
+  - S7 Beads On / Off -> **Fine / Zigzag**;
+  - S10 Lines Sharp / Soft -> **Sweep Bottom / Top**;
+  - preset "Default" -> "Photo".
+- The default's sway is a smooth +-3 % (v0.5's wrapped to a jumpy 0..7 / 256). The default picture breathes
+  the same small amount, without the jumps.
+- No longer adjustable: the red fade (fixed at the photo's slope), Beads Off and soft line cores.
+- Strings above ~75 %: hairline strings (9 px at 4x) alias on SD; at 1080p they shimmer while K4 moves them.
+- Wind with Fall above ~2.6x and Strings near 2x or 4x clips the reference coefficient. The strings thin at
+  row ~448 in that corner (v0.5 had the same over a wider corner).
+- Two new block-RAM rings: the chroma filter tap (256 x 20) and the sync delays (256 x 3). If colours or syncs
+  misbehave only on hardware, suspect these first.
+- ROUTER1 (as v0.5). HD Dual built on seed 2 (seed 1 missed); the other five on seed 1. HD margins are
+  5-8 % (HD Analog 79.74 was v0.5.1's thinnest at 75.83).
+
+## Next step
+Wait for Ron's preview notes. Rebuild the diag with
+`NEXTPNR_ROUTER="--router router1" .heirloom_work/diag_build.sh waterfall`. On approval: `./heirloom_diag.sh merge
+waterfall`, then repack the previewed diag bitstreams under the production TOML instead of re-routing:
+- copy `build/programs/ron/waterfall_diag/rev_b/bitstreams/*.bin` into the production build dir;
+- regenerate `program_config.bin` from the production TOML;
+- run `vmprog_pack.py --no-sign --hardware rev_b`.
+Then update the production SUMMARY / README / PHASE2 row and commit only waterfall's files.
 
 ## K6 top +25 % and default 100 % (2026-11-15)
 
@@ -189,8 +328,6 @@ Ron: K6 now loads at 100 % (initial_value 1023), and the camera effect at the to
 
 Bend / element: K6 Melt is how far the camera's luma (or the Osc triangle) bends the strings.
 
-The per-field melt gain is now (k6 >> 4) + (k6 >> 6), 0..78 (was k6 >> 4, 0..63), decoded in the field-start block. Every position is x1.25 (x1.24 at the top). The 9 x 8 product fits its 16-bit register (+-9984). The strings now bend up to +-0.62 line at max (was +-0.5).
+Diag copy: the same change (melt gain (k6 >> 4) + (k6 >> 6)), no render. The per-field melt gain is now (k6 >> 4) + (k6 >> 6), 0..78 (was k6 >> 4, 0..63), decoded in the field-start block. Every position is x1.25 (x1.24 at the top). The 9 x 8 product fits its 16-bit register (+-9984). The strings now bend up to +-0.62 line at max (was +-0.5).
 
-Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_waterfall/k6b/k6b_cmp.png`.
-
-Build: router1, all seed 1, worst HD Fmax 76.01 MHz, 7262 LC (max of 6). Fmax per config: HD Analog 81.05, SD Analog 77.88, HD HDMI 76.01, SD HDMI 85.08, HD Dual 79.90, SD Dual 71.67 MHz.
+Build: router1, seeds other than 1: HD Analog seed 2, HD Dual seed 2, worst HD Fmax 77.64 MHz, 7333 LC (max of 6). Fmax per config: HD Analog 77.64, SD Analog 79.71, HD HDMI 78.12, SD HDMI 79.72, HD Dual 81.93, SD Dual 79.21 MHz.

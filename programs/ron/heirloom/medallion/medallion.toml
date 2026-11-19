@@ -1,4 +1,4 @@
-# Medallion - Heirloom #12, rebuilt 2026-10-21 (v0.5.0) from WIN_20230305_23_51_38.
+# Medallion - Heirloom #12, rebuilt 2026-10-21 (v0.5.0) from WIN_20230305_23_51_38; phase 2 diag v0.6.0 (2026-11-03).
 # Two diamonds of stepped fire rings cut by MSB-flipping stripes; an oval medallion keys in a CMY plaid.
 # See medallion.vhd, medallion.py (fitted constants) and SUMMARY.md.
 
@@ -6,23 +6,23 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.medallion"
 program_name = "Medallion"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Mask", "Color"]
 program_type = "processing"
-description = "Two diamonds of stepped fire rings, flipped by horizontal stripes; a medallion in the middle shows a CMY plaid."
+description = "Two leaning diamonds of stepped fire rings, flipped by horizontal bands; a medallion in the middle shows a CMY plaid."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Diamonds"
+name_label = "Lean"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 468
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -32,7 +32,7 @@ name_label = "Rings"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 521
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -48,11 +48,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Stripes"
+name_label = "Bands"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 534
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -128,17 +128,27 @@ name = "Test Card"
 linear_potentiometer_12 = 1023
 
 [[preset]]
-name = "Swapped"
+name = "Arrowheads"
+rotary_potentiometer_1 = 1023
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Bow Tie"
+rotary_potentiometer_1 = 0
+linear_potentiometer_12 = 380
+
+[[preset]]
+name = "Cascade"
+rotary_potentiometer_4 = 120
+rotary_potentiometer_2 = 640
+
+[[preset]]
+name = "Lens Bands"
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_1 = 760
+
+[[preset]]
+name = "Inside Out"
 toggle_switch_9 = 1
-linear_potentiometer_12 = 400
-
-[[preset]]
-name = "Saw Smooth"
-toggle_switch_8 = 1
-toggle_switch_10 = 1
-
-[[preset]]
-name = "Dense Rings"
-rotary_potentiometer_2 = 900
-rotary_potentiometer_3 = 1023
-rotary_potentiometer_4 = 760
+rotary_potentiometer_1 = 900
+linear_potentiometer_12 = 420

@@ -1,21 +1,23 @@
-# Vase - Heirloom #27, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230424_23_59_47.
+# Vase - Heirloom #27, v0.6.0 (2026-11-09, phase 2 diag): S8 Twin (mirrored second vase), S9 Wrap
+# (Rings / Helix), K5 Key -624..+527 px, P12 Bulge sways the axis above the photo.
+# v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230424_23_59_47.
 # A glossy lathe vase on black (the camera's picture of a reflective object), keyed and colourised
 # by one slow vertical cycle: yellow/green/blue body, fast red bars, red and magenta blocks, a red key
 # window with a no-red channel.  See vase.vhd and SUMMARY.md.
-# v0.5.2 (2026-11-15, K6 camera pass): K6 = Camera (surface strength, default 50 % = the shipped look);
-# the old K6 Gloss moved to S8 (Photo / Glaze); the edge comb (old S8 Tear) is always on.
+# v0.6.1 (2026-11-15, K6 camera pass): K6 = Camera (surface strength, default 50 % = the shipped look);
+# the old K6 Gloss is dropped (x1; K6 in Osc mode spans its dull .. glazed range).
 
 [program]
 processing_delay_clks = 32
 program_id = "com.czartroniks.vase"
 program_name = "Vase"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Mask", "Render"]
 program_type = "processing"
-description = "A glossy vase on black, striped by red bars and rolling colour bands; the camera wraps round it and it spins."
+description = "A glossy vase striped by red bars and rolling colour bands: twin it, spiral its bars, sway it; the camera wraps round it."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -87,15 +89,15 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Gloss"
-value_labels = ["Photo", "Glaze"]
-initial_value_label = "Photo"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Blocks"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Wrap"
+value_labels = ["Rings", "Helix"]
+initial_value_label = "Rings"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -123,18 +125,39 @@ suffix_label = "%"
 name = "Photo"
 
 [[preset]]
-name = "Hourglass"
+name = "Dancer"
 linear_potentiometer_12 = 1000
-rotary_potentiometer_4 = 760
+rotary_potentiometer_4 = 820
 
 [[preset]]
 name = "Column"
 linear_potentiometer_12 = 0
 rotary_potentiometer_1 = 820
-toggle_switch_9 = 0
 
 [[preset]]
 name = "Swap Glaze"
 toggle_switch_7 = 1
 toggle_switch_10 = 1
+rotary_potentiometer_6 = 760
+
+[[preset]]
+name = "Twin Vases"
 toggle_switch_8 = 1
+
+[[preset]]
+name = "Barber Pole"
+toggle_switch_9 = 1
+rotary_potentiometer_4 = 900
+rotary_potentiometer_1 = 420
+
+[[preset]]
+name = "Key Slide"
+rotary_potentiometer_5 = 110
+rotary_potentiometer_3 = 330
+
+[[preset]]
+name = "Snake Pair"
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 800
+rotary_potentiometer_4 = 860

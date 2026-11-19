@@ -1,4 +1,6 @@
 # Shield - Heirloom #38, rebuilt 2026-10-27 (v0.5.0) from WIN_20230529_22_56_41.
+# v0.6.0 (2026-11-03, phase-2 diag): K1 exponential 0.51..8.1 shields (photo at 512), K6 also bends the stripes,
+# S7 Line -> Pairs (Same / Facing), S10 Stripes -> Rows (Level / Brick).
 # Two shields of nested U bands cut by orange / red stripes into a plaid, dark-red and blue outline ramps,
 # a red M body, blue pillars and seam stripes.  See shield.vhd, shield.py and SUMMARY.md.
 
@@ -6,7 +8,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.shield"
 program_name = "Shield"
-program_version = "0.5.2"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -22,7 +24,7 @@ name_label = "Shields"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 213
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -78,9 +80,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Line"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Pairs"
+value_labels = ["Same", "Facing"]
+initial_value_label = "Same"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -96,9 +98,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Stripes"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Rows"
+value_labels = ["Level", "Brick"]
+initial_value_label = "Level"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -131,7 +133,7 @@ linear_potentiometer_12 = 1023
 
 [[preset]]
 name = "Six Shields"
-rotary_potentiometer_1 = 1023
+rotary_potentiometer_1 = 940
 rotary_potentiometer_5 = 700
 linear_potentiometer_12 = 520
 
@@ -140,3 +142,23 @@ name = "Azure Crown"
 toggle_switch_8 = 1
 toggle_switch_9 = 1
 rotary_potentiometer_2 = 700
+
+[[preset]]
+name = "Facing"
+toggle_switch_7 = 1
+rotary_potentiometer_1 = 700
+linear_potentiometer_12 = 480
+
+[[preset]]
+name = "Brickwork"
+toggle_switch_10 = 1
+rotary_potentiometer_3 = 380
+rotary_potentiometer_5 = 380
+
+[[preset]]
+name = "Harlequin"
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 640
+rotary_potentiometer_2 = 760

@@ -3,7 +3,7 @@
 --
 -- 2026-11-15: K6 camera top +25 % (Ron)
 --
--- Waterfall v0.5.0 -- Heirloom #45 (2026-10-27 rebuild), from WIN_20230610_00_51_13.
+-- Waterfall v0.6.0 (phase-2 diag) -- Heirloom #45 (2026-10-27 rebuild), from WIN_20230610_00_51_13.
 --
 -- The photo: ONE line-locked chirped oscillator into a banded colourizer.
 --   * The oscillator is reset at every line start.  Its first cycle runs slowly from the left
@@ -23,21 +23,22 @@
 --   * The line cores are fixed-PIXEL features (dark navy cores, red G-low lines after the fall,
 --     the B pulse after odd lines): a dip table by signed pixel distance to the nearest line.
 --   * R carries a VCA that fades it toward the right (white-cyan -> cyan, lavender -> blue);
---     done in YUV on the red reconstructed from Y and Cr.
+--     done in YUV on the red reconstructed from Y and Cr (fixed at the photo's slope).
 --
---   K1  Strings  line count (oscillator gain 0.5x .. 2x)
+--   K1  Strings  line count (oscillator gain 0.25x .. 1x .. 4x, exponential)
 --   K2  Bands    vertical roll of the colour bands
---   K3  Fade     the red fade to the right (none .. 2x)
+--   K3  Curtain  the oscillator's phase offset: the curtain edge (line 0) and every string slide
+--                (left: drawn back to ~70 % of the width; right: over the block area, the strings sliding on)
 --   K4  Speed    bipolar (still in the centre): colour flows through the strings, the fall
---                sways, the seam chevrons roll
---   K5  Seam     height of the torn seam (0 = clean edge .. 2x)
+--                sways, the seam chevrons roll; past the photo's speed the curtain also swings
+--   K5  Seam     height of the torn seam (0 = clean edge .. 1x .. 4x)
 --   K6  Melt     how far the camera (or Osc) bends the strings
---   S7  Beads    On / Off (the sawtooth beading of the line edges)
+--   S7  Beads    Fine / Zigzag (the line-edge beading, or a slow +-32 px zigzag of every row)
 --   S8  Wind     Off / On (the bend reversed: the strings blow the other way)
 --   S9  Dusk     Off / On (Cr <-> Cb: reds turn blue, cyans turn orange)
---   S10 Lines    Sharp / Soft (the line cores)
+--   S10 Sweep    Bottom / Top (the string geometry upside down: the hard sweep at the top)
 --   S11 Source   Video / Osc
---   P12 FALL     the bend: 0 = straight hanging strings, 50 % = the photo, 100 % = whipped
+--   P12 FALL     the bend: 0 = straight hanging strings, 50 % = the photo, 100 % = 3x whipped
 --
 -- Virtual 1080-line coordinates (timing-ID row step, width-measured column step); generated
 -- avid; output conditioning ([1 2 1] luma, [1 2 2 2 2 2 2 2 1]/16 chroma, luma 13/16); blanking
@@ -123,19 +124,24 @@ architecture waterfall of program_top is
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
     -- controls
-    signal g1, g12 : unsigned(12 downto 0) := (others => '0');
+    signal g1, g3, g12 : unsigned(12 downto 0) := (others => '0');
     signal s_warm : std_logic := '0';
     signal s_k1, s_k2, s_k3, s_k5, s_p12 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_mg : unsigned(6 downto 0) := to_unsigned(40, 7);                  -- melt gain (k6 >> 4) x 1.25
     signal s_sp : signed(10 downto 0) := (others => '0');
-    signal s_nobead, s_wind, s_dusk, s_soft, s_osc : std_logic := '0';
+    signal s_zig, s_wind, s_dusk, s_rise, s_osc : std_logic := '0';
     -- per-field constants
     signal s_vstep : unsigned(5 downto 0) := to_unsigned(16, 6);
-    signal s_g8 : unsigned(9 downto 0) := to_unsigned(256, 10);
+    signal s_g8 : unsigned(9 downto 0) := to_unsigned(256, 10);     -- Strings gain Q8, 64 .. 511 (x 2 when s_ex)
+    signal s_fb : unsigned(9 downto 0) := to_unsigned(256, 10);     -- Fall Q8 before the sway, 0 .. 767
+    signal s_ex : std_logic := '0';                                 -- Strings' top octave: coefficients halved, knot store >> 7
+    signal s_cof : signed(12 downto 0) := (others => '0');          -- Curtain: knot offset (Q7 photo lines, x g) incl. the swing
+    signal s_amp : unsigned(9 downto 0) := (others => '0');         -- curtain swing depth (K4 past the photo speed)
+    signal s_tri2 : signed(7 downto 0) := (others => '0');          -- the swing triangle (sway + quarter cycle)
     signal s_f8 : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal s_gfs : signed(11 downto 0) := to_signed(256, 12);
     signal s_cfa : signed(11 downto 0) := (others => '0');
-    signal s_h36 : unsigned(6 downto 0) := to_unsigned(36, 7);
+    signal s_h36 : unsigned(7 downto 0) := to_unsigned(36, 8);
     signal s_inv : unsigned(10 downto 0) := to_unsigned(256, 11);
     signal s_roll : unsigned(10 downto 0) := (others => '0');
     signal s_bjs : unsigned(15 downto 0) := to_unsigned(6242, 16);
@@ -189,7 +195,7 @@ architecture waterfall of program_top is
     signal e_cb, e_cc : signed(11 downto 0) := (others => '0');
     -- engine MAC: serial radix-4 Booth multiply-accumulate (load + 6 steps)
     signal m_a : signed(13 downto 0) := (others => '0');
-    signal m_b : signed(10 downto 0) := (others => '0');
+    signal m_b : signed(11 downto 0) := (others => '0');
     signal m_go, m_clr : std_logic := '0';
     signal m_sh : signed(25 downto 0) := (others => '0');
     signal m_bb : std_logic_vector(12 downto 0) := (others => '0');
@@ -232,22 +238,18 @@ architecture waterfall of program_top is
     signal n_s : unsigned(11 downto 0) := (others => '0');
     signal n_band : t_b3 := (others => (others => '0'));
     signal n_fy : t_u6a := (others => (others => '0'));
-    signal n_jit : signed(4 downto 0) := (others => '0');
+    signal n_jit : signed(9 downto 0) := (others => '0');
     signal n_oy : unsigned(7 downto 0) := (others => '0');
     -- committed line values
     signal l_bank : std_logic := '0';
     signal l_x0 : unsigned(10 downto 0) := (others => '0');
     signal l_rst : unsigned(19 downto 0) := (others => '0');
     signal l_gst : unsigned(12 downto 0) := (others => '0');
-    signal l_g0 : unsigned(21 downto 0) := (others => '0');
-    signal l_cnt0 : unsigned(9 downto 0) := (others => '0');
     signal l_tear, l_stair : std_logic := '0';
     signal l_xt : unsigned(10 downto 0) := (others => '0');
     signal l_cthr : unsigned(4 downto 0) := (others => '0');
-    signal l_s : unsigned(11 downto 0) := (others => '0');
     signal l_band : t_b3 := (others => (others => '0'));
     signal l_fy : t_u6a := (others => (others => '0'));
-    signal l_jit : signed(4 downto 0) := (others => '0');
     signal l_oy : unsigned(7 downto 0) := (others => '0');
 
     -- generated avid
@@ -324,8 +326,20 @@ architecture waterfall of program_top is
     signal p16_s : t_s12a3 := (others => (others => '0'));
     signal p_dok : t_sl(12 to 14) := (others => '0');
     signal s_y21, s_u21, s_v21 : unsigned(9 downto 0) := to_unsigned(512, 10);
-    -- output conditioning
-    signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
+    -- output conditioning; the chroma box filter's 8-back tap rides a 256 x 20 block-RAM ring (u10 & v10):
+    -- read 6 behind the write, + a fabric register = s_u21 / s_v21 of 8 clocks ago
+    type t_cring is array (0 to 255) of std_logic_vector(19 downto 0);
+    signal s_cring : t_cring := (others => "10000000001000000000");
+    attribute no_rw_check of s_cring : signal is true;
+    signal s_cwp : unsigned(7 downto 0) := (others => '0');
+    signal s_crp : unsigned(7 downto 0) := to_unsigned(250, 8);
+    signal s_crq, s_crr : std_logic_vector(19 downto 0) := "10000000001000000000";
+    -- the syncs' 24-clock delay: a 256 x 3 ring read 22 behind the write, + a fabric register
+    type t_sring is array (0 to 255) of std_logic_vector(2 downto 0);
+    signal s_sring : t_sring := (others => "111");
+    attribute no_rw_check of s_sring : signal is true;
+    signal s_srp : unsigned(7 downto 0) := to_unsigned(234, 8);
+    signal s_srq, s_srr : std_logic_vector(2 downto 0) := "111";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
     signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y22, s_y23, s_y24, s_y25, s_y26, s_y27x, s_yf27 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -334,9 +348,6 @@ architecture waterfall of program_top is
     signal s_u28, s_v28 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     type t_bit_shift is array (0 to C_LAT - 1) of std_logic;
-    signal s_hsync_sr : t_bit_shift := (others => '1');
-    signal s_vsync_sr : t_bit_shift := (others => '1');
-    signal s_field_sr : t_bit_shift := (others => '1');
     signal s_gav_sr   : t_bit_shift := (others => '0');   -- s_gav_sr(k) = generated avid of the stage-(k+1) pixel
 
     function f_exp5(v : std_logic_vector(4 downto 0)) return unsigned is
@@ -423,12 +434,27 @@ begin
         end if;
     end process p_luto;
 
+    p_rings : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_crq <= s_cring(to_integer(s_crp));
+            s_cring(to_integer(s_cwp)) <= std_logic_vector(s_u21) & std_logic_vector(s_v21);
+            s_srq <= s_sring(to_integer(s_srp));
+            s_sring(to_integer(s_cwp)) <= data_in.hsync_n & data_in.vsync_n & data_in.field_n;
+            s_cwp <= s_cwp + 1; s_crp <= s_crp + 1; s_srp <= s_srp + 1;
+        end if;
+    end process p_rings;
+
     p_ctrl : process(clk)
         variable v_s : signed(10 downto 0);
         variable v_a : unsigned(12 downto 0);
         variable v_t : unsigned(15 downto 0);
         variable v_m : unsigned(11 downto 0);
         variable v_ab : unsigned(9 downto 0);
+        variable v_k5e : unsigned(11 downto 0);
+        variable v_h : unsigned(15 downto 0);
+        variable v_o : signed(12 downto 0);
+        variable v_ph2 : unsigned(15 downto 0);
         procedure glide(signal g : inout unsigned(12 downto 0); k : std_logic_vector(9 downto 0); w : std_logic) is
             variable d : signed(14 downto 0);
             variable n : signed(14 downto 0);
@@ -472,23 +498,25 @@ begin
                 s_warm <= '1';
                 glide(g1, registers_in(0), s_warm);
                 glide(g12, registers_in(7), s_warm);
+                glide(g3, registers_in(2), s_warm);
                 s_k2 <= unsigned(registers_in(1));
-                s_k3 <= unsigned(registers_in(2));
                 s_k5 <= unsigned(registers_in(4));
                 s_mg <= resize(unsigned(registers_in(5)(9 downto 4)), 7) + resize(unsigned(registers_in(5)(9 downto 6)), 7);
                 v_s := signed(resize(unsigned(registers_in(3)), 11)) - 512;          -- K4 Speed
                 if v_s > -8 and v_s < 8 then v_s := (others => '0'); end if;
                 s_sp <= v_s;
-                s_nobead <= registers_in(6)(0);
+                s_zig    <= registers_in(6)(0);
                 s_wind   <= registers_in(6)(1);
                 s_dusk   <= registers_in(6)(2);
-                s_soft   <= registers_in(6)(3);
+                s_rise   <= registers_in(6)(3);
                 s_osc    <= registers_in(6)(4);
                 if s_wmax /= 0 then s_w <= s_wmax; end if;
                 s_wmax <= (others => '0');
                 -- motion: sway phase, seam roll, colour drift, bead phase, Osc time
                 if v_s < 0 then v_ab := unsigned(resize(-v_s, 10)); else v_ab := unsigned(v_s(9 downto 0)); end if;
                 s_tph <= s_tph + shift_left(resize(v_ab, 16), 2);
+                -- curtain swing depth: 0 up to the photo's speed (|v| 128), then 2 Q7 per step (+-6 lines at the ends)
+                if v_ab > 128 then s_amp <= resize(shift_left(resize(v_ab - 128, 10), 1), 10); else s_amp <= (others => '0'); end if;
                 v_t := s_tacc + unsigned(resize(s_sp, 16));
                 s_tacc <= v_t;
                 s_troll <= signed(v_t(15 downto 6));
@@ -497,10 +525,15 @@ begin
                 s_ot <= s_ot + 1;
                 f_st <= to_unsigned(1, 4);
             end if;
-            s_k1 <= g1(12 downto 3); s_p12 <= g12(12 downto 3);
+            s_k1 <= g1(12 downto 3); s_k3 <= g3(12 downto 3); s_p12 <= g12(12 downto 3);
+            -- Fall: 0 .. 1x at 50 % (p12 / 2, the photo's law) .. 3x (p12 - 256 above)
+            if s_p12 > 512 then s_fb <= s_p12 - 256; else s_fb <= resize(s_p12(9 downto 1), 10); end if;
             s_drift <= s_cdr(15 downto 8);
             if s_tph(15) = '0' then s_tri <= signed(s_tph(14 downto 7) xor x"80");      -- u - 128
             else s_tri <= signed((not s_tph(14 downto 7)) xor x"80"); end if;
+            v_ph2 := (s_tph(15 downto 14) + 1) & s_tph(13 downto 0);
+            if v_ph2(15) = '0' then s_tri2 <= signed(v_ph2(14 downto 7) xor x"80");
+            else s_tri2 <= signed((not v_ph2(14 downto 7)) xor x"80"); end if;
 
             -- per-field sequencer: one op per state; the serial units step while their
             -- counters are non-zero and the state machine waits.
@@ -526,53 +559,70 @@ begin
                         f_st <= f_st + 1;
                     when 2 =>
                         if f_dn > 63 then s_vstep <= to_unsigned(63, 6); else s_vstep <= f_dn(5 downto 0); end if;
-                        -- k1^2
-                        f_ma <= resize(s_k1, 24); f_mb <= resize(s_k1, 12); f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
+                        -- Strings gain g8 = 64 2^(k1 / 256): an octave per quarter turn, linear within it
+                        -- (64 .. 128 .. 256 at 50 % = the photo .. 512 .. 1022).  The top octave keeps g8 at
+                        -- 256 .. 511 and sets s_ex: the knot store then shifts 7, not 8 (block float)
+                        case to_integer(s_k1(9 downto 8)) is
+                            when 0      => s_g8 <= shift_right(resize(s_k1(7 downto 0), 10) + 256, 2);
+                            when 1      => s_g8 <= shift_right(resize(s_k1(7 downto 0), 10) + 256, 1);
+                            when others => s_g8 <= resize(s_k1(7 downto 0), 10) + 256;
+                        end case;
+                        s_ex <= s_k1(9) and s_k1(8);
+                        -- curtain swing: depth |tri2|
+                        f_ma <= resize(s_amp, 24);
+                        if s_tri2 < 0 then f_mb <= resize(unsigned(-resize(s_tri2, 9)), 12); f_neg <= '1';
+                        else f_mb <= resize(unsigned(s_tri2), 12); f_neg <= '0'; end if;
+                        f_acc <= (others => '0'); f_mc <= to_unsigned(8, 4);
                         f_st <= f_st + 1;
-                    when 3 =>       -- g8 = 128 + k1/8 + k1^2/4096
-                        s_g8 <= to_unsigned(128, 10) + resize(s_k1(9 downto 3), 10) + resize(f_acc(19 downto 12), 10);
-                        -- sway: (p12/2) * |tri|
-                        f_ma <= resize(s_p12(9 downto 1), 24);
+                    when 3 =>       -- Curtain = K3 offset 4 (k3 - 512): -16 .. 0 at 50 % .. +16 lines; + the swing
+                        v_o := shift_left(resize(signed((not s_k3(9)) & s_k3(8 downto 0)), 13), 2);
+                        if f_neg = '1' then s_cof <= v_o - signed(resize(f_acc(16 downto 7), 13));
+                        else s_cof <= v_o + signed(resize(f_acc(16 downto 7), 13)); end if;
+                        -- sway: fb * |tri|
+                        f_ma <= resize(s_fb, 24);
                         if s_tri < 0 then f_mb <= resize(unsigned(-resize(s_tri, 9)), 12); f_neg <= '1';
                         else f_mb <= resize(unsigned(s_tri), 12); f_neg <= '0'; end if;
                         f_acc <= (others => '0'); f_mc <= to_unsigned(8, 4);
                         f_st <= f_st + 1;
-                    when 4 =>       -- f8 = p12/2 +- (p12/2 |tri| 30) >> 15
-                        v_m := resize(shift_right(shift_left(f_acc(17 downto 0), 5) - shift_left(f_acc(17 downto 0), 1), 15), 12);
-                        if f_neg = '1' then s_f8 <= resize(s_p12(9 downto 1), 10) - resize(v_m, 10);
-                        else s_f8 <= resize(s_p12(9 downto 1), 10) + resize(v_m, 10); end if;
-                        -- seam: h36 = k5 * 9 / 128; inv = 131071 / max(k5, 64)
-                        s_h36 <= resize(shift_right(shift_left(resize(s_k5, 14), 3) + resize(s_k5, 14), 7), 7);
+                    when 4 =>       -- f8 = fb +- (fb |tri|) >> 12: a smooth +-3 % sway (v0.5's +-12 % formula wrapped in
+                                    -- an 18-bit shift_left to a 0..7 sawtooth; +-3 % is what it showed, minus the jumps)
+                        v_m := resize(f_acc(16 downto 12), 12);
+                        if f_neg = '1' then s_f8 <= s_fb - resize(v_m, 10);
+                        else s_f8 <= s_fb + resize(v_m, 10); end if;
+                        -- seam: k5e = k5 .. 512 at 50 % .. 2045 (1x .. 4x); h36 = k5e * 9 / 128; inv = 131071 / max(k5e, 64)
+                        if s_k5(9) = '1' then v_k5e := resize(s_k5, 12) + shift_left(resize(s_k5(8 downto 0), 12), 1);
+                        else v_k5e := resize(s_k5, 12); end if;
+                        v_h := shift_right(shift_left(resize(v_k5e, 16), 3) + resize(v_k5e, 16), 7);
+                        s_h36 <= v_h(7 downto 0);
                         f_dn <= to_unsigned(131071, 18);
-                        if s_k5 < 64 then f_dd <= to_unsigned(64, 12); else f_dd <= resize(s_k5, 12); end if;
+                        if v_k5e < 64 then f_dd <= to_unsigned(64, 12); else f_dd <= v_k5e; end if;
                         f_rem <= (others => '0'); f_dc <= to_unsigned(18, 5);
                         f_st <= f_st + 1;
                     when 5 =>
                         s_inv <= f_dn(10 downto 0);
-                        if s_wind = '1' then f_neg <= '1'; else f_neg <= '0'; end if;
                         -- band roll = k2 * 135 / 128
                         s_roll <= resize(shift_right(shift_left(resize(s_k2, 18), 7) + shift_left(resize(s_k2, 18), 2)
                                   + shift_left(resize(s_k2, 18), 1) + resize(s_k2, 18), 7), 11);
                         -- gf = g8 f8 / 256
                         f_ma <= resize(s_g8, 24); f_mb <= resize(s_f8, 12); f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
                         f_st <= f_st + 1;
-                    when 6 =>       -- ca = g8 (256 -+ f8) / 256 (signed); gf negated for Wind
-                        if f_neg = '1' then s_gfs <= -signed(resize(f_acc(17 downto 8), 12));
-                        else s_gfs <= signed(resize(f_acc(17 downto 8), 12)); end if;
+                    when 6 =>       -- gf = g8 f8 / 256 (<= 1720), negated for Wind; ca = g8 (256 -+ f8) / 256 (signed)
+                        if s_wind = '1' then s_gfs <= -signed(resize(f_acc(18 downto 8), 12));
+                        else s_gfs <= signed(resize(f_acc(18 downto 8), 12)); end if;
                         f_ma <= resize(s_g8, 24);
                         if s_wind = '1' then f_mb <= resize(256 + s_f8, 12); f_neg <= '0';
                         elsif s_f8 > 256 then f_mb <= resize(s_f8 - 256, 12); f_neg <= '1';
                         else f_mb <= resize(256 - s_f8, 12); f_neg <= '0'; end if;
-                        f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
+                        f_acc <= (others => '0'); f_mc <= to_unsigned(11, 4);
                         f_st <= f_st + 1;
-                    when 7 =>       -- bead phase step per line = 6242 ys / 256
-                        if f_acc(18) = '1' then v_m := to_unsigned(1023, 12); else v_m := resize(f_acc(17 downto 8), 12); end if;
-                        if f_neg = '1' then s_cfa <= -signed(v_m);
-                        else s_cfa <= signed(v_m); end if;
+                    when 7 =>       -- ca (clipped at 2047: only Wind with Fall > ~2.6x and Strings near 2x / 4x);
+                                    -- bead phase step per line = 6242 ys / 256
+                        if f_acc(20 downto 19) /= "00" then v_m := to_unsigned(2047, 12); else v_m := resize(f_acc(18 downto 8), 12); end if;
+                        if f_neg = '1' then s_cfa <= -signed(v_m); else s_cfa <= signed(v_m); end if;
                         f_ma <= to_unsigned(6242, 24); f_mb <= s_ys; f_acc <= (others => '0'); f_mc <= to_unsigned(12, 4);
                         f_st <= f_st + 1;
-                    when 8 =>
-                        s_bjs <= f_acc(23 downto 8);
+                    when 8 =>       -- bead step (/8 for Zigzag)
+                        if s_zig = '1' then s_bjs <= resize(f_acc(23 downto 11), 16); else s_bjs <= f_acc(23 downto 8); end if;
                         s_linit <= '1';            -- start the line engine on line 0
                         f_st <= (others => '0');
                     when others =>
@@ -580,11 +630,9 @@ begin
                 end case;
             end if;
 
-            s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
-            s_field_sr(0) <= data_in.field_n; s_gav_sr(0) <= g_avid;
+            s_gav_sr(0) <= g_avid;
             for i in 1 to C_LAT - 1 loop
-                s_hsync_sr(i) <= s_hsync_sr(i - 1); s_vsync_sr(i) <= s_vsync_sr(i - 1);
-                s_field_sr(i) <= s_field_sr(i - 1); s_gav_sr(i) <= s_gav_sr(i - 1);
+                s_gav_sr(i) <= s_gav_sr(i - 1);
             end loop;
         end if;
     end process p_ctrl;
@@ -700,9 +748,9 @@ begin
             if data_in.avid = '1' and s_avq = '0' then
                 -- commit this line
                 l_bank <= e_bank;
-                l_x0 <= n_x0; l_rst <= n_rst; l_gst <= n_gst; l_g0 <= n_g0; l_cnt0 <= n_cnt0;
-                l_tear <= n_tear; l_stair <= n_stair; l_xt <= n_xt; l_cthr <= n_cthr; l_s <= n_s;
-                l_band <= n_band; l_fy <= n_fy; l_jit <= n_jit; l_oy <= n_oy;
+                l_x0 <= n_x0; l_rst <= n_rst; l_gst <= n_gst;
+                l_tear <= n_tear; l_stair <= n_stair; l_xt <= n_xt; l_cthr <= n_cthr;
+                l_band <= n_band; l_fy <= n_fy; l_oy <= n_oy;
             end if;
 
             ---------------------------------------------------------------
@@ -719,11 +767,11 @@ begin
                     end case;
                 end if;
                 if q_more = '1' and (q_w = 1 or (q_w = 0 and m_cnt = 1)) then
-                    m_a <= resize(signed(s_pqf), 14);
+                    m_a <= resize(signed(s_pqf), 14) + resize(s_cof, 14);   -- + Curtain: adds g o to the knot
                     case to_integer(q_r) is
-                        when 0 => m_b <= resize(e_cb, 11);
-                        when 1 => m_b <= resize(e_cc, 11);
-                        when others => m_b <= resize(s_cfa, 11);
+                        when 0 => m_b <= e_cb;
+                        when 1 => m_b <= e_cc;
+                        when others => m_b <= s_cfa;
                     end case;
                     m_go <= '1';
                     if q_r = 0 then m_clr <= '1'; else m_clr <= '0'; end if;
@@ -738,7 +786,8 @@ begin
                 if q_w = 0 and m_cnt = 1 and q_cr = 2 then q_wr <= '1'; q_wj <= q_cj; end if;
             end if;
             if q_wr = '1' then
-                v_q := resize(shift_right(m_acc, 8), 30);
+                if s_ex = '1' then v_q := resize(shift_right(m_acc, 7), 30);
+                else v_q := resize(shift_right(m_acc, 8), 30); end if;
                 if v_q > 32767 then v_c := to_signed(32767, 16);
                 elsif v_q < -32768 then v_c := to_signed(-32768, 16);
                 else v_c := v_q(15 downto 0); end if;
@@ -824,14 +873,14 @@ begin
                     when 2 =>       -- row (clamped)
                         if e_vy8(19 downto 8) > 1079 then e_vy <= to_unsigned(1079, 11); else e_vy <= e_vy8(18 downto 8); end if;
                         e_st <= to_unsigned(22, 5);
-                    when 22 =>      -- psi row-knot; band roll
-                        v_y := e_vy;
+                    when 22 =>      -- psi row-knot (Sweep Top: the string geometry upside down); band roll
+                        if s_rise = '1' then v_y := 1079 - e_vy; else v_y := e_vy; end if;
                         if v_y < 224 then e_pk <= to_unsigned(0, 6); e_pfy <= (others => '0');
                         elsif v_y < 288 then e_pk <= to_unsigned(1, 6); e_pfy <= resize(shift_left(v_y - 224, 2), 9);
                         elsif v_y < 768 then e_pk <= resize(2 + shift_right(v_y - 288, 5), 6); e_pfy <= resize(shift_left((v_y - 288) and to_unsigned(31, 11), 3), 9);
                         elsif v_y < 944 then e_pk <= resize(17 + shift_right(v_y - 768, 4), 6); e_pfy <= resize(shift_left((v_y - 768) and to_unsigned(15, 11), 4), 9);
                         else e_pk <= resize(28 + shift_right(v_y - 944, 3), 6); e_pfy <= resize(shift_left((v_y - 944) and to_unsigned(7, 11), 5), 9); end if;
-                        v_u := resize(v_y, 18) + resize(s_roll, 18);
+                        v_u := resize(e_vy, 18) + resize(s_roll, 18);
                         if v_u >= 1080 then v_u := v_u - 1080; end if;
                         e_yr <= v_u(10 downto 0);
                         e_st <= to_unsigned(23, 5);
@@ -839,7 +888,7 @@ begin
                         e_d800 <= signed(resize(e_yr, 12)) - 800;
                         e_st <= to_unsigned(3, 5);
                     when 3 =>       -- seam zone: yt = 800 + (yr - 800) inv / 256
-                        m_a <= resize(e_d800, 14); m_b <= signed(resize(s_inv(10 downto 1), 11)); m_go <= '1'; m_clr <= '1';
+                        m_a <= resize(e_d800, 14); m_b <= signed(resize(s_inv(10 downto 1), 12)); m_go <= '1'; m_clr <= '1';
                         e_st <= e_st + 1;
                     when 4 =>
                         e_st <= e_st + 1;
@@ -917,24 +966,20 @@ begin
                         e_ki <= e_ki + 1;
                         e_st <= e_st + 1;
                     when 10 =>      -- s lerp: (sk1 - sk0) fy / 64
-                        m_a <= resize(to_signed(C_SK(to_integer(e_ki)), 13) - e_sk0, 14); m_b <= signed(resize(e_fy(0), 11));
+                        m_a <= resize(to_signed(C_SK(to_integer(e_ki)), 13) - e_sk0, 14); m_b <= signed(resize(e_fy(0), 12));
                         m_go <= '1'; m_clr <= '1';
                         e_st <= e_st + 1;
-                    when 11 =>      -- s = sk0 + ...; s k3
+                    when 11 =>      -- s = sk0 + ... (the fade slope, fixed at the photo's); cb = gf (256 - fy) / 256
                         v_s := resize(e_sk0, 14) + resize(shift_right(m_acc, 6), 14);
-                        m_a <= resize(v_s, 14); m_b <= signed(resize(s_k3, 11));
+                        if v_s < 0 then n_s <= (others => '0');
+                        elsif v_s > 4095 then n_s <= (others => '1');
+                        else n_s <= unsigned(v_s(11 downto 0)); end if;
+                        m_a <= resize(s_gfs, 14); m_b <= signed(resize(256 - e_pfy, 12));
                         m_go <= '1'; m_clr <= '1';
-                        e_st <= e_st + 1;
-                    when 12 =>      -- s_eff = s k3 / 512; cb = gf (256 - fy) / 256
-                        if m_acc < 0 then n_s <= (others => '0');
-                        elsif shift_right(m_acc, 9) > 4095 then n_s <= (others => '1');
-                        else n_s <= unsigned(m_acc(20 downto 9)); end if;
-                        m_a <= resize(s_gfs, 14); m_b <= signed(resize(256 - e_pfy, 11));
-                        m_go <= '1'; m_clr <= '1';
-                        e_st <= e_st + 1;
+                        e_st <= to_unsigned(13, 5);
                     when 13 =>      -- cc = gf fy / 256
                         e_cb <= resize(shift_right(m_acc, 8), 12);
-                        m_a <= resize(s_gfs, 14); m_b <= signed(resize(e_pfy, 11));
+                        m_a <= resize(s_gfs, 14); m_b <= signed(resize(e_pfy, 12));
                         m_go <= '1'; m_clr <= '1';
                         e_st <= e_st + 1;
                     when 14 =>      -- start the psi loop and the colour loop; line values
@@ -944,8 +989,12 @@ begin
                         q_cr <= (others => '0');
                         q_found <= '0'; q_done <= '0'; q_neg0 <= '1';
                         r_run <= '1'; r_sl <= (others => '0'); r_e <= (others => '0'); r_h <= '0';
-                        if s_nobead = '1' then n_jit <= (others => '0');
-                        else n_jit <= to_signed(C_SIN16(to_integer(e_bj(15 downto 12))), 5); end if;
+                        if s_zig = '1' then
+                            if e_bj(15) = '0' then n_jit <= signed(e_bj(14 downto 5) xor "1000000000");
+                            else n_jit <= signed((not e_bj(14 downto 5)) xor "1000000000"); end if;
+                        else
+                            n_jit <= to_signed(C_SIN16(to_integer(e_bj(15 downto 12))), 10);
+                        end if;
                         n_oy <= e_vy(8 downto 1) + s_ot;
                         n_tear <= e_tear; n_stair <= e_stair; n_xt <= e_xt; n_cthr <= e_cthr; n_band <= e_band; n_fy <= e_fy;
                         e_st <= to_unsigned(16, 5);
@@ -974,12 +1023,12 @@ begin
                         e_st <= e_st + 1;
                     when 19 =>      -- red fade: g0 = 2^20 + 1000 s, step = s vstep / 16
                         if d_n > 1048575 then n_rst <= (others => '1'); else n_rst <= d_n(19 downto 0); end if;
-                        m_a <= signed(resize(n_s, 14)); m_b <= signed(resize(s_vstep, 11));
+                        m_a <= signed(resize(n_s, 14)); m_b <= signed(resize(s_vstep, 12));
                         m_go <= '1'; m_clr <= '1';
                         e_st <= e_st + 1;
                     when 20 =>
                         n_gst <= unsigned(m_acc(16 downto 4));
-                        m_a <= signed(resize(n_s, 14)); m_b <= to_signed(1000, 11);
+                        m_a <= signed(resize(n_s, 14)); m_b <= to_signed(1000, 12);
                         m_go <= '1'; m_clr <= '1';
                         e_cnt <= -shift_left(resize(e_shift, 16), 4);
                         e_st <= e_st + 1;
@@ -1014,7 +1063,10 @@ begin
     ---------------------------------------------------------------------------
     -- Beams: stage 0 (virtual x, Q4), stage 6 (x, the first-cycle DDA, the seam chevron
     -- counter), stage 13 (x for the red fade).  The later beams restart on the delayed g_start
-    -- and step with the delayed avid, so they need no pipeline registers.
+    -- and step with the delayed avid, so they need no pipeline registers.  Their start values
+    -- (jitter, chevron count, fade start) come straight from the engine's next-line registers:
+    -- the beams load them within ~15 clocks of the avid rise, and the engine rewrites them 45+
+    -- clocks later (state 14, state 21).
     ---------------------------------------------------------------------------
     p_beam : process(clk)
         variable v_a : unsigned(25 downto 0);
@@ -1024,14 +1076,14 @@ begin
             if g_start = '1' then b_ln <= b_ln + 1; end if;
             if g_ssr(7) = '1' then b9_pc <= (others => '0'); elsif s_gav_sr(7) = '1' then b9_pc <= b9_pc + 1; end if;
             if g_start = '1' then
-                b_x16 <= resize(l_jit, 17);
+                b_x16 <= resize(n_jit, 17);
             elsif g_avid = '1' then
                 b_x16 <= b_x16 + signed(resize(s_vstep, 17));
             end if;
             if g_ssr(5) = '1' then
-                b6_x16 <= resize(l_jit, 17);
+                b6_x16 <= resize(n_jit, 17);
                 b6_a1 <= (others => '0');
-                b6_cnt <= l_cnt0;
+                b6_cnt <= n_cnt0;
             elsif s_gav_sr(5) = '1' then
                 b6_x16 <= b6_x16 + signed(resize(s_vstep, 17));
                 v_a := resize(b6_a1, 26) + resize(l_rst, 26);
@@ -1039,7 +1091,7 @@ begin
                 b6_cnt <= b6_cnt + resize(s_vstep, 10);
             end if;
             if g_ssr(11) = '1' then
-                b16_g <= signed(resize(l_g0, 23));
+                b16_g <= signed(resize(n_g0, 23));
             elsif s_gav_sr(11) = '1' then
                 b16_g <= b16_g - signed(resize(l_gst, 23));
             end if;
@@ -1207,7 +1259,7 @@ begin
             p12_w <= p11_w;
             v_b := l_band(to_integer(p11_slot));
             if v_b = 4 then v_b4 := "11"; else v_b4 := v_b(1 downto 0); end if;
-            if s_soft = '0' and v_b /= 3 and p11_d >= -12 and p11_d <= 28 then p_dok(12) <= '1'; else p_dok(12) <= '0'; end if;
+            if v_b /= 3 and p11_d >= -12 and p11_d <= 28 then p_dok(12) <= '1'; else p_dok(12) <= '0'; end if;
             v_d := p11_d + 12;
             if v_d < 0 then v_d := (others => '0'); end if;
             if v_d > 40 then v_d := to_signed(40, 13); end if;
@@ -1275,13 +1327,12 @@ begin
             -- 18..23: output conditioning (s_y21 / s_u21 / s_v21 are the stage-17 colour)
             -- chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent 8-sums, luma [1 2 1]; centre at
             -- stage 22 -> 23
-            s_csu(0) <= s_u21; s_csv(0) <= s_v21;
-            for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
+            s_crr <= s_crq; s_srr <= s_srq;
             if s_bxh = "00000000" then
                 s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
             else
-                s_boxu <= s_boxu + s_u21 - s_csu(7);
-                s_boxv <= s_boxv + s_v21 - s_csv(7);
+                s_boxu <= s_boxu + s_u21 - unsigned(s_crr(19 downto 10));
+                s_boxv <= s_boxv + s_v21 - unsigned(s_crr(9 downto 0));
             end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u27 <= v_sc(13 downto 4);
@@ -1310,9 +1361,9 @@ begin
     data_out.y       <= std_logic_vector(s_y28);
     data_out.u       <= std_logic_vector(s_u28);
     data_out.v       <= std_logic_vector(s_v28);
-    data_out.hsync_n <= s_hsync_sr(C_LAT - 1);
-    data_out.vsync_n <= s_vsync_sr(C_LAT - 1);
-    data_out.field_n <= s_field_sr(C_LAT - 1);
+    data_out.hsync_n <= s_srr(2);
+    data_out.vsync_n <= s_srr(1);
+    data_out.field_n <= s_srr(0);
     data_out.avid    <= s_gav_sr(C_LAT - 1);
 
 end architecture waterfall;

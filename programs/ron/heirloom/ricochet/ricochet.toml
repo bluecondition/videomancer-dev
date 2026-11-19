@@ -1,4 +1,4 @@
-# Ricochet - Heirloom #30, rebuilt 2026-10-21 (v0.5.0) from WIN_20230515_23_08_59.
+# Ricochet - Heirloom #30, rebuilt 2026-10-21 (v0.5.0) from WIN_20230515_23_08_59; v0.6.0 phase-2 diag 2026-11-03.
 # Nested chevrons pointing right from red cores, orange to cyan bands, seam stripes, flat orange ground.
 # See ricochet.vhd, ricochet.py (fitted constants) and SUMMARY.md.
 
@@ -6,13 +6,13 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.ricochet"
 program_name = "Ricochet"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Mirror", "Shape"]
 program_type = "processing"
-description = "Chevrons fire from red cores, orange to cyan bands streaming out to a flat orange ground; seams split into stripes."
+description = "Chevrons fire from red cores, bands streaming out to an orange ground; past the photo speed each system ricochets."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -79,7 +79,7 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Point"
-value_labels = ["Right", "Left"]
+value_labels = ["Right", "Alternate"]
 initial_value_label = "Right"
 
 [[parameter]]
@@ -124,9 +124,22 @@ name = "Full Reach"
 linear_potentiometer_12 = 1023
 
 [[preset]]
-name = "Bowtie"
+name = "Ricochet"
+toggle_switch_7 = 1
+rotary_potentiometer_5 = 960
+
+[[preset]]
+name = "Bow and Burst"
+toggle_switch_7 = 1
 toggle_switch_8 = 1
+toggle_switch_10 = 1
 linear_potentiometer_12 = 620
+
+[[preset]]
+name = "Herringbone"
+toggle_switch_7 = 1
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_3 = 700
 
 [[preset]]
 name = "Echoes"
@@ -134,19 +147,10 @@ toggle_switch_9 = 1
 linear_potentiometer_12 = 300
 
 [[preset]]
-name = "Azure Twin"
-toggle_switch_8 = 1
-toggle_switch_10 = 1
-
-[[preset]]
-name = "Six Systems"
-rotary_potentiometer_1 = 1023
-rotary_potentiometer_3 = 700
-
-[[preset]]
-name = "Etched"
-rotary_potentiometer_6 = 620
-linear_potentiometer_12 = 650
+name = "Red Giants"
+rotary_potentiometer_2 = 900
+rotary_potentiometer_5 = 1023
+linear_potentiometer_12 = 800
 
 [[preset]]
 name = "Osc Weave"

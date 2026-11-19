@@ -109,19 +109,28 @@ HSH = [
 # Pipeline: one instruction per clock (a multiply stalls ~22 clocks).  An RF register stored by
 # instruction i may be read from instruction i + 4 on: the assembler inserts NOPs.
 OPS = dict(NOP=0, LDI=1, ADDI=2, LD=3, ADD=4, SUB=5, ST=6, OUT=7, IN=8, MAX0=9, MUL=10, MULI=11, MULP=12, END=15)
-PORTS = dict(X1=0, X2=1, X3=2, X5=3, P=4, TSX=5, V=6, Y4=7, EA=8, HSH=9)
+PORTS = dict(X1=0, X2=1, X3=2, X5=3, P=4, TSX=5, V=6, Y4=7, EA=8, HSH=9, SHF=10)
 OUTS = dict(S1R=0, FLR=1, FRR=2, DX0=3, K2X=4, KXO=5, LV1=6, LV2=7, LV3=8, XLW=9, XRW=10, LOB=11,
-            L0=12, CA=13, G0=14, XA=15, XF=16, PSI=17, PHV=18, HGW=19, CY=20, OY=21, GINC=22)
+            L0=12, CA=13, G0=14, XA=15, XF=16, PSI=17, PHV=18, HGW=19, CY=20, OY=21, GINC=22, SH=23)
 RF_HAZARD = 4
 
+# v0.6.0 (phase 2): K1 Heights (ribbon cascade / lens, count fixed at the photo's 5.3), K2 Sweep 0.25x .. 4x and
+# K5 Width 0.25x .. 2.25x on a (1 + u)^2 curve (photo at 512, bit-exact), P12 above 50 % thins the strips 45 -> 15
+# lines (SH), S10 Shuffle also tears the ribbons at every seam (SHK).
 FIELD = """
-    IN X1; ADDI -512; MAX0; MULI 4,0; ST T0
-    IN X1; MULI 4,0; ADDI 2048; ADD T0; MULI 81741,12; ST KV
-    IN X2; ADDI -512; MULI 37,3; ADDI 4096; ST T1
-    IN X2; ADDI -512; MAX0; MULI 49,3; ADD T1; ST SW
+    LDI 81741; ST KV
+    IN X1; ADDI -512; MAX0; ST T0
+    IN X2; ADDI -512; MAX0; ST T1
+    IN X5; ADDI -512; MULI 1,1; ADDI 512; ST T3
+    IN X1; ADDI -512; SUB T0,0; MULI 91,2; ST CJ
+    LD T0; MULI 359,3; ST CK
+    IN X2; ADDI -512; SUB T1,0; MULI 1,1; ADD T1,0; ADDI 512; ST T2
+    LD T3; MUL T3,6; ST WID
+    LD T2; MUL T2,6; ST SW
     MULI 27914,10; ST S1V; MULP TSX,10; MULI 1,10; ST S1X; MULP TSX,12; OUT S1R; MULI -67,1; OUT GINC
     LD SW; MULI 30199,12; ST FLV; MULP TSX,12; OUT FLR
     LD SW; MULI 26844,12; MULP TSX,12; OUT FRR
+    LD SW; MULI 27914,11; ST S1H
     LD S1V; MULI 61009,9; ADDI -119453778; ST PSIA
     IN X3; ADDI -511; MAX0; ST T2
     IN X3; ADDI -512; MAX0; ST WIDE
@@ -131,12 +140,13 @@ FIELD = """
     LD LOB,2; ADD LOB,4; ADD LOB,5; OUT LV1
     LD LOB,1; ADD LOB,3; ADD LOB,4; OUT LV2
     LD LOB,0; ADD LOB,4; OUT LV3
-    IN X5; ADDI -512; MULI 29,3; ADDI 4096; ST WID
     IN TSX; MULP TSX,15; ST K2; OUT K2X
     IN TSX; MULI 93,12; OUT KXO
     IN TSX; MULI -120,0; ADD K2,1; OUT DX0
     IN V; MULI 1,3; MUL KV,8; ADD VROLL,0; ST VROLL
-    IN P; ADDI -512; MAX0; MULI 45,0; ST PQ
+    IN P; ADDI -512; MAX0; ST PQ0; MULI -61,6; ADDI 720; OUT SH
+    LD PQ0; MULI 45,0; ST PQ
+    IN SHF; MULI 25600,0; ST SHK
     LD OY0; ADDI -197; ST OY0
     END
 """
@@ -146,14 +156,20 @@ LINE = """
     LD NPSI; OUT PSI; LD NPHV; OUT PHV; LD NHGW; OUT HGW; LD NCY; OUT CY; LD NOY; OUT OY
 """
 
+# Heights: G = CJ * DM^2 / 2^28 (cascade, CJ <= 0) + CK * (DM^3 / 8192^2 - DM) / 2^15 (lens, CK >= 0), DM = the line - 540
+# (Q4 lines), added to the line before the ribbon frequency KV.
 LCOMP = """
+    IN Y4; ADDI -8640; ST DM
     IN EA; MULP P,9; ST QA
+    LD DM; MUL DM,13; ST DM2
+    MUL DM,13; SUB DM,0; MUL CK,15; ST GK
     IN EA; MULI 5,2; ADDI 10854; MULP EA,9; MULP P,14; ADDI -1019; ST D4
-    LD PQ; MULP HSH,12; ST SL
+    LD DM2; MUL CJ,15; ADD GK,0; ST G
+    LD PQ; ADD SHK,0; MULP HSH,12; ST SL
     LDI 20000; ADD QA,1; ADD QA,3; ST UF4
     LDI 4880; SUB QA,2; SUB QA,4; ST XL4
     LDI 112; SUB QA,7; SUB QA,11; MUL WID,12; MAX0; ST NHGW
-    IN Y4; ADD SL,0; ADDI -2032; MUL KV,4; ADD VROLL,0; ST NPHV
+    IN Y4; ADD G,0; ADD SL,0; ADDI -2032; MUL KV,4; ADD VROLL,0; ST NPHV
     LDI -4480; SUB D4,0; MUL S1X,4; ST NL0
     LDI 4480; SUB XL4,0; MUL S1X,4; ST NCA
     LD D4; ADD XL4,0; ADDI 1104; MUL FLV,4; ST T1
@@ -162,7 +178,7 @@ LCOMP = """
     LD NL0; MULI -67,1; ADD T3,0; ST NG0
     LD D4; ADDI 8432; ST NXA
     LD UF4; ADD D4,0; ST NXF
-    LD NN; MUL NN,4; ADDI -76176; MUL S1V,13; ST T2
+    LD NN; MUL NN,4; ADDI -76176; MUL S1H,12; ST T2
     IN Y4; ADDI -26400; ST DY
     IN Y4; MULI 126,4; ADD OY0,0; ST NOY
     LD PSIA; SUB T1,0; SUB T2,0; ST NPSI

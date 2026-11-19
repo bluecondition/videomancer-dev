@@ -1,11 +1,123 @@
 # Shield — twin striped shields, plaid in nested U bands, blue pillars
 
+**v0.6.2 (2026-11-19): phase 2 FINAL — Ron prefers the diag in every case, so it is merged into production** (`out/rev_b/ron/heirloom/shield.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; this exact build not flashed). It is the phase-2 round plus the K6 camera pass; status lines below that say "diag" or "production untouched" are history. The replaced v0.5.2 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`.
+
+**v0.6.0 (2026-11-03, phase 2): diag preview built, awaiting Ron's preview** (see [Phase 2](#phase-2-v060);
+`Shield Diag`, `out/rev_b/ron/_diag/shield_diag_v0.6.0.vmprog`, copy in `out/rev_b/ron/heirloom/_diag/`).
+Production v0.5.0 (`programs/ron/heirloom/shield/`) is untouched. Phase-2 working files: `.heirloom_work/rb_shield/p2/`.
 **v0.5.0 (2026-10-27): built, NOT flashed.** Heirloom #38, rebuilt from the photo
 `photos/WIN_20230529_22_56_41_Pro.jpg`. The photo shows two shields side by side. Each is a nest of
 U-shaped bands, with vertical walls at the top and a V tip at the bottom centre. Horizontal stripes cut
 the bands into an orange and red plaid. Each shield is ringed by a dark-red ramp, then a navy-to-blue
 ramp, with a thin white line on its left arm. Below sit a red M body and bright blue triangles. Blue
 pillars stand by the seams, with a column of stripes in each seam. Presets are hand-written placeholders.
+
+## Phase 2 (v0.6.0)
+No notes from Ron for shield (free hand, 2026-11-03 batch). The v0.5 knobs were already bold, each one an oscillator
+or level on one module (the H ramp's frequency, the keyer gain, the stripe oscillator, the drift, the F1 level, the
+video attenuator, the V parabola's depth). So the round keeps them, and spends the changes on per-shield modules and
+on the two weak switches:
+- **Per-shield parameter sets.** The line engine now runs twice per line, for set A (every second shield, including
+  the one left of the centre seam) and set B (the others). The pixel path picks a set by the shield's parity. In
+  patch terms, each shield is its own V-parabola + F1 module instead of one module multed to every shield.
+- **S7 Line** (a thin white line on / off) is now **Pairs: Same / Facing**. Facing draws every set-B shield upside
+  down, with its pillars, M body and triangles: upright and inverted shields interlock.
+- **S10 Stripes** (on / off) duplicated K3 = 0, which also gives one stripe type. It is now **Rows: Level / Brick**:
+  the stripe square wave is patched into the H ramp's phase, so orange rows slide +1/8 shield and red rows −1/8.
+- **K6 Etch** bends the stripes as well as the bands, by the same luma: the plaid rows warp around the picture.
+- **K1 Shields** is exponential, with the photo at the centre and about twice v0.5's range each way.
+- The default frame is byte-identical to v0.5 (GHDL, see Checks).
+
+| Was (v0.5) | Now (v0.6.0) | Full sweep, in screen terms |
+|---|---|---|
+| K1 Shields: linear (k + 160)/183, 0.87 .. 6.5 shields, photo 2.04 at 213 | **Shields** exponential 2.04 × 2^((k − 512)/256): **0.51 .. 8.1**, photo at **512** (new default, same picture, bit-exact) | 0 = one shield ≈ 3,780 virtual px wide: the seam column fills the middle with two shields' outer rings and pillars, and no whole shield shows; 512 = the photo's two shields (942 px tiles); 1023 = 8 narrow shields (236 px), the bands squeezed into tall chevrons |
+| K6 Etch: luma bends the bands, 0 .. 320 px per full luma | **Etch**, same band bend, **plus the stripes**: the stripe phase moves 4/4096 cycle per quarter-px of etch | Default Etch, white picture: bands move ~100 px and stripes ~0.38 cycle (~56 lines at the photo's 147-line period). Full Etch: 320 px and 1.24 cycles, so rows fold into chevrons around the picture. Osc: the lattice bends the stripes into chevrons |
+| S7 Line: the white / dark one-shot lines On / Off | **S7 Pairs** (renamed): **Same / Facing** | Facing turns every second shield over: the right shield's V tip goes from y ≈ 930 to y ≈ 150 (1080 lines), and its M body and blue triangles move to the top. A whole-screen change. The white and dark lines are now always on, as in the photo |
+| S10 Stripes: On / Off (plain orange nested bands) | **S10 Rows** (renamed): **Level / Brick** | Orange and red rows offset ±1/8 shield (±118 px, 235 px relative = 12 % of the width at the photo's count); scales with K1 (945 px relative at K1 0, 59 px at 1023). At K3 ≈ 0 (one stripe type) the whole picture slides 1/8 shield |
+
+Unchanged: K2 Bands, K3 Stripes, K4 Speed, K5 Pillars, S8 Tincture, S9 Flip (with Facing it swaps which shields point
+up), S11 Source, P12 Depth.
+
+**Presets:**
+- Photo, Banners, Cascade and Azure Crown are as before.
+- Six Shields now sets K1 to 940, which is still 6.5 shields.
+- New:
+  - **Facing:** S7 on, 3.4 shields, P12 480.
+  - **Brickwork:** S10 on, fewer stripes, lower pillars.
+  - **Harlequin:** Facing + Brick + Azure, 3.1 shields, finer bands.
+- Model previews of the new controls and presets: `p2/sheet6.png`.
+
+**Engine (new).**
+- **K1.** Sequencer slot 14 (zc 366, stored at 386) computes 373·(256 + k mod 256), sliced by k div 256: a linear
+  mantissa, at most 6 % off a true exponential and exact at the photo. The next field's step slot uses it, one field
+  late, which is invisible under the glide. `c_step` is 18 bits wide.
+- **Tile phase.** 25 bits, so the phase wraps every two shields. Parity = bit 24 xor bit 23. The phase at virtual
+  x = 960 is always the photo's PH960, so the shield left of the centre seam is always set A and stays upright.
+- **Line engine.** Two passes of the existing 107-clock sequence, about 215 clocks after the line start (SD's active
+  line is 720 clocks).
+  - Pass B flips y when Facing is on (Flip xor Facing).
+  - The once-per-line work (stripe phase, wobble, start phase) runs in pass A only.
+  - In pass B, Brick adds ±2^21 to the line's start phase according to the line's stripe bit.
+  - The line hands over the top 12 bits of the stripe phase instead of a stripe bit.
+- **Pixel path.**
+  - The parity is pipelined. Stage 5 picks this shield's g, and stage 7 picks its C1.
+  - Stage 10 bends the stripe phase by 4 × the etch term.
+  - The keyer word grows from 8 to 10 bits and carries the parity (for the white-line fade) and the stripe bit.
+  - Latency (32) and pixel depth are unchanged, so the U/V parity holds.
+- **Cost.** +~250 LC (6,651–6,665 → 6,901–6,918). EBR unchanged at 12.
+
+**Build** (router1, `NEXTPNR_ROUTER="--router router1" .heirloom_work/diag_build.sh shield`, 2026-11-03).
+- All six configs closed on seed 1: HD Analog 78.97, SD Analog 85.75, HD HDMI 81.35, SD HDMI 86.48, HD Dual 81.35,
+  SD Dual 85.75 MHz.
+- 6,901–6,918 / 7,680 LC (90 %), 12 / 32 EBR.
+- iceunpack OK ×6. The packed config carries the new labels and presets.
+- No pin-skew screen; the builder's seeds are kept.
+
+**Checks** (working files in `.heirloom_work/rb_shield/p2/`):
+- **GHDL front end** (`check.sh`): analyse / elaborate / synth clean.
+- **Model.** `imodel6.py` is the v0.5 integer model plus the v0.6 arithmetic. Its default frame equals v0.5's model
+  on every pixel at 1080p, 720p and NTSC.
+- **Sweep** (`sweep6.py`), over all 1024 K1 positions in every mode:
+  - the K1 product and its slices fit, and `c_step` < 2^18;
+  - the phase at x = 960 returns to PH960 (parity 0 at the centre);
+  - the etch and bend widths fit.
+- **GHDL renders** (`sims.sh`: 720p60, decimation 1, Speed still, black input, as v0.5's baseline):
+  - **the default output is byte-identical to v0.5's `out_exact4.txt`;**
+  - **Facing + Brick + K1 640 matches `imodel6.py` on 100 % of pixels.** The capture is mid-glide, at K1 = 542. This
+    verifies the two-pass line engine, the parity select, Facing, Brick and the K1 path.
+- **Not simulated,** reasoned from the code and the model instead: the stripe bend (it needs luma, and the input
+  was black), Osc mode, SD, motion over time, and Facing + Flip.
+
+## Open questions for Ron
+1. **Seesaw.** With per-shield sets in place, P12 could drive the set-B shields inverted, so one shield deepens as
+   its neighbour flattens. Want it, and on which switch (S9 Flip is the candidate)?
+2. **K1 Shields** is still a count (the H oscillator's frequency). Would you rather have per-shield widths (Lens:
+   centre shields swell / Fan: widths grow left to right), with the count fixed at the photo's, as on jukebox?
+3. **Brick amount.** ±1/8 shield keeps the bricks readable. ±1/4 is a full counterchange: every second row shows the
+   inverted shield, which is much busier.
+4. **Outline ring.** Its width (the dark-red and blue ramps, hairline .. a fat ring pushing the M out) has no
+   control. Worth trading a knob for it?
+
+## Hardware watch list
+- **Renamed:**
+  - S7 Line → **Pairs** (Same / Facing);
+  - S10 Stripes → **Rows** (Level / Brick).
+- **K1's default moved** from 213 to 512 (same picture).
+- **The white line can't be switched off any more.**
+- **Facing** leaves a hard vertical cut at every second seam where an upright and an inverted shield meet. This is
+  by design: they are two separate shields. At P12 = 0 (flat banners) Facing changes only the pillars, the same as
+  v0.5's Flip.
+- **Osc default.** The lattice now also bends the stripes. Video with no input is still exactly the photo.
+- **Timing.** Nothing thin: the lowest HD config is 78.97 MHz. No features were cut for fit.
+
+## Next step
+On approval, run `./heirloom_diag.sh merge shield`. Then repack the previewed diag bitstreams under the production
+TOML instead of re-routing:
+1. Copy `build/programs/ron/shield_diag/rev_b/bitstreams/*.bin` into the production build dir.
+2. Regenerate `program_config.bin` from the production TOML.
+3. Run `vmprog_pack.py --no-sign --hardware rev_b`.
+
+Then update the production SUMMARY / README / PHASE2 rows and commit only shield's files and rows.
 
 ## Reading of the photo (measured)
 Working files are in `.heirloom_work/rb_shield/` (`notes.md`, `gfit.json`).
@@ -159,23 +271,15 @@ Working files are in `.heirloom_work/rb_shield/` (`notes.md`, `gfit.json`).
   is the designed P12 climax.
 - **Osc mode.** At default Etch the lattice's positive mean shrinks the shields by about 45 px.
 
-## K6 camera pass (2026-11-15)
-
-Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.5.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
-
 ## K6 top +25 % and default 100 % (2026-11-15)
 
-- **Bend-type:** K6 Etch adds the camera's (or the lattice's) luma to the field, so the bands, outlines and pillars
-  bend.
-- **Change:** the per-field etch gain constant 86 -> 108, so c_eg is 0 .. 107 (was 0 .. 85; x1.26 at 1023). This
-  adds no logic.
-  - The pixel path already had room: the nibble products stay under 12 bits, the etch sum is ≤ 27,285 (16 bits)
-    and the etch term ≤ 1,705.
-  - The field + etch wraps at 1024 px by design.
+- **Bend-type:** K6 Etch bends the bands and the stripes by the camera's (or the lattice's) luma.
+- **Change:** the same as the main program. The per-field etch gain constant 86 -> 108, so c_eg is 0 .. 107 (was
+  0 .. 85; x1.26 at 1023).
+  - The pixel path already had room: the products stay under 12 bits, the etch sum is ≤ 27,285 and the etch term
+    ≤ 1,705.
+  - The field + etch wraps at 1024 px and the stripe phase wraps, both by design.
   - Full Etch is now ~400 px per full luma (was 320).
-  - The K6 default of 100 % and the version (v0.5.2) were set by the orchestrator.
-  - The diag copy got the same change (its own SUMMARY.md).
-- **Look check:** `.heirloom_work/rb_shield/k6b/k6b_cmp.png` (720p60 dec 4, bear, K6 1023, glide bypassed in the
-  scratch copies). The picture is the same, with the blue bands bent further into the stripes. No wrap.
-- **Build:** router1, all six on seed 1. HD Analog 87.37, HD HDMI 84.63, HD Dual 84.63 MHz (worst HD 84.63);
-  6,642-6,670 LC, 12 EBR.
+  - The K6 default of 100 % and the version (v0.6.2) were set by the orchestrator.
+- **Build:** router1, all six on seed 1. HD Analog 87.11, HD HDMI 78.36, HD Dual 82.39 MHz (worst HD 78.36);
+  6,908-6,924 LC, 12 EBR. `out/rev_b/ron/_diag/shield_diag_v0.6.2.vmprog`.

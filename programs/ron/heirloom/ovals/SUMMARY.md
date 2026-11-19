@@ -1,5 +1,140 @@
 # Ovals — chains of rainbow-roped vesica ovals on a striped pink ground
 
+**v0.6.2 (2026-11-19): phase 2 FINAL — Ron prefers the diag in every case, so it is merged into production** (`out/rev_b/ron/heirloom/ovals.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; this exact build not flashed). It is the phase-2 round plus the K6 camera pass; status lines below that say "diag" or "production untouched" are history. The replaced v0.5.4 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`.
+
+**v0.6.0 (2026-11-03, phase 2): diag preview built, awaiting Ron's preview** (see [Phase 2](#phase-2-v060);
+`Ovals Diag`, `out/rev_b/ron/_diag/ovals_diag_v0.6.0.vmprog`, copy in `out/rev_b/ron/heirloom/_diag/`).
+Production v0.5.2 (`programs/ron/heirloom/ovals/`) is untouched. Phase-2 working files:
+`.heirloom_work/rb_ovals/p2/`.
+
+## Phase 2 (v0.6.0)
+No notes from Ron for ovals (free hand, 2026-11-03 batch). v0.5.2 sat at 99.6 % LC, so the round first freed about
+350 LC with no visible change, then spent it on per-column parameters and two new switch looks:
+- **K1 Columns** was a global X zoom of the whole lattice. It is now **Stagger**: each of the four lens columns
+  per group (outer left, the double oval's two lenses, outer right) gets its own lens-row phase, like four
+  oscillators on one clock with their own phase offsets. The column count is fixed at the photo's.
+- **Seams.** v0.5 picked a half's inner or outer lens by quadrant (the fold at T = m). That only works while
+  the two lenses are in step; with any Stagger it put a straight full-height seam down every diamond-centre
+  line (the phase-1 seam problem, seen in the first v0.6 render). The pixel path now takes the **union of each
+  half's inner and outer lens** (three-way max with the other half's inner lens). The blend that hides the side
+  flip uses the true crease, |Q_in − Q_out| / 2, in place of the distance to T = m. That also removes the
+  v0.5 deviation "the fold picks one lens at the diamond-centre line (a Q step up to ~12 px)".
+- Both Stagger patterns keep the two outer columns in one phase, so where neighbouring groups meet (the period
+  boundary) nothing steps.
+
+| Was (v0.5) | Now (v0.6.0) | Full sweep, in screen terms |
+|---|---|---|
+| K1 Columns: lattice density ×0.5 .. ×2 (zoom about the centre) | **K1 Stagger** (renamed), bipolar, photo at 512 (all columns in step) | **Right = Braid:** the double oval's two lenses slide apart in phase, up to anti-phase (each ±1/4 row = ±131 lines at 1080p), while the outer columns stand still. The double oval becomes two interleaved chains, one lens bulging where the other pinches. **Left = Rock:** the double oval slides against the outer columns, up to half a row (263 lines = 24 % of the height), so its bellies sit beside the outer columns' X points and the diamonds between them change shape. Glided; rides with K2 (the offsets are in rows) |
+| K2 Links: lens-row frequency ×0.5 .. ×2, clamped at both ends (the outer ~12 % of travel did nothing) | **×0.25 .. ×4, exponential over the full travel**, photo at 512 (bit-exact) | 0 = half a link on screen (one giant lens, rows ~2100 lines); 1023 = ~8 rows of 131-line links. The stripes keep their period |
+| S8 Glow: On / Off (the bottom ~12 % of the frame) | **S8 Glow: Bottom / Rows** | Bottom = the photo's white glow below line ~945. **Rows:** the belly of every lens row glows across the whole frame: full white over the middle third of each row, fading out over the next ~15 % (it follows the bulge oscillator, so it moves with Speed and K2) |
+| S9 Twist: the violet / green ropes swap sides (a colour nudge) | **S9 Wave: Arc / Cusp** (renamed) | Cusp inverts the bulge oscillator (255 − s): every link pinches where it was widest and comes to a sharp point where the links used to touch. The result is cusped hourglass / four-point-star links with concave sides over the whole lattice. The X stars and the Rows glow follow the new pinch / belly rows |
+
+Unchanged: K3 Split, K4 Speed, K5 Ropes, K6 Etch, S7 Stripes, S10 Palette, S11 Source, P12 Swell (all were
+already live and bold on the v0.5 sheet).
+
+**Presets** (hand-written placeholders, as everywhere in heirloom):
+- Photo (the defaults).
+- **Braid** (K1 1023).
+- **Rock** (K1 0, Swell 700).
+- **Cusp Chain** (S9 Cusp).
+- **Glow Beads** (S8 Rows, K2 700).
+- **Ice Cusps** (Cusp + Ice, Braid 800, Swell 800).
+- **Tall Rock** (Rock 150, K2 200, Swell 900).
+- **Dense Lattice** (K2 1000, Split 800, K5 300).
+
+**Engine (new).**
+- **Per-column half-widths.** After the v0.5 line computation (states 1..128), the line engine runs four
+  more passes (e_lc 129..250, column j = e_lc(6:5)). Each pass reads the bulge ROM at the line's phase ± the
+  column's offset, computes M_j = A·s_j on the line multiplier, and stores h_j = (M_j + 1.047·M_j + dl)/2 + p_j
+  in place of the shared half-width. The half-width chain (mg16 → t1 → hb16 → hb) now runs every clock off
+  e_m16, so the four passes share its adders. The star, the Rows glow and the centre line use the shared phase.
+- **Pixel stages 2..8** are the per-half union: s = T − m, a = s + L_in, b = s − L_out, |a|, |b|,
+  Q_in = h_in − |a|, Q_out = h_out − |b|. Stage 6 decides on three signs at once (Q_in − qo, Q_out − qo,
+  Q_in − Q_out). Stage 7 takes both crease half-distances, and stage 8 the min against the axis distance. The
+  stage count is unchanged.
+- **Cusp** is one XOR on the bulge ROM output; **Rows** is a per-line mux into the glow weight.
+- **K2:** idx = K2 >> 2 into the 0.5 .. 2 table, shifted left or right by idx(7). c_dv is 13 bits; every
+  product of it fits its slice (`sweep.py`).
+
+**Fit (nothing visible was cut).** First the cuts, ~−400 LC before any feature:
+- The output chroma filter's two 8-deep 10-bit delay lines → a 256 × 20 block-RAM ring (read = write − 6, RAM
+  register + one fabric register = 8 clocks, `no_rw_check`, 0 transparency emulation): −160 FF, +2 EBR.
+- The video tap's 10-clock FF delay → one register: the camera (and the Osc etch lattice) sits ~8 px left of
+  the lattice at 1080p (~1 % of the width at SD). That is invisible for a ring-bending etch, and with black input
+  it changes nothing.
+- The latency-28 padding (two 30-bit output registers) moved ahead of the beam: the beam starts at
+  s_gav_sr(1), every pixel-path avid tap is +2, and data_out = stage 26. The output stream is unchanged.
+- The blend distances are saturated at 63 (only e < 32 matters) and Q is carried at 12 bits (|Q| < 1200).
+  Both are bit-exact.
+- The Osc row step (ys·121/256, a constant multiply) is a 7-entry table, and K1's density slot and multiply are gone.
+
+Then the union and the features took back ~+170 LUT. Net: 7,291–7,3xx LC against v0.5.2's 7,645–7,657.
+
+**Build** (router2, `.heirloom_work/diag_build.sh ovals`, 2026-11-03): post-route Fmax HD Analog 81.18 (seed 1),
+SD Analog 77.29 (seed 1), HD HDMI 88.34 (**seed 2**: seed 1 stalled the router under load, not a miss), SD HDMI
+84.85 (**seed 2**, same), HD Dual 79.99 (seed 1), SD Dual 88.37 MHz (seed 1). 7,291–7,307 / 7,680 LC (95.1 %,
+−354 against v0.5.2), 17 / 32 EBR (+2: the chroma ring). iceunpack OK ×6. The sources' md5 was unchanged across
+the build. After the build the presets Staircase / Weave / Tall Weave were renamed Braid / Rock / Tall Rock (they
+were named for an earlier pattern), and the vmprog was repacked from the same bitstreams with a regenerated
+program_config.bin: 146 bytes differ, all labels. `out/rev_b/ron/_diag/ovals_diag_v0.6.0.vmprog` (482,620 B), copy
+in `out/rev_b/ron/heirloom/_diag/`. No pin-skew screen.
+
+**Checks** (working files in `.heirloom_work/rb_ovals/p2/`):
+- GHDL analyse / elaborate / synth front end clean (`check.sh`).
+- Standalone yosys (`syn.sh`): v0.5.2 4,324 LUT / 3,083 FF / 15 RAM → v0.6.0 4,352 LUT / 2,725 FF / 17 RAM; no
+  `emulate_transparency`.
+- `sweep.py`: K2's c_dv over the full travel fits every product slice (z_t1, dphi, z_t7, c_fls) in all modes,
+  and is monotonic with the default = v0.5's 1030; the Stagger offsets are 0 at 512; the Rows weight is 0..61.
+- GHDL 720p60, decimation 1, 2 warm-up + 1 captured field:
+  - **Cuts only (before the union): default frame byte-identical to production v0.5.2** (Video, no input, the
+    photo look: 0 of 921,600 pixels differ). Osc differs only by the Osc etch lattice's ~10 px shift (visually
+    the same, `cmp_d1.png`).
+  - **Final: default frame = v0.5.2 except two thin strips on the diamond-centre lines** (1.19 % of pixels
+    differ by more than 12; `diff_d2.png`). There the union replaces the old fold's Q step with the true crease.
+  - Extremes (sim-only copies with the K1 glide preset): Braid 1023 + Glow Rows (`x2_braid.png`) and Rock 0 +
+    Cusp (`x2_rock.png`) render coherently, with no straight seams (`crop_x2.png`). The first v0.6 build's
+    staircase render (`x_stag_rows.png`) is the one that showed the fold seams.
+- Not checked by sim: SD, motion over time with Stagger, Split / Swell extremes with Stagger, K2 extremes.
+  These are reasoned from the code and the sweep.
+
+## Open questions for Ron
+1. **Stagger patterns.** Right = Braid (the double oval's lenses apart), left = Rock (the double oval against the
+   outer columns). The alternative I drafted first was a staircase rising across each group (outer columns ±1/2
+   row). It needs a union across the period boundary too (~+60 LC), because the outer columns of neighbouring
+   groups then differ. Want it instead of one side?
+2. **Columns.** The column count is now fixed at the photo's (Stagger took K1). Should a count or zoom come
+   back, for example on a switch with two or three fixed densities?
+3. **S8 Glow Rows vs Off.** Rows replaced the plain Off. Do you miss a glow-free picture? (P12, K5 and Split
+   all still show the rings under it.)
+4. **Twist.** The violet / green rope swap is gone (S9 is now Wave). Bring it back as a third role somewhere?
+
+## Hardware watch list
+- **Renamed controls** (diag vs production labels differ): K1 Columns → **Stagger**; S9 Twist → **Wave**
+  (Arc / Cusp); S8 keeps **Glow** but its options are now Bottom / Rows (was On / Off).
+- **Default picture:** it should match v0.5 except along the two diamond-centre lines beside the double oval,
+  where the union now draws the true crease (thin ~3 px strips; it was a Q step in v0.5).
+- **The video etch** now sits ~8 px left of the lattice (the video tap moved ahead). That should be invisible.
+  If the etch looks offset, that is why.
+- **Seams:** with Stagger off-centre, look along the diamond-centre lines and the period boundary for straight
+  vertical seams; the sims showed none at the extremes. At extreme Split / Swell the v0.5 boundary seam (the
+  outer lenses straddling the period boundary) is unchanged.
+- **Timing:** comfortable (HD 80–88 MHz). HD HDMI and SD HDMI are on seed 2 (router stalls on seed 1 under
+  load); if HD HDMI shows lines, re-route that config.
+- **Fit:** 95 % LC, so a second round has ~100 LC before the guideline. Nothing was cut for fit.
+
+## Next step
+- On approval: `./heirloom_diag.sh merge ovals`, then **repack the previewed diag bitstreams** under the
+  production TOML instead of re-routing. Copy `build/programs/ron/ovals_diag/rev_b/bitstreams/*.bin` into a
+  scratch dir with `program_config.bin` regenerated from `programs/ron/heirloom/ovals/ovals.toml`, then
+  `vmprog_pack.py --no-sign --hardware rev_b --toml-path programs/ron/heirloom/ovals/ovals.toml <dir>
+  out/rev_b/ron/heirloom/ovals.vmprog`. Expect the same size as the preview, ~140 bytes different, and no
+  `_diag` in the id.
+- Then update the production SUMMARY / README / PHASE2 rows and commit only ovals's files and rows
+  (`.heirloom_work/p2_batch/stage_rows.py ovals`).
+- To rebuild the diag instead: `.heirloom_work/diag_build.sh ovals` (router2).
+
+## v0.5 reference (production)
+
 **v0.5.1 (2026-10-28): built, NOT flashed.** Rebuilt from the photo WIN_20231003_23_01_50 (Heirloom #50).
 v0.5.1 is the review iteration on v0.5.0: no straight seams (lens union plus a both-side palette blend at every
 side flip) and high-contrast ring interiors.  Presets are hand-written placeholders.
@@ -148,13 +283,8 @@ photo look.  Osc substitutes a drifting 2-D triangle lattice through the same pa
 - images: `cmp_final.png`, `z_mid_final.png` (photo / v0.5.0 / v0.5.1 middle double oval), `sheet.png`;
 - `v051a/` (fallback build without the fold clamp), `syn/v20.vhd` (3-candidate draft).
 
-## K6 camera pass (2026-11-15)
-
-Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.5.3). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
-
 ## K6 top +25 % and default 100 % (2026-11-15)
 
-**Bend type**: K6 Etch adds the camera (or Osc) luma to the palette index, so the gain was raised 25 %. The K6 default is now 100 % (orchestrator).
-- The design is at 99.6 % LC, so the change is one per-field add. c_k6 = K6 / 2 + K6 / 8 (0 .. 638, still 10 bits), and the etch product slice moves down one bit (p7_et(17:8)). The pixel multiplier keeps its 8 x 10 width, and p8_e2 grows by one bit. The index clamps at 0 .. 511 as before.
-- Check: `.heirloom_work/rb_ovals/k6b/k6b_cmp.png` (glide bypassed in the scratch copies). Bright areas push further up the palette: same picture, no wrap.
-- Build: v0.5.4, router1, all six on seed 1; worst HD 83.77 MHz (HD Analog 83.77, HD HDMI 90.77, HD Dual 86.19); 7,658 / 7,680 LC (99.7 %, +1 vs v0.5.2). `.kinetic_work/k6_builds.txt`: heirloom ovals OK router1 worst-HD 83.77 LC 7658.
+**Bend type**: K6 Etch adds the camera luma to the palette index. The change is the same as in the main program: c_k6 = K6 / 2 + K6 / 8 and the etch slice p7_et(17:8), +25 % at every position. The K6 default is now 100 % (orchestrator).
+- Not rendered; checked by GHDL analysis and the build.
+- Build: v0.6.2, router1, all six on seed 1; worst HD 86.64 MHz (HD Analog 89.69, HD HDMI 96.16, HD Dual 86.64); 7,312 / 7,680 LC. `.kinetic_work/k6_builds.txt`: diag ovals OK router1 worst-HD 86.64 LC 7312.

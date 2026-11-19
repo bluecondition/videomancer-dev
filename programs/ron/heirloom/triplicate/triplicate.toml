@@ -1,4 +1,4 @@
-# Triplicate - Heirloom #53 (2026-10-21), rebuilt from selfie.jpg (a paper collage).
+# Triplicate - Heirloom #53 phase 2 diag v0.6.0 (2026-11-09); v0.5.0 (2026-10-21) rebuilt from selfie.jpg (a paper collage).
 # The picture cut out as a bear, photocopied in red, green and blue and cascaded over a wall of prints.
 # See triplicate.vhd and SUMMARY.md.
 
@@ -6,7 +6,7 @@
 processing_delay_clks = 21
 program_id = "com.czartroniks.triplicate"
 program_name = "Triplicate"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -20,21 +20,21 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Recede"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 150
+display_min_value = -100
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 name_label = "Size"
 control_mode = "linear"
-display_min_value = 60
-display_max_value = 130
+display_min_value = -100
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -85,14 +85,14 @@ initial_value_label = "RGB"
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Inks"
-value_labels = ["RGB", "CMY"]
+value_labels = ["RGB", "CMYK"]
 initial_value_label = "RGB"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Front"
-value_labels = ["Colour", "Ink"]
-initial_value_label = "Colour"
+name_label = "Print"
+value_labels = ["Positive", "Negative"]
+initial_value_label = "Positive"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -117,7 +117,7 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Selfie"
+name = "Photo"
 
 [[preset]]
 name = "Nested Dolls"
@@ -132,10 +132,26 @@ rotary_potentiometer_2 = 400
 [[preset]]
 name = "CMYK Plates"
 toggle_switch_8 = 1
-toggle_switch_9 = 1
 rotary_potentiometer_3 = 640
 
 [[preset]]
 name = "Silhouettes"
 rotary_potentiometer_3 = 1023
 toggle_switch_10 = 1
+
+[[preset]]
+name = "Reverse Stack"
+rotary_potentiometer_1 = 0
+linear_potentiometer_12 = 1023
+rotary_potentiometer_2 = 380
+
+[[preset]]
+name = "Negatives"
+toggle_switch_9 = 1
+rotary_potentiometer_3 = 420
+
+[[preset]]
+name = "Dance"
+rotary_potentiometer_5 = 900
+linear_potentiometer_12 = 760
+rotary_potentiometer_2 = 400

@@ -1,4 +1,4 @@
-# Waterfall - Heirloom #45 (rebuilt 2026-10-27), from WIN_20230610_00_51_13.
+# Waterfall Diag v0.6.0 (phase 2) - Heirloom #45 (rebuilt 2026-10-27), from WIN_20230610_00_51_13.
 # One line-locked chirped oscillator into a banded colourizer: a curtain of fine lines that fans
 # out and sweeps hard left at the bottom, over rainbow / cyan / lavender / orange bands.
 # See waterfall.vhd and SUMMARY.md.
@@ -7,7 +7,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.waterfall"
 program_name = "Waterfall"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -39,9 +39,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Fade"
+name_label = "Curtain"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
 initial_value = 512
 display_float_digits = 0
@@ -80,8 +80,8 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Beads"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+value_labels = ["Fine", "Zigzag"]
+initial_value_label = "Fine"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -97,9 +97,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Lines"
-value_labels = ["Sharp", "Soft"]
-initial_value_label = "Sharp"
+name_label = "Sweep"
+value_labels = ["Bottom", "Top"]
+initial_value_label = "Bottom"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -118,7 +118,7 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
 name = "Hanging"
@@ -130,11 +130,28 @@ rotary_potentiometer_4 = 820
 linear_potentiometer_12 = 1023
 
 [[preset]]
-name = "Dusk"
-toggle_switch_9 = 1
-rotary_potentiometer_3 = 800
+name = "Open Curtain"
+rotary_potentiometer_3 = 120
+
+[[preset]]
+name = "Fountain"
+toggle_switch_10 = 1
+linear_potentiometer_12 = 800
 
 [[preset]]
 name = "Dense Rain"
 rotary_potentiometer_1 = 900
 rotary_potentiometer_5 = 900
+
+[[preset]]
+name = "Zigzag Storm"
+toggle_switch_7 = 1
+rotary_potentiometer_4 = 1000
+rotary_potentiometer_5 = 1023
+linear_potentiometer_12 = 760
+
+[[preset]]
+name = "Dusk Sweep"
+toggle_switch_9 = 1
+rotary_potentiometer_1 = 300
+rotary_potentiometer_3 = 760

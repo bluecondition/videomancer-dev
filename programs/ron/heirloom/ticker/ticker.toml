@@ -2,18 +2,19 @@
 # Camera video through a sample-and-hold mosaic: H-locked half cells, a line hold on two
 # free-running clocks with tall held bands, a cyan/white luma window key, soft edges.
 # See ticker.vhd and SUMMARY.md.
+# v0.6.0 diag (phase 2): exponential Cells, mixed row sizes, ticker scroll, mirror, duty, cyan flood.
 
 [program]
 processing_delay_clks = 36
 program_id = "com.czartroniks.ticker"
 program_name = "Ticker"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pixel", "Glitch", "Signal"]
 program_type = "processing"
-description = "Sample-and-hold mosaic: half cells, rows on two drifting clocks, tall held bars, a cyan key, soft analog edges."
+description = "Sample-and-hold mosaic: half cells, rows on two clocks, held bars, a cyan key; rows mix sizes, scroll, mirror."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -21,11 +22,11 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Cells"
 control_mode = "linear"
-display_min_value = 12
+display_min_value = 0
 display_max_value = 100
-initial_value = 346
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
@@ -85,21 +86,21 @@ initial_value_label = "Cyan"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
+name_label = "Grid"
+value_labels = ["Even", "Mixed"]
+initial_value_label = "Even"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
 name_label = "Shadow"
 value_labels = ["Photo", "Deep"]
 initial_value_label = "Photo"
 
 [[parameter]]
-parameter_id = "toggle_switch_9"
-name_label = "Edges"
-value_labels = ["Soft", "Hard"]
-initial_value_label = "Soft"
-
-[[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Clocks"
-value_labels = ["Two", "One"]
-initial_value_label = "Two"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -118,11 +119,29 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
 name = "Readout"
 toggle_switch_11 = 1
+
+[[preset]]
+name = "Ticker Tape"
+toggle_switch_11 = 1
+rotary_potentiometer_4 = 960
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Mixed Rows"
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 620
+rotary_potentiometer_4 = 720
+
+[[preset]]
+name = "Kaleido"
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+toggle_switch_9 = 1
 
 [[preset]]
 name = "Meltdown"
@@ -131,13 +150,12 @@ linear_potentiometer_12 = 1000
 rotary_potentiometer_4 = 820
 
 [[preset]]
-name = "Fine Grain"
-rotary_potentiometer_1 = 900
-rotary_potentiometer_2 = 760
-linear_potentiometer_12 = 200
+name = "Slits"
+toggle_switch_7 = 1
+rotary_potentiometer_5 = 90
+rotary_potentiometer_1 = 700
 
 [[preset]]
-name = "Magenta Hard"
-toggle_switch_7 = 1
-toggle_switch_9 = 1
-rotary_potentiometer_3 = 300
+name = "Cyan Flood"
+rotary_potentiometer_3 = 60
+toggle_switch_8 = 1

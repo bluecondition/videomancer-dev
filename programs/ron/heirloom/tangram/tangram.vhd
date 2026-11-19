@@ -3,7 +3,7 @@
 --
 -- 2026-11-15: K6 camera top +25 % (Ron)
 --
--- Tangram v0.5.0 -- Heirloom #9, rebuilt from the photo WIN_20230222_00_06_47.
+-- Tangram v0.6.0 (phase-2 diag) -- Heirloom #9, rebuilt from the photo WIN_20230222_00_06_47.
 --
 -- The photo is an ADDITIVE RGB patch: each colour channel carries one oscillator layer.
 --   R  hot-pink stripe fans: a log-chirped stripe phase (thin dense lines on one side, each next stripe
@@ -26,12 +26,16 @@
 -- Composite RGB = M [r g b 1] (fitted) folded into three RGB -> YUV ROMs (hardware convention u = Cr).
 --
 --   K1  Width   pink stripe width (duty 0.08 .. 0.9, photo 0.46)
---   K2  Wedge   blue wedge opening x0.42 .. x2.4 (bipolar, centre = the photo)
---   K3  Zigzag  plateau zig-zag depth x0 .. x2 (0 = straight edges)
---   K4  Speed   bipolar flow: pink fans stream, green ramps scroll, blue rays flow (still at the centre)
---   K5  Ramps   lower green sawtooth count x0.5 .. x2.9
+--   K2  Wedge   blue wedge opening x0.25 .. x4 (bipolar, centre = the photo)
+--   K3  Zigzag  the green layer's angles: plateau zig x-1 (inverted) .. x0 (straight) .. x1 (photo) .. x4, and the
+--               lower ramps' slant with it (falling .. flat .. photo .. x4 steep)
+--   K4  Speed   bipolar flow: pink fans stream, green ramps scroll, blue rays flow (still at the centre; top x2);
+--               past the photo's speed three LFOs loosen the patch: the wedge swings about its apex, the pink
+--               phase sways down the frame and the plateau slides (all 0 at the default)
+--   K5  Ramps   lower green sawtooth count x0.25 .. x4
 --   K6  Bend    how far the source (camera luma / Osc) bends the pink stripes and lower ramps
---   S7  Tear    torn top-left band + glitch band (default On)
+--   S7  Tear    Shred / Photo (default Photo = the torn top-left band + glitch band; Shred = torn bands down the
+--               whole left third and glitch tears every 64 lines)
 --   S8  Key     centre-triangle key + right cut (default On)
 --   S9  Palette Photo / Rotate (pink fans -> green, green ramps -> blue, blue wedge -> red)
 --   S10 Mirror  pink and green layers mirrored about the centre
@@ -40,7 +44,7 @@
 --
 -- Shell (escalator v0.5): timing-ID virtual-1080 steps, vblank zone, generated avid, output
 -- conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma to ~777) before the gate.
--- Latency 28 clocks in every mode.
+-- Latency 28 clocks in every mode.  v0.6.0 diag: .heirloom_work/rb_tangram/p2 (mc2.py = the microcode).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -82,7 +86,8 @@ architecture tangram of program_top is
     signal s_zone, s_zone_d, s_zgo : std_logic := '0';
     signal s_avq, s_avr : std_logic := '0';
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
-    signal f_tear, f_key, f_pal, f_mir, f_osc : std_logic := '0';
+    signal f_tear : std_logic := '1';
+    signal f_key, f_pal, f_mir, f_osc : std_logic := '0';
     signal f_sd : std_logic := '0';                                   -- SD pixel width (faster smear)
 
     -- per-field values (engine OUT ports, hardwired phase accumulators)
@@ -95,6 +100,7 @@ architecture tangram of program_top is
     signal f_pa, f_pb : unsigned(15 downto 0) := (others => '0');     -- Osc phases: field start, line start
     signal o_sa, o_sb : unsigned(15 downto 0) := (others => '0');
     signal u_z      : signed(15 downto 0) := (others => '0');         -- plateau zig offset (Q.4 px)
+    signal f_tneg   : std_logic := '0';                               -- lower ramps slant negative (K3 left of x0)
     type t_ws is array(0 to 5) of unsigned(12 downto 0);
     signal r_ws     : t_ws := (others => (others => '0'));            -- fan-scaled spline weights
 
@@ -147,7 +153,10 @@ architecture tangram of program_top is
     type t_inc is array(0 to 4) of unsigned(10 downto 0);
     signal l_inc  : t_inc := (others => (others => '0'));           -- plateau ramp increments per pixel, Q.6
     signal l_dot, l_gl, l_tb, l_sep : std_logic := '0';
-    signal l_goff : unsigned(13 downto 0) := (others => '0');
+    signal l_goff : unsigned(15 downto 0) := (others => '0');
+    signal l_pfl  : unsigned(9 downto 0) := (others => '0');        -- the line's pink flow phase (flow + sway)
+    signal l_xq   : unsigned(14 downto 0) := to_unsigned(15939, 15); -- the line's wedge axis, Q.4 px
+    signal l_xc8  : unsigned(18 downto 0);                           -- the same, Q.8 (low bits = 996.2 px exactly)
     signal l_gm   : unsigned(2 downto 0) := (others => '0');
     signal l_vyq  : unsigned(14 downto 0) := (others => '0');
 
@@ -435,10 +444,13 @@ begin
         if rising_edge(clk) then
             v_y := e_vy(18 downto 8);
             e_f <= e_vy(13 downto 6);
-            if v_y < 135 then v_yl := e_vy; e_tb2 <= '0'; else v_yl := e_vy - 34560; e_tb2 <= '1'; end if;
+            if f_tear = '0' then
+                -- Shred: the two torn bands alternate down the whole frame, 128 lines each
+                v_yl := "0000" & e_vy(14 downto 0); e_tb2 <= e_vy(15);
+            elsif v_y < 135 then v_yl := e_vy; e_tb2 <= '0'; else v_yl := e_vy - 34560; e_tb2 <= '1'; end if;
             e_ft <= v_yl(13 downto 6);
             e_rt <= v_yl(15 downto 14);
-            if f_tear = '1' and v_y < 270 then e_tb <= '1'; else e_tb <= '0'; end if;
+            if f_tear = '0' or v_y < 270 then e_tb <= '1'; else e_tb <= '0'; end if;
             if v_y < 100 then e_pb5 <= to_unsigned(0, 5);
             elsif v_y < 298 then e_pb5 <= to_unsigned(7, 5);
             elsif v_y < 549 then e_pb5 <= to_unsigned(15, 5);
@@ -446,9 +458,15 @@ begin
             else e_pb5 <= to_unsigned(0, 5); end if;
 
             v_y := l_vyq(14 downto 4);
-            if f_tear = '1' and v_y < 270 then l_tb <= '1'; else l_tb <= '0'; end if;
-            if f_tear = '1' and v_y >= 626 and v_y < 644 then l_gl <= '1'; else l_gl <= '0'; end if;
-            l_goff <= shift_left(resize(v_y - 626, 14), 9);
+            if f_tear = '0' or v_y < 270 then l_tb <= '1'; else l_tb <= '0'; end if;
+            if f_tear = '1' then
+                if v_y >= 626 and v_y < 644 then l_gl <= '1'; else l_gl <= '0'; end if;
+                l_goff <= shift_left(resize(v_y - 626, 16), 9);
+            else
+                -- Shred: rows 0..17 of every 64 torn right by 0 .. 136 px
+                if v_y(5 downto 0) < 18 then l_gl <= '1'; else l_gl <= '0'; end if;
+                l_goff <= shift_left(resize(v_y(5 downto 0), 16), 11);
+            end if;
             if v_y = 549 or v_y = 550 then l_sep <= '1'; else l_sep <= '0'; end if;
             if v_y < 100 then l_gm <= "000";
             elsif v_y < 298 then l_gm <= "001";
@@ -523,7 +541,7 @@ begin
             if s_avr = '1' then u_pend <= '1'; end if;
             x_d1 <= x_run; x_i1 <= x_i;
             if x_run = '1' then
-                if x_i = 18 then x_run <= '0'; end if;
+                if x_i = 19 then x_run <= '0'; end if;
                 x_i <= x_i + 1;
             end if;
             -- XFER window: the drawn line has left the parameter stages (16 clocks after its avid)
@@ -631,6 +649,7 @@ begin
                                 when 10 => r_ws(3) <= unsigned(u_acc(12 downto 0));
                                 when 11 => r_ws(4) <= unsigned(u_acc(12 downto 0));
                                 when 12 => r_ws(5) <= unsigned(u_acc(12 downto 0));
+                                when 13 => f_tneg <= u_acc(15);
                                 when others => null;
                             end case;
                         when OP_SHR4 => u_acc <= shift_right(u_acc, 4);
@@ -718,6 +737,8 @@ begin
         end if;
     end process p_eng;
 
+    l_xc8 <= l_xq & "0011";
+
     -- XFER loader: the line-register block, one word a clock (mc2.py param block order)
     p_xfer : process(clk) begin
         if rising_edge(clk) then
@@ -735,12 +756,14 @@ begin
                     when 9  => l_gb(2) <= resize(signed(u_rfq(15 downto 4)), 13);
                     when 10 => l_gb(1) <= resize(signed(u_rfq(15 downto 4)), 13);
                     when 11 => l_gb(0) <= resize(signed(u_rfq(15 downto 4)), 13);
+                    when 12 => l_pfl <= unsigned(u_rfq(9 downto 0));
                     when 13 => l_inc(0) <= unsigned(u_rfq(10 downto 0));
                     when 14 => l_inc(1) <= unsigned(u_rfq(10 downto 0));
                     when 15 => l_inc(2) <= unsigned(u_rfq(10 downto 0));
                     when 16 => l_inc(3) <= unsigned(u_rfq(10 downto 0));
                     when 17 => l_inc(4) <= unsigned(u_rfq(10 downto 0));
                     when 18 => l_vyq <= unsigned(u_rfq(14 downto 0));
+                    when 19 => l_xq <= unsigned(u_rfq(14 downto 0));
                     when others => null;
                 end case;
             end if;
@@ -970,7 +993,7 @@ begin
             if f_mir = '1' and b_vx > C_XC8 then p1_vxm <= resize(C_XC2 - resize(b_vx, 20), 19); p_rev(1) <= '1';
             else p1_vxm <= b_vx; p_rev(1) <= '0'; end if;
             p_rev(2 to 4) <= p_rev(1 to 3);
-            if b_vx > C_XC8 then v_vx := resize(b_vx - C_XC8, 20); else v_vx := resize(C_XC8 - b_vx, 20); end if;
+            if b_vx > l_xc8 then v_vx := resize(b_vx - l_xc8, 20); else v_vx := resize(l_xc8 - b_vx, 20); end if;
             p1_dx <= v_vx(18 downto 4);
             if v_vx(18 downto 8) < 7 then p1_dc <= '1'; else p1_dc <= '0'; end if;
             if b_vx > C_XH8 then v_vx := resize(b_vx - C_XH8, 20); else v_vx := resize(C_XH8 - b_vx, 20); end if;
@@ -984,7 +1007,8 @@ begin
             p1_vs <= v_src;
 
             ------------------------------------------------------------ 2
-            if l_gl = '1' and p1_vxm(18 downto 8) > 1060 then p2_vxg <= p1_vxm - resize(l_goff, 19);
+            if l_gl = '1' and ((f_tear = '1' and p1_vxm(18 downto 8) > 1060) or (f_tear = '0' and p1_vxm(18 downto 8) > 160)) then
+                p2_vxg <= p1_vxm - resize(l_goff, 19);
             else p2_vxg <= p1_vxm; end if;
             p2_xi <= p1_vxm(18 downto 8);
             v_bb := resize(l_hw, 20) - signed(resize(p1_dx, 20));
@@ -1072,8 +1096,10 @@ begin
                 end if;
             elsif v_dn and l_gm /= "100" then
                 if p5_acc > resize(p4_inc, 18) then p5_acc <= p5_acc - p4_inc; else p5_acc <= (others => '0'); end if;
-            elsif l_gm = "100" and p_rev(4) = '1' then
-                if p5_acc > resize(p4_inc, 18) then p5_acc <= p5_acc - p4_inc; else p5_acc <= (others => '0'); end if;
+            elsif l_gm = "100" then
+                -- lower ramps: wrapping (only the low 14 bits reach the picture); down on the mirrored half or when
+                -- the slant is negative (K3 left of x0)
+                if (p_rev(4) xor f_tneg) = '1' then p5_acc <= p5_acc - p4_inc; else p5_acc <= p5_acc + p4_inc; end if;
             else
                 v_ga := resize(p5_acc, 19) + p4_inc;
                 if v_ga(18) = '1' then p5_acc <= (others => '1'); else p5_acc <= v_ga(17 downto 0); end if;
@@ -1121,7 +1147,7 @@ begin
             if p6_vi >= -4 then p7_vn <= '1'; else p7_vn <= '0'; end if;
 
             ------------------------------------------------------------ 8: pink phase + gates
-            p8_pr <= unsigned(p7_phi) + resize(f_flowr, 16) + unsigned(resize(p7_br, 16));
+            p8_pr <= unsigned(p7_phi) + resize(l_pfl, 16) + unsigned(resize(p7_br, 16));
             v_on := '1';
             if p7_phi <= f_thl and p_k(7)(2) = '0' then v_on := '0'; end if;
             if f_key = '1' then

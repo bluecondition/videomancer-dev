@@ -3,7 +3,7 @@
 --
 -- 2026-11-15: K6 camera top +25 % (Ron)
 --
--- Ricochet v0.5.0 -- Heirloom #30, rebuilt from the photo WIN_20230515_23_08_59.
+-- Ricochet v0.6.0 (phase 2 diag) -- Heirloom #30, rebuilt from the photo WIN_20230515_23_08_59.
 --
 -- The photo: two systems of nested chevrons pointing right (cores on lines
 -- 256 / 779 of 1080), red teardrop cores at the left, bands running orange ->
@@ -21,14 +21,18 @@
 --     wall  = the red core (bands emerge from under it), floor = its red -> orange shoulder,
 --     cut   = the reach: past it the flat orange ground.
 --
---   K1  Chevrons  chevron systems per frame height (1 .. 6, 2.07 = the photo)
---   K2  Core      size of the red teardrop cores
+--   K1  Chevrons  chevron systems per frame height (0.47 .. 7.95, 2.07 = the photo)
+--   K2  Core      size of the red teardrop cores (P0 0 .. 498 u, 103 = the photo, two slopes)
 --   K3  Bands     bands per chevron (2 .. 24, 8.3 = the photo)
 --   K4  Seams     seam stripe bands: thin and dense .. wide
---   K5  Speed     bipolar band flow (centre +-8 still; right = rings stream out of the cores)
+--   K5  Speed     bipolar band flow (centre +-8 still; right = rings stream out of the cores);
+--                 beyond the photo's speed (|v| > 136) each chevron system also ricochets
+--                 sideways on a triangle LFO (odd / even systems at rates 1 : 1.375, each a
+--                 quarter cycle on from the last; depth to +-3008 hw)
 --   K6  Etch      how far the picture pushes the bands
---   S7  Point     Right / Left
+--   S7  Point     Right / Alternate (every second system points left)
 --   S8  Twin      chevrons fired from both sides, meeting in a bowtie of ground
+--                 (with Alternate: bowtie and burst systems alternate)
 --   S9  Ground    Flat / Echo (the chevron block repeats past the reach)
 --   S10 Palette   Photo / Azure (chroma mirrored)
 --   S11 Source    Video / Osc
@@ -38,7 +42,9 @@
 -- Engine: a vblank-zone sequencer (one serial multiplier, one serial divider,
 -- fixed slots, a shared glide; one small operation per zone clock) sets the
 -- per-field constants; a per-line engine (one serial multiplier, kicked at each
--- line start, computes the NEXT line) sets the DDA starts; the beam runs the F
+-- line start, computes the NEXT line) sets the DDA starts, the line's DDA mode
+-- (per chevron system) and its ricochet offset (a per-line core / reach shift,
+-- so it costs nothing in the pixel path); the beam runs the F
 -- ramp (2nd order), the Y gain and the seam field (the last two 2 / 3 pixels
 -- behind, so they meet the pipe at the stage that uses them); Twin holds and
 -- reverses them at the centre.  Multiplies are split into 3-bit row partials.
@@ -146,7 +152,13 @@ architecture ricochet of program_top is
     signal s_k5 : unsigned(9 downto 0) := to_unsigned(640, 10);
     signal s_vm : unsigned(9 downto 0) := (others => '0');                  -- |speed| - 8
     signal s_vneg, s_vstill : std_logic := '1';
-    signal s_left, s_twin, s_echo, s_azure, s_src : std_logic := '0';
+    signal s_alt, s_twin, s_echo, s_azure, s_src : std_logic := '0';
+    -- ricochet: depth, the two LFO rates and phases; Core: |K2 - 353| and its side
+    signal s_bdep  : unsigned(11 downto 0) := (others => '0');
+    signal s_brt, s_brt2 : unsigned(10 downto 0) := (others => '0');
+    signal s_tau, s_tau2 : unsigned(15 downto 0) := (others => '0');
+    signal s_k2d   : unsigned(9 downto 0) := (others => '0');
+    signal s_k2n   : std_logic := '0';
     signal s_cls  : unsigned(1 downto 0) := (others => '0');
 
     -- per-field constants
@@ -191,7 +203,14 @@ architecture ricochet of program_top is
     signal g_start : std_logic := '0';
 
     -- line engine
-    signal e_lc   : unsigned(5 downto 0) := to_unsigned(63, 6);
+    signal e_lc   : unsigned(6 downto 0) := to_unsigned(127, 7);
+    signal e_sys  : unsigned(3 downto 0) := (others => '0');                 -- chevron system of the next line
+    signal e_tk   : unsigned(15 downto 0) := (others => '0');
+    signal e_tri  : unsigned(8 downto 0) := (others => '0');
+    signal e_tsg  : std_logic := '0';
+    signal e_dl   : signed(13 downto 0) := (others => '0');                  -- ricochet offset (hw)
+    signal n_p0l  : signed(14 downto 0) := to_signed(1608, 15);              -- next line's core / reach levels
+    signal n_pel  : signed(17 downto 0) := to_signed(7877, 18);
     signal e_zk   : std_logic := '0';
     signal e_ph   : unsigned(19 downto 0) := to_unsigned(C_PHTOP, 20);
     signal e_vy   : unsigned(18 downto 0) := (others => '0');
@@ -217,6 +236,8 @@ architecture ricochet of program_top is
     signal b_bb  : signed(29 downto 0) := (others => '0');
     signal b_bin : signed(16 downto 0) := (others => '0');
     signal b_px  : unsigned(10 downto 0) := (others => '0');
+    signal s_p0l : signed(14 downto 0) := to_signed(1608, 15);              -- this line's core / reach levels
+    signal s_pel : signed(17 downto 0) := to_signed(7877, 18);
     signal s_gs1, s_gs2, s_gs3 : std_logic := '0';                          -- g_start delayed
 
     -- pixel path
@@ -328,7 +349,6 @@ begin
         variable v_s  : signed(10 downto 0);
         variable v_r  : unsigned(16 downto 0);
         variable v_dr : unsigned(16 downto 0);
-        variable v_i  : integer range 0 to 8;
         variable v_m  : unsigned(9 downto 0);
         variable v_st : signed(12 downto 0);
         variable v_k  : integer range 0 to 63;
@@ -372,13 +392,15 @@ begin
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
-                s_left  <= registers_in(6)(0);
+                s_alt   <= registers_in(6)(0);
                 s_twin  <= registers_in(6)(1);
                 s_echo  <= registers_in(6)(2);
                 s_azure <= registers_in(6)(3);
                 s_src   <= registers_in(6)(4);
                 s_cls   <= s_clsr;
                 s_t <= unsigned(signed(s_t) + resize(s_spd, 16));
+                s_tau  <= s_tau + s_brt;
+                s_tau2 <= s_tau2 + s_brt2;
             end if;
             s_tq <= s_t(13 downto 4);
             s_half <= s_w(11 downto 1);
@@ -411,17 +433,25 @@ begin
                 end case;
             end if;
 
-            -- DDA constants for (class, mode)
-            if s_zc = 2 then
-                if s_twin = '1' then v_i := 2; elsif s_left = '1' then v_i := 1; else v_i := 0; end if;
-                v_i := v_i + 3 * to_integer(s_cls);
-                c_fst  <= to_signed(C_DDA_FST(v_i), 30);
-                c_fd0  <= to_signed(C_DDA_FD0(v_i), 28);
-                c_dd   <= to_signed(C_DDA_DD(v_i), 17);
-                c_gast <= to_unsigned(C_DDA_GAST(v_i), 13);
-                c_gain <= to_signed(C_DDA_GAIN(v_i), 13);
-                c_gbst <= to_unsigned(C_DDA_GBST(v_i), 13);
-                c_gbin <= to_signed(C_DDA_GBIN(v_i), 17);
+            -- ricochet depth and LFO rates, one op per zone clock (s_vm = |v| - 8):
+            -- depth = (|v| - 136) * 8 past the photo's speed (|v| = 128 at the default 640),
+            -- rates = 3/4 (|v| - 8) and 1.375x that per field (0 when still)
+            if s_zc = 23 then
+                if s_vstill = '0' and s_vm > 128 then s_bdep <= shift_left(resize(s_vm - 128, 12), 3); else s_bdep <= (others => '0'); end if;
+            end if;
+            if s_zc = 24 then
+                if s_vstill = '1' then s_brt <= (others => '0'); else s_brt <= resize(s_vm - shift_right(s_vm, 2), 11); end if;
+            end if;
+            if s_zc = 25 then
+                s_brt2 <= s_brt + shift_right(s_brt, 2) + shift_right(s_brt, 3);
+            end if;
+            -- Core: |K2 - 353| and its side (two slopes about the photo)
+            if s_zc = 40 then
+                if s_g2(12 downto 3) < 353 then
+                    s_k2d <= 353 - s_g2(12 downto 3); s_k2n <= '1';
+                else
+                    s_k2d <= s_g2(12 downto 3) - 353; s_k2n <= '0';
+                end if;
             end if;
 
             -- serial products: one slot every 24 zone clocks (k = 1, 4, 7 ..
@@ -434,7 +464,9 @@ begin
                 case v_k is
                     when 1  => f_a <= resize(s_g1(12 downto 3), 36); f_b <= resize(s_g1(12 downto 3), 16);
                     when 4  => f_a <= resize(s_tmp(14 downto 0), 36); f_b <= resize(s_vk, 16);
-                    when 7  => f_a <= to_unsigned(3759, 36);         f_b <= resize(s_g2(12 downto 3), 16);
+                    when 7  =>
+                        if s_k2n = '1' then f_a <= to_unsigned(4664, 36); else f_a <= to_unsigned(9464, 36); end if;
+                        f_b <= resize(s_k2d, 16);
                     when 10 => f_a <= resize(s_gp(12 downto 3), 36); f_b <= resize(s_gp(12 downto 3), 16);
                     when 16 => f_a <= resize(s_g3(12 downto 3), 36); f_b <= resize(s_g3(12 downto 3), 16);
                     when 22 => f_a <= resize(1023 - s_g4(12 downto 3), 36); f_b <= resize(1023 - s_g4(12 downto 3), 16);
@@ -452,16 +484,23 @@ begin
             end if;
             -- stores and split shift-adds (one add per zone clock)
             case to_integer(s_zc) is
-                -- cycles = 4096 + 5 k1^2 / 256 (Q12), for slot 4
-                when 26  => s_tmp <= resize(f_acc(19 downto 0), 27) + shift_left(resize(f_acc(19 downto 0), 27), 2);
-                when 27  => s_tmp <= resize(to_unsigned(4096, 15) + s_tmp(22 downto 8), 27);
+                -- cycles = 1911 + (k1^2 >> 4) * 15 >> 5 (Q12: 0.47 .. 7.95 systems, 8465 = v0.5's
+                -- photo value at 473), for slot 4
+                when 26  => s_tmp <= shift_left(resize(f_acc(19 downto 4), 27), 4) - resize(f_acc(19 downto 4), 27);
+                when 27  => s_tmp <= resize(to_unsigned(1911, 15) + s_tmp(19 downto 5), 27);
                 when 50  => s_vstep <= f_acc(31 downto 12);
                 -- flyback step = vstep * 77 >> 9 (Q4)
                 when 51  => s_tmp <= shift_left(resize(s_vstep, 27), 6) + shift_left(resize(s_vstep, 27), 3);
                 when 52  => s_tmp <= s_tmp + shift_left(resize(s_vstep, 27), 2);
                 when 53  => s_tmp <= s_tmp + resize(s_vstep, 27);
                 when 54  => s_dyfb <= resize(s_tmp(26 downto 9), 16);
-                when 74  => s_p0 <= to_unsigned(313, 13) + resize(f_acc(21 downto 10), 13);
+                when 74  =>
+                    -- below the photo 4664 * 353 >> 10 = 1607 at most, so no underflow
+                    if s_k2n = '1' then
+                        s_p0 <= to_unsigned(1608, 13) - f_acc(22 downto 10);
+                    else
+                        s_p0 <= to_unsigned(1608, 13) + f_acc(22 downto 10);
+                    end if;
                 when 122 => s_d <= to_unsigned(1566, 15) + resize(f_acc(35 downto 20), 15);
                 when 123 => s_pe <= resize(s_p0, 16) + resize(s_d, 16);
                 when 124 => s_pe <= s_pe + 41;
@@ -582,10 +621,15 @@ begin
     ---------------------------------------------------------------------------
     -- Line engine: kicked at each line start (and once in the zone for line
     -- 0), computes the NEXT line's vertical triangle Y (with the bottom
-    -- flyback) and the DDA starts on one signed serial multiplier
+    -- flyback), its chevron system (phase wraps since the top), the DDA mode
+    -- and starts, and the system's ricochet offset, on one signed serial
+    -- multiplier
     ---------------------------------------------------------------------------
     p_line : process(clk)
         variable v_p  : signed(27 downto 0);
+        variable v_s  : unsigned(20 downto 0);
+        variable v_i  : integer range 0 to 15;
+        variable v_u  : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             e_zk <= '0';
@@ -595,12 +639,15 @@ begin
                 e_ph <= to_unsigned(C_PHTOP, 20);
                 e_vy <= (others => '0');
                 e_fb <= '0';
+                e_sys <= (others => '0');
                 e_lc <= (others => '0');
             elsif g_start = '1' then
-                e_ph <= e_ph + s_vstep;
+                v_s := resize(e_ph, 21) + resize(s_vstep, 21);
+                e_ph <= v_s(19 downto 0);
+                if v_s(20) = '1' then e_sys <= e_sys + 1; end if;
                 e_vy <= e_vy + resize(s_ys, 19);
                 e_lc <= (others => '0');
-            elsif e_lc /= 63 then
+            elsif e_lc /= 127 then
                 e_lc <= e_lc + 1;
             end if;
 
@@ -632,6 +679,20 @@ begin
                     end if;
                 when 3 =>
                     if e_fbt = '1' then e_y <= e_yfb(17 downto 4); else e_y <= signed(resize(e_ylin, 14)); end if;
+                    -- DDA constants of the next line: (class, mode); with Alternate every
+                    -- second system points left (a Burst from the centre in Twin).  The beam
+                    -- has taken this line's starts by now (g_start, b_bin at +3), and c_dd
+                    -- only depends on (class, Twin), so it never changes inside a field.
+                    v_i := 4 * to_integer(s_cls);
+                    if s_twin = '1' then v_i := v_i + 2; end if;
+                    if s_alt = '1' and e_sys(0) = '1' then v_i := v_i + 1; end if;
+                    c_fst  <= to_signed(C_DDA_FST(v_i), 30);
+                    c_fd0  <= to_signed(C_DDA_FD0(v_i), 28);
+                    c_dd   <= to_signed(C_DDA_DD(v_i), 17);
+                    c_gast <= to_unsigned(C_DDA_GAST(v_i), 13);
+                    c_gain <= to_signed(C_DDA_GAIN(v_i), 13);
+                    c_gbst <= to_unsigned(C_DDA_GBST(v_i), 13);
+                    c_gbin <= to_signed(C_DDA_GBIN(v_i), 17);
                 when 4 =>
                     e_tt <= to_signed(4096, 15) - resize(e_y, 15);
                     if e_y < 0 then m_a <= unsigned(resize(-e_y, 27)); else m_a <= unsigned(resize(e_y, 27)); end if;
@@ -659,6 +720,26 @@ begin
                     e_ct <= resize(v_p(27 downto 8), 21);
                 when 50 =>
                     n_bst <= shift_left(resize(signed(resize(c_gbst, 21)) + e_ct, 30), 12);
+                -- ricochet: system k's LFO phase (even systems tau, odd tau2, each a quarter
+                -- cycle on from the last), a triangle, times the depth
+                when 51 =>
+                    if e_sys(0) = '1' then e_tk <= s_tau2; else e_tk <= s_tau; end if;
+                when 52 =>
+                    e_tk(15 downto 14) <= e_tk(15 downto 14) + e_sys(1 downto 0);
+                when 53 =>
+                    if e_tk(15) = '1' then v_u := not e_tk(14 downto 5); else v_u := e_tk(14 downto 5); end if;
+                    if v_u(9) = '1' then e_tri <= v_u(8 downto 0); else e_tri <= not v_u(8 downto 0); end if;
+                    e_tsg <= not v_u(9);
+                when 54 =>
+                    m_a <= resize(s_bdep, 27); m_b <= resize(e_tri, 13); m_acc <= (others => '0');
+                    m_neg <= e_tsg;
+                when 69 =>
+                    if m_neg = '1' then e_dl <= -signed(resize(m_acc(21 downto 9), 14));
+                    else e_dl <= signed(resize(m_acc(21 downto 9), 14)); end if;
+                when 70 =>
+                    n_p0l <= signed(resize(s_p0, 15)) - resize(e_dl, 15);
+                when 71 =>
+                    n_pel <= signed(resize(s_pe, 18)) - resize(e_dl, 18);
                 when others => null;
             end case;
         end if;
@@ -672,6 +753,7 @@ begin
     begin
         if rising_edge(clk) then
             s_gs1 <= g_start; s_gs2 <= s_gs1; s_gs3 <= s_gs2;
+            if g_start = '1' then s_p0l <= n_p0l; s_pel <= n_pel; end if;
             -- F ramp: in step with the pixel entering stage 1
             if g_start = '1' then
                 b_fl  <= c_fst;
@@ -759,8 +841,8 @@ begin
             p5_ph <= p4_ph + signed(resize(v_e(17 downto 4), 19));
 
             -- 6: distances from the core and from the reach
-            p6_d <= p5_ph - signed(resize(s_p0, 19));
-            p6_g <= p5_ph - signed(resize(s_pe, 19));
+            p6_d <= p5_ph - resize(s_p0l, 19);
+            p6_g <= p5_ph - resize(s_pel, 19);
 
             -- 7: band phase and echo partial products (3-bit rows; only the
             --    product bits that land below 2^20 / 2^18 are kept), base

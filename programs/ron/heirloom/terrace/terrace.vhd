@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Terrace v0.5.0 -- Heirloom #11, rebuilt 2026-10-21 from WIN_20230305_23_38_39.
+-- Terrace v0.6.0 (phase-2 diag, 2026-11-09) -- Heirloom #11, rebuilt 2026-10-21 from WIN_20230305_23_38_39.
 -- 2026-11-15: K6 camera top +25 % (Ron): camera bend gain constant 1197 -> 1496 (f_gvv x 1.25, max 11933 of 14 bits); the column bend unchanged.
 --
 -- The photo: a strict grid of flat blocks, 25 rows (42.98 lines, the top row
@@ -18,22 +18,25 @@
 -- RC flyback into a second quantizer = columns (the flyback sweeps back
 -- through the steps: the seam fringe); colour = palette[(row - column) mod 8].
 --
---   K1  Tiles    sawtooth cycles across, 1 .. 8 linear (2.72 = the photo)
---   K2  Rows     rows per frame height, 4 .. 64 linear (25.1)
+--   K1  Tiles    sawtooth cycles across, exponential 0.68 .. 2.72 (50 %, the photo) .. 10.9
+--   K2  Rows     rows per frame height, exponential 6.3 .. 25.1 (50 %, the photo) .. 100
 --   K3  Bend     the column bend 0 .. 5 x the photo's (1) + the camera's bend depth
---   K4  Speed    bipolar row drift (centre still); positive = rows rise, the stairs climb
+--   K4  Speed    bipolar row drift (centre still); positive = rows rise, the stairs climb;
+--                top speed x2 (same curve below 256); past the photo's speed the tiles
+--                slide apart (each tile its own rate, the centre tile still), and glide
+--                home when the knob comes back
 --   K5  Seam     flyback width 0.4 % .. 50 % of a tile (3.05 %; 50 % = chevrons)
 --   K6  Palette  Photo / Primary / Ember / Ocean / Neon / Pastel / Inverse / Mono
 --   S7  Climb    the staircase climbs to the right
 --   S8  Ramp     the treads become continuous slopes
---   S9  Lean     the columns lean half a tile over the frame
+--   S9  Fold     the row ramp folds at mid-frame: the top half mirrors the bottom
 --   S10 Fill     the grey blocks take the source picture (50 %)
 --   S11 Source   Video / Osc (Video: camera luma bends the column steps)
 --   P12 STEPS    column steps per tile: 0 = flat colour bars, 50 % = the
 --                photo's 6, 100 % = 24 (steep fine diagonals)
 --
 -- Engine: per-field sequencer on one serial shift-add multiplier; per-line
--- engine (row accumulator, Lean phase); per-pixel three DDAs (tile phase,
+-- engine (row accumulator, Fold); per-pixel three DDAs (tile phase,
 -- rise c = g u / (1 - f), fall (u - r) / f), corrected at every tile wrap, so
 -- the pixel path has one 15 x 13 product.  Generated avid; output
 -- conditioning ([1 2 .. 2 1]/32 on Y/U/V at 1080, /16 at 720p/SD, luma 13/16)
@@ -58,6 +61,19 @@ architecture terrace of program_top is
     constant C_U0  : unsigned(23 downto 0) := to_unsigned(327016, 24);   -- tile phase at x = 0
     constant C_YSV : unsigned(15 downto 0) := to_unsigned(2911, 16);     -- V ramp start, 11.37 lines Q.8
 
+    -- piecewise-linear 2^(x/256): (256 + x mod 256) << (x / 256), 256 .. 4088
+    function f_exp(x : unsigned(9 downto 0)) return unsigned is
+        variable m : unsigned(11 downto 0);
+    begin
+        m := "0001" & x(7 downto 0);
+        case to_integer(x(9 downto 8)) is
+            when 0 => return m;
+            when 1 => return m(10 downto 0) & '0';
+            when 2 => return m(9 downto 0) & "00";
+            when others => return m(8 downto 0) & "000";
+        end case;
+    end function;
+
     function f_tri8(v : unsigned(7 downto 0)) return unsigned is
     begin
         if v(7) = '1' then return not v(6 downto 0); else return v(6 downto 0); end if;
@@ -75,7 +91,6 @@ architecture terrace of program_top is
     -- timing
     signal t_rw   : unsigned(14 downto 0) := to_unsigned(8738, 15);
     signal t_ys   : unsigned(10 downto 0) := to_unsigned(256, 11);
-    signal t_lean : unsigned(15 downto 0) := to_unsigned(7767, 16);
     signal t_hd   : std_logic := '1';
 
     -- zone / width
@@ -87,7 +102,7 @@ architecture terrace of program_top is
 
     -- controls (glided Q.3: K1, K2, K3, K5, P12)
     type t_g is array(0 to 4) of unsigned(12 downto 0);
-    signal s_g : t_g := (to_unsigned(251 * 8, 13), to_unsigned(360 * 8, 13), to_unsigned(458 * 8, 13),
+    signal s_g : t_g := (to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(458 * 8, 13),
                          to_unsigned(386 * 8, 13), to_unsigned(512 * 8, 13));
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
@@ -97,71 +112,69 @@ architecture terrace of program_top is
     signal q_gph : unsigned(1 downto 0) := (others => '0');
     signal s_s4 : std_logic := '0';
     signal s_m4 : unsigned(8 downto 0) := (others => '0');
+    signal s_m4e : unsigned(10 downto 0) := (others => '0');    -- K4 speed curve operand (x2 top)
+    signal s_d4 : unsigned(8 downto 0) := (others => '0');     -- K4 beyond the photo's speed (tile slide)
     signal s_pal, f_pal : unsigned(2 downto 0) := (others => '0');
-    signal f_climb, f_ramp, f_lean, f_fill, f_osc : std_logic := '0';
+    signal f_climb, f_ramp, f_fold, f_fill, f_osc : std_logic := '0';
 
     -- serial multiplier
     signal q_p : unsigned(4 downto 0) := (others => '0');
     signal q_ld, q_st : std_logic := '0';
-    signal q_wr : std_logic_vector(1 to 20) := (others => '0');
+    signal q_wr : std_logic_vector(1 to 21) := (others => '0');
     signal m_a : unsigned(23 downto 0) := (others => '0');
-    signal m_b : unsigned(15 downto 0) := (others => '0');
+    signal m_b : unsigned(17 downto 0) := (others => '0');
     signal m_h : unsigned(23 downto 0) := (others => '0');
-    signal m_l : unsigned(15 downto 0) := (others => '0');
+    signal m_l : unsigned(17 downto 0) := (others => '0');
 
     -- per-field products (power up near the defaults at 1080p)
-    signal f_k1l : unsigned(20 downto 0) := (others => '0');
-    signal f_k2l : unsigned(23 downto 0) := (others => '0');
     signal f_k3sq, f_psq : unsigned(19 downto 0) := (others => '0');
-    signal f_s4sq  : unsigned(17 downto 0) := (others => '0');
+    signal f_s4sq  : unsigned(18 downto 0) := (others => '0');
     signal f_inc   : unsigned(17 downto 0) := to_unsigned(23790, 18);
-    signal f_kv    : unsigned(15 downto 0) := to_unsigned(24423, 16);
+    signal f_kv    : unsigned(16 downto 0) := to_unsigned(24423, 17);
     signal f_kvl   : unsigned(18 downto 0) := to_unsigned(24423, 19);
-    signal f_yskv  : unsigned(19 downto 0) := to_unsigned(277715, 20);
+    signal f_yskv  : unsigned(20 downto 0) := to_unsigned(277715, 21);
+    signal f_kvc   : unsigned(25 downto 0) := (others => '0');   -- kv x 528.63: the row ramp at the fold line
+    signal f_okc   : signed(27 downto 0) := (others => '0');
+    signal f_dsq   : unsigned(16 downto 0) := (others => '0');   -- (K4 beyond the photo)^2 -> slide rate
+    signal f_ts    : unsigned(18 downto 0) := (others => '0');   -- tile slide phase, rows Q.16 mod 8
+    signal f_tsq   : unsigned(10 downto 0) := (others => '0');   -- its Q.8 slice (per-tile step)
+    signal f_kc    : unsigned(2 downto 0) := (others => '0');    -- centre tile index
+    signal f_tok   : unsigned(10 downto 0) := (others => '0');
+    signal f_to0   : unsigned(10 downto 0) := (others => '0');   -- line-start tile offset = -kc x step
+    signal f_uq0   : unsigned(24 downto 0) := (others => '0');
     signal f_gr    : unsigned(13 downto 0) := to_unsigned(1584, 14);
     signal f_gb    : unsigned(14 downto 0) := to_unsigned(1536, 15);
     signal f_incc  : unsigned(17 downto 0) := (others => '0');
     signal f_incf  : unsigned(19 downto 0) := (others => '0');
     signal f_c0    : unsigned(17 downto 0) := (others => '0');
     signal f_f0m   : unsigned(25 downto 0) := (others => '0');
-    signal f_leanc : unsigned(15 downto 0) := (others => '0');
-    signal f_leanf : unsigned(17 downto 0) := (others => '0');
     signal f_am    : unsigned(10 downto 0) := (others => '0');
     signal f_gvv   : unsigned(13 downto 0) := (others => '0');
-    signal f_spd   : unsigned(15 downto 0) := (others => '0');
+    signal f_spd   : unsigned(16 downto 0) := (others => '0');
     -- derived per-field values
-    signal f_tiles : unsigned(10 downto 0) := to_unsigned(697, 11);
-    signal f_rows  : unsigned(13 downto 0) := to_unsigned(6439, 14);
+    signal f_tiles : unsigned(11 downto 0) := to_unsigned(695, 12);
+    signal f_rows  : unsigned(14 downto 0) := to_unsigned(6429, 15);
     signal f_beta  : unsigned(10 downto 0) := to_unsigned(256, 11);
     signal f_g     : unsigned(12 downto 0) := to_unsigned(1536, 13);
     signal f_va    : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal f_m     : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal f_r16, f_kr, f_kf : unsigned(15 downto 0) := (others => '0');
     signal f_rmu   : unsigned(23 downto 0) := (others => '0');
-    signal f_leanu : unsigned(15 downto 0) := (others => '0');
     signal f_g13, f_gb13 : unsigned(14 downto 0) := (others => '0');
     signal f_gvx   : unsigned(13 downto 0) := (others => '0');
     signal f_gr18  : unsigned(23 downto 0) := (others => '0');
     signal f_kf18  : unsigned(25 downto 0) := (others => '0');
     signal f_inccw : signed(24 downto 0) := (others => '0');
     signal f_incfw : signed(27 downto 0) := (others => '0');
-    signal f_leancw : signed(24 downto 0) := (others => '0');
-    signal f_leanfw : signed(27 downto 0) := (others => '0');
     signal f_f0    : signed(27 downto 0) := (others => '0');
     signal f_o     : unsigned(22 downto 0) := (others => '0');     -- row offset, Q.20 mod 8
 
     -- per-line engine (next line) and committed line values
     signal le_st : unsigned(2 downto 0) := (others => '0');
     signal n_vacc : signed(27 downto 0) := (others => '0');
-    signal n_u0 : unsigned(23 downto 0) := C_U0;
-    signal n_wr : std_logic := '0';
-    signal n_c0 : signed(24 downto 0) := (others => '0');
-    signal n_f0 : signed(27 downto 0) := (others => '0');
+    signal n_t, n_ta : signed(27 downto 0) := (others => '0');
     signal n_lv : unsigned(22 downto 0) := (others => '0');
-    signal n_uq0 : unsigned(24 downto 0) := (others => '0');
     signal l_v : unsigned(22 downto 0) := (others => '0');
-    signal l_u0 : unsigned(23 downto 0) := C_U0;
-    signal l_uq0 : unsigned(24 downto 0) := (others => '0');
     signal l_c0 : signed(24 downto 0) := (others => '0');
     signal l_f0 : signed(27 downto 0) := (others => '0');
 
@@ -184,11 +197,15 @@ architecture terrace of program_top is
     signal b_uq : unsigned(24 downto 0) := (others => '0');
     signal b_c  : signed(24 downto 0) := (others => '0');
     signal b_f  : signed(27 downto 0) := (others => '0');
+    signal b_w  : std_logic := '0';                                 -- this pixel starts a new tile
 
     -- pixel path
     type t_sl is array (natural range <>) of std_logic;
     type t_s25 is array (natural range <>) of signed(24 downto 0);
     signal p_rise : t_sl(1 to 8) := (others => '0');
+    signal p_wr : t_sl(1 to 7) := (others => '0');
+    signal p_to : unsigned(10 downto 0) := (others => '0');        -- tile slide: this tile's row offset (Q.8)
+    signal p9_v : unsigned(10 downto 0) := (others => '0');
     signal p_c : t_s25(1 to 8) := (others => (others => '0'));
     signal p3_d : signed(8 downto 0) := (others => '0');
     signal p3_f : unsigned(11 downto 0) := (others => '0');
@@ -261,14 +278,15 @@ begin
         variable v_p  : integer range 0 to 31;
         variable v_ph : integer range 0 to 31;
         variable v_s  : unsigned(24 downto 0);
-        variable v_pr : unsigned(39 downto 0);
+        variable v_pr : unsigned(41 downto 0);
         variable v_k  : unsigned(9 downto 0);
         variable v_t23 : unsigned(22 downto 0);
         variable v_t26 : unsigned(25 downto 0);
+        variable v_t13 : unsigned(12 downto 0);
     begin
         if rising_edge(clk) then
             v_id := to_integer(unsigned(registers_in(8)(3 downto 0)));
-            t_rw <= unsigned(C_T_RW(v_id)); t_ys <= unsigned(C_T_YS(v_id)); t_lean <= unsigned(C_T_LEAN(v_id));
+            t_rw <= unsigned(C_T_RW(v_id)); t_ys <= unsigned(C_T_YS(v_id));
             case v_id is
                 when 0 | 4 | 5 | 6 | 8 | 12 | 14 => t_hd <= '0';
                 when others => t_hd <= '1';
@@ -313,12 +331,39 @@ begin
                 f_pal <= s_pal;
                 f_climb <= registers_in(6)(0);
                 f_ramp  <= registers_in(6)(1);
-                f_lean  <= registers_in(6)(2);
+                f_fold  <= registers_in(6)(2);
                 f_fill  <= registers_in(6)(3);
                 f_osc   <= registers_in(6)(4);
                 -- row drift: positive = rows rise and the stairs climb (offset grows), mod 8 rows
                 if s_s4 = '1' then f_o <= f_o - resize(f_spd, 23); else f_o <= f_o + resize(f_spd, 23); end if;
+                -- tile slide past the photo's speed (rate (|K4| - 190)^2 / 16, rows Q.16 per field, the
+                -- speed's sign); otherwise the slide phase glides home (1/16 of the way, the short way
+                -- round the 8-row period, at least 1)
+                if f_dsq(16 downto 4) /= 0 then
+                    if s_s4 = '1' then f_ts <= f_ts - resize(f_dsq(16 downto 4), 19);
+                    else f_ts <= f_ts + resize(f_dsq(16 downto 4), 19); end if;
+                elsif f_ts(18) = '1' then
+                    if f_ts(18 downto 4) = "111111111111111" then f_ts <= f_ts + 1;
+                    else f_ts <= f_ts + resize(not f_ts(18 downto 4), 19) + 1; end if;
+                elsif f_ts /= 0 then
+                    if f_ts(18 downto 4) = 0 then f_ts <= f_ts - 1;
+                    else f_ts <= f_ts - resize(f_ts(18 downto 4), 19); end if;
+                end if;
             end if;
+            -- K4 curve operands: x (x + 2 (x - 256)) above 256 (x2 top speed), and the part beyond the
+            -- photo's speed (190)
+            if s_m4(8) = '1' then
+                s_m4e <= resize(s_m4, 11) + shift_left(resize(s_m4(7 downto 0), 11), 1);
+            else
+                s_m4e <= resize(s_m4, 11);
+            end if;
+            if s_m4 > 190 then s_d4 <= s_m4 - 190; else s_d4 <= (others => '0'); end if;
+            f_tsq <= f_ts(18 downto 8);
+            v_t13 := resize(f_tiles, 13) + 10;
+            f_kc <= v_t13(11 downto 9);
+            f_to0 <= (not f_tok) + 1;
+            f_uq0 <= resize(C_U0, 25) + resize(f_inc, 25);
+            f_okc <= signed(resize(f_o, 28)) + signed(resize(f_kvc, 28));
 
             -- glides: K1, K2, K3, K5, P12 ease 1/8 of the gap per field (deadband 4); one channel per
             -- four zone clocks (4..23): select, difference, ease, write
@@ -362,8 +407,6 @@ begin
             f_r16 <= unsigned(r_sr); f_kr <= unsigned(r_skr); f_kf <= unsigned(r_skf);
 
             -- knob curves and derived constants (settle long before the sequencer reads them)
-            f_tiles <= to_unsigned(256, 11) + resize(f_k1l(20 downto 10), 11);               -- 1 + 7 k1 (Q.8)
-            f_rows <= to_unsigned(1024, 14) + resize(f_k2l(23 downto 10), 14);                -- 4 + 60 k2 (Q.8)
             v_t23 := shift_left(resize(f_k3sq, 23), 2) + resize(f_k3sq, 23);              -- 5 k3^2
             f_beta <= resize(v_t23(22 downto 12), 11);
             v_t26 := shift_left(resize(f_psq, 26), 4) + shift_left(resize(f_psq, 26), 3);  -- 24 p^2
@@ -375,7 +418,6 @@ begin
             if v_t26(25 downto 8) >= 256 then f_m <= to_unsigned(256, 10);
             else f_m <= to_unsigned(512, 10) - resize(v_t26(15 downto 8), 10); end if;
             f_rmu <= (f_r16 & x"00") - C_U0;
-            if f_lean = '1' then f_leanu <= t_lean; else f_leanu <= (others => '0'); end if;
             f_g13 <= resize(f_g, 15);
             f_gb13 <= f_gb;
             if f_osc = '1' then f_gvx <= (others => '0'); else f_gvx <= f_gvv; end if;
@@ -383,72 +425,72 @@ begin
             f_kf18 <= f_kf & "0000000000";
             f_inccw <= signed(resize(f_incc, 25)) - signed('0' & f_gr18);
             f_incfw <= signed(resize(f_incf, 28)) - signed(resize(f_kf18, 28));
-            f_leancw <= signed(resize(f_leanc, 25)) - signed('0' & f_gr18);
-            f_leanfw <= signed(resize(f_leanf, 28)) - signed(resize(f_kf18, 28));
             f_f0 <= -signed(resize(f_f0m, 28));
 
-            -- serial products: slot p = zc/32 (1..20), phase 0 load, 1..16 step, 20 store; the strobes and
+            -- serial products: slot p = zc/32 (1..21), phase 0 load, 1..18 step, 20 store; the strobes and
             -- the slot number are registered from zc first (one clock late, same order)
             v_p  := to_integer(s_zc(9 downto 5));
             v_ph := to_integer(s_zc(4 downto 0));
             q_p <= s_zc(9 downto 5);
-            if s_zone = '1' and v_p >= 1 and v_p <= 20 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
-            if s_zone = '1' and v_p >= 1 and v_p <= 20 and v_ph >= 1 and v_ph <= 16 then q_st <= '1'; else q_st <= '0'; end if;
-            for k in 1 to 20 loop
+            if s_zone = '1' and v_p >= 1 and v_p <= 21 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
+            if s_zone = '1' and v_p >= 1 and v_p <= 21 and v_ph >= 1 and v_ph <= 18 then q_st <= '1'; else q_st <= '0'; end if;
+            for k in 1 to 21 loop
                 if s_zone = '1' and v_p = k and v_ph = 20 then q_wr(k) <= '1'; else q_wr(k) <= '0'; end if;
             end loop;
             if q_ld = '1' then
                 m_h <= (others => '0'); m_l <= (others => '0');
                 case to_integer(q_p) is
-                    when 1  => m_a <= resize(s_g(0)(12 downto 3), 24); m_b <= to_unsigned(1792, 16);
-                    when 2  => m_a <= resize(s_g(1)(12 downto 3), 24); m_b <= to_unsigned(15375, 16);
-                    when 3  => m_a <= resize(s_g(2)(12 downto 3), 24); m_b <= resize(s_g(2)(12 downto 3), 16);
-                    when 4  => m_a <= resize(s_g(4)(12 downto 3), 24); m_b <= resize(s_g(4)(12 downto 3), 16);
-                    when 5  => m_a <= resize(s_m4, 24);                m_b <= resize(s_m4, 16);
-                    when 6  => m_a <= resize(f_tiles, 24);             m_b <= resize(t_rw, 16);
-                    when 7  => m_a <= resize(f_rows, 24);              m_b <= to_unsigned(971, 16);
-                    when 8  => m_a <= resize(f_kv, 24);                m_b <= resize(t_ys, 16);
-                    when 9  => m_a <= resize(f_kv, 24);                m_b <= C_YSV;
-                    when 10 => m_a <= resize(f_g, 24);                 m_b <= f_kr;
-                    when 11 => m_a <= resize(f_g, 24);                 m_b <= resize(f_beta, 16);
-                    when 12 => m_a <= resize(f_inc, 24);               m_b <= resize(f_gr, 16);
-                    when 13 => m_a <= resize(f_inc, 24);               m_b <= f_kf;
-                    when 14 => m_a <= C_U0;                            m_b <= resize(f_gr, 16);
-                    when 15 => m_a <= f_rmu;                           m_b <= f_kf;
-                    when 16 => m_a <= resize(f_leanu, 24);             m_b <= resize(f_gr, 16);
-                    when 17 => m_a <= resize(f_leanu, 24);             m_b <= f_kf;
-                    when 18 => m_a <= resize(f_va, 24);                m_b <= resize(f_m, 16);
-                    when 19 => m_a <= resize(f_s4sq, 24);              m_b <= to_unsigned(34953, 16);
-                    when others => m_a <= resize(f_am, 24);            m_b <= to_unsigned(1496, 16);   -- camera gain x 1.25 (K6 top +25 %)
+                    when 1  => m_a <= resize(f_exp(s_g(0)(12 downto 3)), 24); m_b <= to_unsigned(695, 18);    -- Tiles 2.72 x 2^((k1 - 512) / 256)
+                    when 2  => m_a <= resize(f_exp(s_g(1)(12 downto 3)), 24); m_b <= to_unsigned(6429, 18);   -- Rows 25.1 x 2^((k2 - 512) / 256)
+                    when 3  => m_a <= resize(s_g(2)(12 downto 3), 24); m_b <= resize(s_g(2)(12 downto 3), 18);
+                    when 4  => m_a <= resize(s_g(4)(12 downto 3), 24); m_b <= resize(s_g(4)(12 downto 3), 18);
+                    when 5  => m_a <= resize(s_m4, 24);                m_b <= resize(s_m4e, 18);
+                    when 6  => m_a <= resize(f_tiles, 24);             m_b <= resize(t_rw, 18);
+                    when 7  => m_a <= resize(f_rows, 24);              m_b <= to_unsigned(971, 18);
+                    when 8  => m_a <= resize(f_kv, 24);                m_b <= resize(t_ys, 18);
+                    when 9  => m_a <= resize(f_kv, 24);                m_b <= resize(C_YSV, 18);
+                    when 10 => m_a <= resize(f_g, 24);                 m_b <= resize(f_kr, 18);
+                    when 11 => m_a <= resize(f_g, 24);                 m_b <= resize(f_beta, 18);
+                    when 12 => m_a <= resize(f_inc, 24);               m_b <= resize(f_gr, 18);
+                    when 13 => m_a <= resize(f_inc, 24);               m_b <= resize(f_kf, 18);
+                    when 14 => m_a <= C_U0;                            m_b <= resize(f_gr, 18);
+                    when 15 => m_a <= f_rmu;                           m_b <= resize(f_kf, 18);
+                    when 16 => m_a <= to_unsigned(135329, 24);         m_b <= resize(f_kv, 18);       -- kv x 528.63 (Fold line)
+                    when 17 => m_a <= resize(s_d4, 24);                m_b <= resize(s_d4, 18);       -- slide rate
+                    when 18 => m_a <= resize(f_va, 24);                m_b <= resize(f_m, 18);
+                    when 19 => m_a <= resize(f_s4sq, 24);              m_b <= to_unsigned(34953, 18);
+                    when 20 => m_a <= resize(f_am, 24);                m_b <= to_unsigned(1496, 18);   -- camera gain x 1.25 (K6 top +25 %)
+                    when others => m_a <= resize(f_tsq, 24);           m_b <= resize(f_kc, 18);       -- centre tile x step
                 end case;
             end if;
             if q_st = '1' then
                 if m_b(0) = '1' then v_s := resize(m_h, 25) + resize(m_a, 25); else v_s := resize(m_h, 25); end if;
                 m_h <= v_s(24 downto 1);
-                m_l <= v_s(0) & m_l(15 downto 1);
-                m_b <= '0' & m_b(15 downto 1);
+                m_l <= v_s(0) & m_l(17 downto 1);
+                m_b <= '0' & m_b(17 downto 1);
             end if;
             v_pr := m_h & m_l;
-            if q_wr(1)  = '1' then f_k1l   <= v_pr(20 downto 0); end if;
-            if q_wr(2)  = '1' then f_k2l   <= v_pr(23 downto 0); end if;
+            if q_wr(1)  = '1' then f_tiles <= v_pr(21 downto 10); end if;
+            if q_wr(2)  = '1' then f_rows  <= v_pr(24 downto 10); end if;
             if q_wr(3)  = '1' then f_k3sq  <= v_pr(19 downto 0); end if;
             if q_wr(4)  = '1' then f_psq   <= v_pr(19 downto 0); end if;
-            if q_wr(5)  = '1' then f_s4sq  <= v_pr(17 downto 0); end if;
+            if q_wr(5)  = '1' then f_s4sq  <= v_pr(18 downto 0); end if;
             if q_wr(6)  = '1' then f_inc   <= v_pr(25 downto 8); end if;
-            if q_wr(7)  = '1' then f_kv    <= v_pr(23 downto 8); end if;
+            if q_wr(7)  = '1' then f_kv    <= v_pr(24 downto 8); end if;
             if q_wr(8)  = '1' then f_kvl   <= v_pr(26 downto 8); end if;
-            if q_wr(9)  = '1' then f_yskv  <= v_pr(27 downto 8); end if;
+            if q_wr(9)  = '1' then f_yskv  <= v_pr(28 downto 8); end if;
             if q_wr(10) = '1' then f_gr    <= v_pr(27 downto 14); end if;
             if q_wr(11) = '1' then f_gb    <= v_pr(22 downto 8); end if;
             if q_wr(12) = '1' then f_incc  <= v_pr(31 downto 14); end if;
             if q_wr(13) = '1' then f_incf  <= v_pr(33 downto 14); end if;
             if q_wr(14) = '1' then f_c0    <= v_pr(31 downto 14); end if;
             if q_wr(15) = '1' then f_f0m   <= v_pr(39 downto 14); end if;
-            if q_wr(16) = '1' then f_leanc <= v_pr(29 downto 14); end if;
-            if q_wr(17) = '1' then f_leanf <= v_pr(31 downto 14); end if;
+            if q_wr(16) = '1' then f_kvc   <= v_pr(33 downto 8); end if;
+            if q_wr(17) = '1' then f_dsq   <= v_pr(16 downto 0); end if;
             if q_wr(18) = '1' then f_am    <= v_pr(18 downto 8); end if;
-            if q_wr(19) = '1' then f_spd   <= v_pr(33 downto 18); end if;
+            if q_wr(19) = '1' then f_spd   <= v_pr(34 downto 18); end if;
             if q_wr(20) = '1' then f_gvv   <= v_pr(21 downto 8); end if;
+            if q_wr(21) = '1' then f_tok   <= v_pr(10 downto 0); end if;
 
             s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
             s_field_sr(0) <= data_in.field_n; s_gav_sr(0) <= g_avid;
@@ -505,18 +547,16 @@ begin
     g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
 
     ---------------------------------------------------------------------------
-    -- Per-line engine: the next line's row value and Lean phase, advanced at
-    -- the source avid fall (line 0 late in the vblank zone); committed at the
-    -- source avid rise
+    -- Per-line engine: the next line's row value, advanced at the source avid
+    -- fall (line 0 late in the vblank zone); committed at the source avid rise.
+    -- Fold: v = o + |ramp - ramp(line 540)| (the top half mirrors the bottom)
     ---------------------------------------------------------------------------
     p_line : process(clk)
-        variable v_t : unsigned(24 downto 0);
     begin
         if rising_edge(clk) then
             if s_zone = '1' and s_zc = 900 then
                 n_vacc <= signed(resize(f_o, 28)) - signed(resize(f_yskv, 28));
-                n_u0 <= C_U0; n_c0 <= signed(resize(f_c0, 25)); n_f0 <= f_f0;
-                le_st <= to_unsigned(3, 3);
+                le_st <= to_unsigned(2, 3);
             elsif data_in.avid = '0' and s_avq = '1' then
                 le_st <= to_unsigned(1, 3);
             elsif le_st /= 0 then
@@ -525,19 +565,24 @@ begin
             case to_integer(le_st) is
                 when 1 =>
                     n_vacc <= n_vacc + signed(resize(f_kvl, 28));
-                    v_t := resize(n_u0, 25) + resize(f_leanu, 25);
-                    n_u0 <= v_t(23 downto 0); n_wr <= v_t(24);
                 when 2 =>
-                    if n_wr = '1' then n_c0 <= n_c0 + f_leancw; n_f0 <= n_f0 + f_leanfw;
-                    else n_c0 <= n_c0 + signed(resize(f_leanc, 25)); n_f0 <= n_f0 + signed(resize(f_leanf, 28)); end if;
+                    n_t <= n_vacc - f_okc;
                 when 3 =>
-                    if n_vacc > signed(resize(f_o, 28)) then n_lv <= unsigned(n_vacc(22 downto 0)); else n_lv <= f_o; end if;
-                    n_uq0 <= resize(n_u0, 25) + resize(f_inc, 25);
+                    if n_t(27) = '1' then n_ta <= -n_t; else n_ta <= n_t; end if;
+                when 4 =>
+                    if f_fold = '1' then
+                        n_lv <= unsigned(n_ta(22 downto 0)) + f_o;
+                    elsif n_vacc > signed(resize(f_o, 28)) then
+                        n_lv <= unsigned(n_vacc(22 downto 0));
+                    else
+                        n_lv <= f_o;
+                    end if;
                 when others => null;
             end case;
             if data_in.avid = '1' and s_avq = '0' then
-                l_v <= n_lv; l_u0 <= n_u0; l_uq0 <= n_uq0; l_c0 <= n_c0; l_f0 <= n_f0;
+                l_v <= n_lv;
             end if;
+            l_c0 <= signed(resize(f_c0, 25)); l_f0 <= f_f0;
         end if;
     end process p_line;
 
@@ -565,9 +610,10 @@ begin
     begin
         if rising_edge(clk) then
             if g_start = '1' then
-                b_u <= l_u0; b_uq <= l_uq0; b_c <= l_c0; b_f <= l_f0;
+                b_u <= C_U0; b_uq <= f_uq0; b_c <= l_c0; b_f <= l_f0; b_w <= '0';
             elsif g_avid = '1' then
                 b_u <= b_uq(23 downto 0);
+                b_w <= b_uq(24);
                 b_uq <= resize(b_uq(23 downto 0), 25) + resize(f_inc, 25);
                 if b_uq(24) = '1' then
                     b_c <= b_c + f_inccw; b_f <= b_f + f_incfw;
@@ -597,6 +643,7 @@ begin
             else r_fa <= unsigned(b_f(17 downto 9)); end if;
             p_rise(1) <= b_f(27);
             p_c(1) <= b_c;
+            p_wr(1) <= b_w;
             -- 2: ROM read; 3: fabric copy
             p3_d <= signed(r_dq); p3_f <= unsigned(r_fq);
             -- 4: product operands: g.beta x D (rise) or g x F (fall)
@@ -619,11 +666,18 @@ begin
             else
                 p8_ch <= resize(shift_right(p7_prod, 2), 27);
             end if;
-            -- 9: + the source's bend
+            -- 8: tile slide: each tile's row offset (line start = -kc x step, + step per tile)
+            if s_gav_sr(6) = '1' and s_gav_sr(7) = '0' then
+                p_to <= f_to0;
+            elsif p_wr(7) = '1' then
+                p_to <= p_to + f_tsq;
+            end if;
+            -- 9: + the source's bend; the row value + this tile's offset
             p9_ch <= p8_ch + signed(resize(v_vt, 27));
+            p9_v <= l_v(22 downto 12) + p_to;
             -- 10: colour index and palette address
             v_ch := p9_ch;
-            v_v8 := l_v(22 downto 12);
+            v_v8 := p9_v;
             v_c8 := unsigned(v_ch(20 downto 10));
             if f_ramp = '1' then
                 if f_climb = '1' then v_d8 := v_v8 + v_c8; else v_d8 := v_v8 - v_c8; end if;
@@ -701,6 +755,7 @@ begin
 
             -- delays
             for i in 2 to 8 loop p_rise(i) <= p_rise(i - 1); p_c(i) <= p_c(i - 1); end loop;
+            for i in 2 to 7 loop p_wr(i) <= p_wr(i - 1); end loop;
             for i in 11 to 12 loop p_grey(i) <= p_grey(i - 1); end loop;
         end if;
     end process p_pix;

@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Rorschach v0.5.0 -- Heirloom #4, rebuilt from the photo WIN_20221124_22_54_05.
+-- Rorschach v0.6.0 (phase-2 diag) -- Heirloom #4, rebuilt from the photo WIN_20221124_22_54_05.
 --
 -- The photo: camera video folded top-to-bottom about row 525.5 (a frame-store
 -- mirror; there is no left/right mirror), through an 8-colour cyclic
@@ -22,28 +22,41 @@
 -- frame-store tears (row jumps, sideways shifts, colour smears).
 --
 --   K1  Bands    colourizer gain 0.5 .. 4 cycles (1 = the photo; Video: 2x)
---   K2  Palette  colourways (was K6, v0.5.2; Level, the colourizer offset, is fixed at 0)
---   K3  Detail   busy fragments 0 .. 2 cycles; above 60 % they spill into the bands
---   K4  Speed    bipolar colour cycling, still at the centre (+-8)
---   K5  Fold     fold line 0.25 .. 1.0 frame heights (0.487 = the photo)
---   K6  Camera   camera strength (v0.5.2).  Below 50 % the source (camera, or the Osc
---                scene) shows only where the photo's own inkblot phase is under a level,
+--   K2  Ink      the dark band's width (the blue / red shapes), square law: 0 = gone,
+--                50 % = the photo (37/256 of a cycle), 100 % = 4x (149/256);
+--                the six pastel bands share the rest equally
+--   K3  Palette  colourways (was K6, K6 camera pass; Detail, the busy fragments, is fixed
+--                at the photo's 60 %)
+--   K4  Speed    bipolar colour cycling, still at the centre (+-8); beyond the
+--                default speed (|K4 - 512| > 92) the inkblot also slides sideways
+--                in the cycle's direction (square law, ~1 width / 3 s at the ends)
+--   K5  Fold     fold line 0.125 .. 1.0 frame heights, linear (0.487 = the photo
+--                at 41 %; 0 = eight folded copies)
+--   K6  Camera   camera strength (K6 camera pass).  Below 50 % the source (camera, or the
+--                Osc scene) shows only where the photo's own inkblot phase is under a level,
 --                the rest is the flat ground a black input gives (0 % = no camera); 50 % =
 --                the shipped look; above it the chroma is boosted to x1.875 at 100 %.
---                (K2 Palette: Rorschach / Ink (mono) / Swap / Comp / Turn / Twist (chroma
+--                (K3 Palette: Rorschach / Ink (mono) / Swap / Comp / Turn / Twist (chroma
 --                swaps and turns) / Night (luma negative) / Vivid (double chroma))
 --   S7  Mirror   Mirror / Repeat (the top half reflected, or repeated)
---   S8  Stairs   Off / On: the whole dark band sample-and-held into blocks
---   S9  Split    Hue / Blue: the dark band's hue, or all blue
+--   S8  Stairs   Hue / All: only the dark band's hue stair-steps (the photo), or
+--                the whole picture sample-and-held into 84-px blocks
+--   S9  Quad     Off / On: the scene squeezed into the left half and mirrored
+--                into the right (a four-way inkblot)
 --   S10 Negative Off / On: the scalar inverted (band order reversed)
 --   S11 Source   Video / Osc
---   P12 TEAR     frame-store tears: 0 = clean fold .. 100 % = torn into slabs
+--   P12 TEAR     frame-store tears: 0 = clean fold .. 100 % = torn into slabs;
+--                above the photo's 35 % the mirrored copies also tear away
+--                sideways (to half the width at 100 %)
+--
+-- The store is read with mirrored edges (period two widths), so sideways drift,
+-- slip, tears and Quad never show a seam.
 --
 -- Generated avid; output conditioning (luma [1 3 4 4 3 1]/16 smear, chroma
 -- [1 2 2 2 2 2 2 2 1]/16, luma to ~777) before the blanking gate.  Latency 24
 -- clocks in every mode.  Colours in the hardware convention (U = Cr, V = Cb).
 
--- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Palette (was K6); K2 Level fixed at 0 (C_KFIX_2).
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Palette (was K6); K3 Detail fixed at 614 (C_KFIX_3).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -56,7 +69,7 @@ use work.rorschach_pkg.all;
 use work.all;
 
 architecture rorschach of program_top is
-    constant C_KFIX_2 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(0, 10));   -- K6 camera pass: fixed knob
+    constant C_KFIX_3 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(614, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 24;   -- matches processing_delay_clks
     constant C_LIM : integer := 8388608;   -- 128 store rows, Q16
     constant C_HC  : std_logic_vector(15 downto 0) := x"3C6B";
@@ -110,7 +123,7 @@ architecture rorschach of program_top is
     -- timing (computed per field from the measured raster)
     signal t_cx  : unsigned(12 downto 0) := to_unsigned(2184, 13);
     signal t_cx2 : unsigned(11 downto 0) := to_unsigned(1092, 12);
-    signal t_cx2m : signed(23 downto 0) := to_signed(1092 - 32768, 24);
+    signal t_rx  : unsigned(13 downto 0) := to_unsigned(2184, 14);   -- read step (Quad: 2x)
     signal t_cc  : unsigned(12 downto 0) := to_unsigned(1551, 13);
     signal t_ys  : unsigned(10 downto 0) := to_unsigned(256, 11);
     signal t_hs  : unsigned(8 downto 0) := to_unsigned(256, 9);
@@ -127,10 +140,10 @@ architecture rorschach of program_top is
     signal s_wd : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal s_hd : unsigned(10 downto 0) := to_unsigned(1080, 11);
 
-    -- glides (Q.3): 0 K1 Bands, 1 K2 Level (fixed), 2 K3 Detail, 3 K5 Fold, 4 P12 Tear, 5 K6 Camera
+    -- glides (Q.3): 0 K1 Bands, 1 K2 Ink, 2 K3 Detail (fixed), 3 K5 Fold, 4 P12 Tear, 5 K6 Camera
     type t_g is array(0 to 5) of unsigned(12 downto 0);
-    signal s_g : t_g := (to_unsigned(387 * 8, 13), to_unsigned(0, 13), to_unsigned(614 * 8, 13),
-                         to_unsigned(323 * 8, 13), to_unsigned(358 * 8, 13), to_unsigned(512 * 8, 13));
+    signal s_g : t_g := (to_unsigned(387 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(614 * 8, 13),
+                         to_unsigned(423 * 8, 13), to_unsigned(358 * 8, 13), to_unsigned(512 * 8, 13));
     -- K6 Camera: reveal level (scene phase, 64 = all) and chroma boost (1 + n/8), per field
     signal c_klv : unsigned(6 downto 0) := to_unsigned(64, 7);
     signal c_bst : unsigned(2 downto 0) := (others => '0');
@@ -146,7 +159,7 @@ architecture rorschach of program_top is
     -- serial multiplier (9 slots) and divider (5 slots)
     signal q_p : unsigned(4 downto 0) := (others => '0');
     signal q_ld, q_st : std_logic := '0';
-    signal q_wr : std_logic_vector(1 to 9) := (others => '0');
+    signal q_wr : std_logic_vector(1 to 13) := (others => '0');
     signal m_a : unsigned(19 downto 0) := (others => '0');
     signal m_b, m_l : unsigned(17 downto 0) := (others => '0');
     signal m_h : unsigned(19 downto 0) := (others => '0');
@@ -178,24 +191,41 @@ architecture rorschach of program_top is
     signal f_gseed : unsigned(31 downto 0) := x"9E3779B9";
     signal f_nseed : unsigned(15 downto 0) := x"C4E3";
     signal f_pl    : unsigned(2 downto 0) := (others => '0');
-    signal f_rep, f_stair, f_blue, f_neg, f_osc : std_logic := '0';
+    signal f_rep, f_stair, f_quad, f_neg, f_osc : std_logic := '0';
+    -- phase 2: sideways drift (K4), slip of the mirrored copies (P12), Ink thresholds (K2)
+    signal s_mdr  : unsigned(8 downto 0) := (others => '0');
+    signal f_xd   : unsigned(22 downto 0) := (others => '0');
+    signal f_sd   : unsigned(9 downto 0) := (others => '0');
+    signal f_slip : unsigned(21 downto 0) := (others => '0');
+    signal f_b0, f_b1 : signed(23 downto 0) := to_signed(1092, 24);
+    signal f_dk   : unsigned(7 downto 0) := to_unsigned(37, 8);
+    signal f_w6   : unsigned(8 downto 0) := to_unsigned(219, 9);
+    signal f_s6   : unsigned(13 downto 0) := to_unsigned(9344, 14);
+    signal f_tacc : unsigned(15 downto 0) := (others => '0');
+    -- band lookup (K2 Ink): phase -> {dark, band - 1}, refilled every field from the thresholds
+    type t_bram is array (0 to 255) of std_logic_vector(3 downto 0);
+    signal bram : t_bram := (others => "1000");
+    signal bf_we : std_logic := '0';
+    signal bf_a  : unsigned(7 downto 0) := (others => '0');
+    signal bf_d  : std_logic_vector(3 downto 0) := "1000";
+    signal bf_b  : unsigned(2 downto 0) := (others => '0');
+    signal bf_tn : unsigned(7 downto 0) := (others => '0');
+    signal r_bd  : std_logic_vector(3 downto 0) := "1000";
 
     -- per-line engine; it runs 24 clocks after the source avid fall (the
     -- pixel path has drained) and writes the line registers (l_*) directly
     signal le_st : unsigned(3 downto 0) := (others => '0');
     signal le_dl : unsigned(4 downto 0) := (others => '0');
     signal n_vy  : unsigned(19 downto 0) := (others => '0');
-    signal n_ym, n_ymt, n_yr : signed(25 downto 0) := (others => '0');
-    signal n_up, n_adv, n_new : std_logic := '0';
+    signal n_ym, n_ymt, n_yr, n_yb : signed(25 downto 0) := (others => '0');
+    signal n_up, n_adv, n_new, n_odd : std_logic := '0';
     signal n_rpw : unsigned(25 downto 0) := (others => '0');
     signal n_d   : signed(20 downto 0) := (others => '0');
     signal n_dab : unsigned(19 downto 0) := (others => '0');
     signal n_p   : unsigned(7 downto 0) := (others => '0');
     signal n_grem : unsigned(6 downto 0) := (others => '0');
     signal n_vv  : unsigned(11 downto 0) := (others => '0');
-    signal g_dy, g_dx, g_cpo : signed(23 downto 0) := (others => '0');
-    signal g_hon : std_logic := '0';
-    signal g_hc  : unsigned(3 downto 0) := (others => '0');
+    signal g_on  : std_logic := '0';   -- the current tear group is torn (its draw is read from tg_* directly)
     signal l_ra0, l_ra1, l_hrow : unsigned(5 downto 0) := (others => '0');
     signal l_r0p, l_hon, l_wok : std_logic := '0';
     signal l_fy  : unsigned(4 downto 0) := (others => '0');
@@ -228,6 +258,7 @@ architecture rorschach of program_top is
 
     -- beam (stage 0)
     signal b_u, b_cp : signed(23 downto 0) := (others => '0');
+    signal b_t : unsigned(21 downto 0) := (others => '0');   -- b_u folded: mirrored edges
     signal b_cst, b_first : std_logic := '0';
     signal b_cell : unsigned(7 downto 0) := (others => '0');
 
@@ -249,6 +280,7 @@ architecture rorschach of program_top is
     attribute no_rw_check of vr2 : signal is true;
     attribute no_rw_check of vr3 : signal is true;
     attribute no_rw_check of vh  : signal is true;
+    attribute no_rw_check of bram : signal is true;
     -- video write side
     signal w_yf : unsigned(13 downto 0) := (others => '0');
     signal w_uw : unsigned(21 downto 0) := (others => '0');
@@ -272,8 +304,9 @@ architecture rorschach of program_top is
     signal p1_cp, p2_cp : std_logic := '0';
     signal p1_fx, p2_fx, p3_fx, p4_fx, p5_fx, p6_fx, p7_fx : unsigned(4 downto 0) := (others => '0');
     signal ha_1, ha_2, ha_3 : unsigned(15 downto 0) := (others => '0');
-    signal p_cst : t_sl(1 to 13) := (others => '0');
-    signal p_tk : t_sl(1 to 14) := (others => '0');
+    signal p_cst : t_sl(1 to 2) := (others => '0');
+    signal p_ast : t_sl(1 to 5) := (others => '0');   -- start of a cell pair (Stairs All)
+    signal p_tk : t_sl(2 to 5) := (others => '0');
     signal p3_q00, p3_q01, p3_q10, p3_q11 : unsigned(5 downto 0) := (others => '0');
     signal p3_hh : unsigned(1 downto 0) := (others => '0');
     signal p4_na : signed(8 downto 0) := (others => '0');
@@ -282,7 +315,7 @@ architecture rorschach of program_top is
     signal p_n : t_s9a(6 to 8) := (others => (others => '0'));
     type t_u3a is array (natural range <>) of unsigned(2 downto 0);
     signal p4_hz, p4_hm : unsigned(1 downto 0) := (others => '0');
-    signal p_hue : t_u3a(5 to 13) := (others => (others => '0'));   -- dark-band hue
+    signal p_hue : t_u3a(5 to 5) := (others => (others => '0'));   -- dark-band hue (to stage 13 via ringp)
     signal p_kz : std_logic_vector(4 to 10) := (others => '0');       -- K6: pixel shows the flat ground
     signal p3_sk : unsigned(5 downto 0) := (others => '0');           -- K6: the photo scene's phase at the corner
     signal s_tu23, s_tv23 : signed(13 downto 0) := (others => '0');   -- K6: chroma boost d n
@@ -313,16 +346,23 @@ architecture rorschach of program_top is
     signal p11_pg : unsigned(7 downto 0) := (others => '0');
     signal p11_no : signed(7 downto 0) := (others => '0');
     signal p12_ph : unsigned(7 downto 0) := (others => '0');
-    signal p13_bd : unsigned(2 downto 0) := (others => '0');
-    signal p13_dk : std_logic := '0';
-    signal p14_dh : std_logic := '0';
-    signal p14_sel, p14_hsel : unsigned(3 downto 0) := (others => '0');
-    signal p15_c : std_logic_vector(23 downto 0) := x"108080";
+    signal p14_sel, p14_hsel, p14_ah : unsigned(3 downto 0) := (others => '0');
+    signal p15_x : std_logic_vector(63 downto 0) := x"10EB808080808080";   -- f_palx: Y, 251-Y, U, V, -U, -V, 2U, 2V
     signal p16_y, p16_u, p16_v : unsigned(9 downto 0) := to_unsigned(64, 10);
-    signal p1_cl : unsigned(5 downto 0) := (others => '0');
+    signal p1_c, p2_cl : unsigned(5 downto 0) := (others => '0');
+    signal p1_first : std_logic := '0';
+    signal p2_cn : unsigned(3 downto 0) := (others => '0');
 
     -- output conditioning
-    signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
+    signal s_wp : unsigned(7 downto 0) := (others => '0');
+    type t_ring is array (0 to 255) of std_logic_vector(15 downto 0);
+    type t_ring8 is array (0 to 255) of std_logic_vector(7 downto 0);
+    signal ringc : t_ring := (others => x"8080");
+    signal ringp : t_ring8 := (others => (others => '0'));
+    attribute no_rw_check of ringc : signal is true;
+    attribute no_rw_check of ringp : signal is true;
+    signal r_cb, r_cbf, r_cw : std_logic_vector(15 downto 0) := x"8080";
+    signal r_pb, r_pbf : std_logic_vector(7 downto 0) := (others => '0');
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
     signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y17, s_y18, s_y19, s_y20, s_y21, s_y22x, s_yf22 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -382,6 +422,13 @@ begin
             r_v3 <= vr3(to_integer(a_b3));
         end if;
     end process p_vr3;
+    p_bram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if bf_we = '1' then bram(to_integer(bf_a)) <= bf_d; end if;
+            r_bd <= bram(to_integer(p12_ph));
+        end if;
+    end process p_bram;
     p_vh : process(clk)
     begin
         if rising_edge(clk) then
@@ -389,6 +436,29 @@ begin
             r_vh <= vh(to_integer(a_hue));
         end if;
     end process p_vh;
+
+
+    -- delay rings (phase-2 fit, were FF chains): written at s_wp, read 6 back, plus one fabric
+    -- register = the sample 8 clocks back.  The chroma ring is written from its own copy register
+    -- (so p16 stays beside the colourway logic) and read 5 back: still p16 8 clocks back.
+    p_ringc : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_wp <= s_wp + 1;
+            r_cw <= std_logic_vector(p16_u(9 downto 2)) & std_logic_vector(p16_v(9 downto 2));
+            ringc(to_integer(s_wp)) <= r_cw;
+            r_cb <= ringc(to_integer(s_wp - 5));
+            r_cbf <= r_cb;
+        end if;
+    end process p_ringc;
+    p_ringp : process(clk)
+    begin
+        if rising_edge(clk) then
+            ringp(to_integer(s_wp)) <= "000" & p_tk(5) & p_ast(5) & std_logic_vector(p_hue(5));
+            r_pb <= ringp(to_integer(s_wp - 6));
+            r_pbf <= r_pb;
+        end if;
+    end process p_ringp;
 
 
     ---------------------------------------------------------------------------
@@ -446,11 +516,11 @@ begin
                 elsif v_x < -7 then s_s4 <= '1'; v_u := unsigned(-v_x) - 8; s_m4 <= v_u(8 downto 0);
                 else s_s4 <= '0'; s_m4 <= (others => '0'); end if;
                 -- labelled knob: 0..7 at program load is the label index
-                if unsigned(registers_in(1)) < 8 then f_pl <= unsigned(registers_in(1)(2 downto 0));
-                else f_pl <= unsigned(registers_in(1)(9 downto 7)); end if;
+                if unsigned(registers_in(2)) < 8 then f_pl <= unsigned(registers_in(2)(2 downto 0));
+                else f_pl <= unsigned(registers_in(2)(9 downto 7)); end if;
                 f_rep   <= registers_in(6)(0);
                 f_stair <= registers_in(6)(1);
-                f_blue  <= registers_in(6)(2);
+                f_quad  <= registers_in(6)(2);
                 f_neg   <= registers_in(6)(3);
                 f_osc   <= registers_in(6)(4);
                 -- colour cycle; reseed the tears and fragments every 4 fields
@@ -459,7 +529,15 @@ begin
                 f_fc <= f_fc + 1;
                 if f_fc = 3 then f_gseed <= f_gseed + x"9E3779B9"; end if;
             end if;
-            f_rot <= f_rac + shift_left(resize(s_g(1)(12 downto 3), 16), 6);
+            f_rot <= f_rac;
+            -- drift depth: beyond the default speed (s_m4 = 80 at K4 600), 0 there (+4 for pot noise)
+            if s_m4 > 84 then s_mdr <= s_m4 - 84; else s_mdr <= (others => '0'); end if;
+            -- read step: Quad reads two store widths per line (mirrored about the centre)
+            if f_quad = '1' then t_rx <= shift_left(resize(t_cx, 14), 1); else t_rx <= resize(t_cx, 14); end if;
+            -- line start bases (store column + 0.5, Q16; half the read step = the first pixel's
+            -- centre): even copies, and odd copies slipped by P12
+            f_b0 <= signed(resize(t_rx(13 downto 1), 24)) + signed(resize(f_xd, 24));
+            f_b1 <= f_b0 + signed(resize(f_slip, 24));
             f_nseed <= f_gseed(15 downto 0) xor x"5A5A";
             f_amp <= s_g(2)(12 downto 4);
             if s_g(2)(12 downto 3) > 614 then s_k3x <= resize(s_g(2)(12 downto 3) - 614, 9); else s_k3x <= (others => '0'); end if;
@@ -473,8 +551,8 @@ begin
                     when 0 =>
                         case to_integer(q_gi) is
                             when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
-                            when 1 => gl_k <= unsigned(C_KFIX_2) & "000"; gl_o <= s_g(1);
-                            when 2 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(2);
+                            when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
+                            when 2 => gl_k <= unsigned(C_KFIX_3) & "000"; gl_o <= s_g(2);
                             when 3 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(3);
                             when 4 => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(4);
                             when others => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(5);
@@ -534,9 +612,9 @@ begin
             q_p <= s_zc(9 downto 5);
             -- operands are registered from the slot number (phase 0..1), loaded at phase 2,
             -- shifted at phases 3..20, stored at phase 22
-            if s_zone = '1' and v_p >= 1 and v_p <= 9 and v_ph = 1 then q_ld <= '1'; else q_ld <= '0'; end if;
-            if s_zone = '1' and v_p >= 1 and v_p <= 9 and v_ph >= 2 and v_ph <= 19 then q_st <= '1'; else q_st <= '0'; end if;
-            for k in 1 to 9 loop
+            if s_zone = '1' and v_p >= 1 and v_p <= 13 and v_ph = 1 then q_ld <= '1'; else q_ld <= '0'; end if;
+            if s_zone = '1' and v_p >= 1 and v_p <= 13 and v_ph >= 2 and v_ph <= 19 then q_st <= '1'; else q_st <= '0'; end if;
+            for k in 1 to 13 loop
                 if s_zone = '1' and v_p = k and v_ph = 21 then q_wr(k) <= '1'; else q_wr(k) <= '0'; end if;
             end loop;
             v_t := s_g(4)(12 downto 3);
@@ -551,9 +629,13 @@ begin
                     when 3 => m_an <= resize(f_g, 20);        m_bn <= to_unsigned(599, 18);
                     when 4 => m_an <= resize(s_m4, 20);       m_bn <= resize(s_m4, 18);
                     when 5 => m_an <= resize(m_l, 20);       m_bn <= to_unsigned(338, 18);   -- m4^2 (slot 4)
-                    when 6 => m_an <= resize(s_g(3)(12 downto 3), 20); m_bn <= to_unsigned(809, 18);
+                    when 6 => m_an <= resize(s_g(3)(12 downto 3), 20); m_bn <= to_unsigned(947, 18);
                     when 7 => m_an <= resize(v_t, 20);        m_bn <= resize(v_t, 18);
                     when 8 => m_an <= resize(f_t2, 20);       m_bn <= resize(f_t2, 18);
+                    when 10 => m_an <= resize(s_mdr, 20);     m_bn <= resize(s_mdr, 18);   -- drift: depth^2
+                    when 11 => m_an <= resize(s_g(1)(12 downto 3), 20); m_bn <= resize(s_g(1)(12 downto 3), 18);   -- K2 Ink: k2^2
+                    when 12 => m_an <= m_h(1 downto 0) & m_l; m_bn <= to_unsigned(150, 18);   -- d = k2^2 * 150 / 2^20
+                    when 13 => m_an <= resize(f_w6, 20);      m_bn <= to_unsigned(10923, 18);   -- pastel band: w6 / 6, Q8
                     when others => m_an <= resize(s_k3x, 20); m_bn <= to_unsigned(3, 18);   -- spill: 0..1 quarter
                 end case;
             end if;
@@ -567,10 +649,44 @@ begin
             if q_wr(2) = '1' then f_g <= to_unsigned(128, 10) + v_pr(29 downto 20); end if;
             if q_wr(3) = '1' then f_gw <= v_pr(19 downto 10); end if;
             if q_wr(5) = '1' then f_drm <= v_pr(26 downto 16); end if;
-            if q_wr(6) = '1' then f_av <= to_unsigned(271, 11) + resize(v_pr(19 downto 10), 11); end if;
+            if q_wr(6) = '1' then f_av <= to_unsigned(135, 11) + resize(v_pr(19 downto 10), 11); end if;   -- 135 .. 1081
             if q_wr(7) = '1' then f_t2 <= v_pr(19 downto 10); end if;
             if q_wr(8) = '1' then f_t4 <= v_pr(19 downto 10); end if;
             if q_wr(9) = '1' then f_sp <= v_pr(12 downto 10); end if;   -- spill, quarters (0..1)
+            -- sideways drift: depth^2 / 8 Q16 columns per field (mirrored edges: wraps at two widths)
+            if q_wr(10) = '1' then
+                if s_s4 = '1' then f_xd <= f_xd - resize(v_pr(17 downto 3), 23);
+                else f_xd <= f_xd + resize(v_pr(17 downto 3), 23); end if;
+            end if;
+            if q_wr(12) = '1' then f_dk <= v_pr(27 downto 20); end if;   -- 0 .. 37 (512) .. 149
+            if q_wr(13) = '1' then f_s6 <= v_pr(21 downto 8); end if;
+
+            -- P12 slip (zc 326..327): the odd copies' sideways offset, 0 up to the photo's 35 %,
+            -- then 3072 Q16 per step (half the width at 100 %)
+            if s_zone = '1' and s_zc = 326 then
+                if v_t > 358 then f_sd <= v_t - 358; else f_sd <= (others => '0'); end if;
+            elsif s_zone = '1' and s_zc = 327 then
+                f_slip <= shift_left(resize(f_sd, 22), 11) + shift_left(resize(f_sd, 22), 10);
+            end if;
+            -- K2 Ink: the dark band d (slot 12); the six pastel bands split the rest, thresholds
+            -- T_1 = d, T_k = d + ceil((k - 1) * (256 - d) / 6) (= the photo's 37, 74, 110, 147, 183,
+            -- 220 at d = 37); the band lookup is refilled at zc 512..767, one phase per clock
+            bf_we <= '0';
+            if s_zone = '1' and s_zc = 408 then
+                f_w6 <= to_unsigned(256, 9) - resize(f_dk, 9);
+            elsif s_zone = '1' and s_zc = 511 then
+                bf_tn <= f_dk; bf_b <= (others => '0'); f_tacc <= resize(f_s6, 16) + 255;
+            elsif s_zone = '1' and s_zc(9 downto 8) = "10" then
+                v_10 := resize(bf_b, 11);
+                if s_zc(7 downto 0) >= bf_tn and bf_b /= 6 then
+                    v_10 := resize(bf_b, 11) + 1;
+                    bf_tn <= f_dk + f_tacc(15 downto 8); f_tacc <= f_tacc + f_s6;
+                end if;
+                bf_b <= v_10(2 downto 0);
+                bf_we <= '1'; bf_a <= s_zc(7 downto 0);
+                if v_10(2 downto 0) = "000" then bf_d <= "1000";
+                else bf_d <= '0' & std_logic_vector(v_10(2 downto 0) - 1); end if;
+            end if;
 
             -- P12 tear curves by shift-add (zc 320..324)
             if s_zone = '1' and s_zc = 320 then
@@ -625,7 +741,6 @@ begin
                 t_la <= shift_left(resize(s_hd, 21), 8) - shift_left(resize(s_hd, 21), 3);
                 t_lb <= shift_left(resize(s_hd, 21), 2) + resize(s_hd, 21);
                 if s_wd >= 1280 then t_hd <= '1'; else t_hd <= '0'; end if;
-                t_cx2m <= signed(resize(t_cx2, 24)) - 32768;
             elsif s_zone = '1' and s_zc = 897 then
                 t_la <= t_la - t_lb;
             elsif s_zone = '1' and s_zc = 898 then
@@ -692,6 +807,7 @@ begin
     p_line : process(clk)
         variable v_y : signed(25 downto 0);
         variable v_v : signed(25 downto 0);
+        variable v_gdy, v_gdx, v_gcp : signed(23 downto 0);
     begin
         if rising_edge(clk) then
             if s_zgo = '1' then
@@ -699,6 +815,7 @@ begin
                 n_ym <= signed(resize(f_kstep(17 downto 1), 26)); n_up <= '1';
                 n_rpw <= resize(f_kstep(17 downto 1), 26);
                 n_grem <= (others => '0');
+                n_odd <= '0';
             end if;
             if data_in.avid = '0' and s_avq = '1' then
                 le_dl <= to_unsigned(24, 5);
@@ -710,7 +827,7 @@ begin
             elsif le_dl = 1 then
                 le_st <= to_unsigned(1, 4);
             elsif le_st /= 0 then
-                if le_st = 8 then le_st <= (others => '0'); else le_st <= le_st + 1; end if;
+                if le_st = 9 then le_st <= (others => '0'); else le_st <= le_st + 1; end if;
             end if;
 
             tg_go <= '0';
@@ -727,12 +844,13 @@ begin
                     -- fold: bounce (Mirror) or wrap (Repeat) at 128 store rows
                     n_adv <= '0';
                     if n_adv = '1' then
+                        -- n_odd: copy parity (flips at every bounce or wrap), for the P12 slip
                         if f_rep = '1' then
-                            if n_ymt >= C_LIM then n_ym <= n_ymt - C_LIM; else n_ym <= n_ymt; end if;
+                            if n_ymt >= C_LIM then n_ym <= n_ymt - C_LIM; n_odd <= not n_odd; else n_ym <= n_ymt; end if;
                         elsif n_up = '1' then
-                            if n_ymt >= C_LIM then n_ym <= 2 * C_LIM - n_ymt; n_up <= '0'; else n_ym <= n_ymt; end if;
+                            if n_ymt >= C_LIM then n_ym <= 2 * C_LIM - n_ymt; n_up <= '0'; n_odd <= not n_odd; else n_ym <= n_ymt; end if;
                         else
-                            if n_ymt < 0 then n_ym <= -n_ymt; n_up <= '1'; else n_ym <= n_ymt; end if;
+                            if n_ymt < 0 then n_ym <= -n_ymt; n_up <= '1'; n_odd <= not n_odd; else n_ym <= n_ymt; end if;
                         end if;
                     else
                         n_new <= '1';   -- line 0 (zone run)
@@ -746,34 +864,35 @@ begin
                     elsif n_dab > 470 * 256 then n_p <= f_pe;
                     else n_p <= f_po; end if;
                 when 5 =>
-                    -- a new tear group: take the precomputed draw, then draw the next one
+                    -- a new tear group: take the precomputed draw (it stays in tg_* for the whole group;
+                    -- the next one is drawn on the group's last line, state 9)
                     if n_new = '1' then
                         if tg_lines = 0 then n_grem <= (others => '0'); else n_grem <= tg_lines - 1; end if;
-                        if tg_act < n_p then
-                            g_dy <= tg_dy; g_dx <= tg_dx; g_cpo <= tg_cpo; g_hon <= tg_hf; g_hc <= tg_hc;
-                        else
-                            g_dy <= (others => '0'); g_dx <= (others => '0'); g_cpo <= (others => '0'); g_hon <= '0';
-                        end if;
-                        tg_go <= '1';
+                        if tg_act < n_p then g_on <= '1'; else g_on <= '0'; end if;
                     end if;
                 when 6 =>
-                    v_y := n_ym + resize(g_dy, 26);
+                    if g_on = '1' then v_gdy := tg_dy; v_gdx := tg_dx; v_gcp := tg_cpo;
+                    else v_gdy := (others => '0'); v_gdx := (others => '0'); v_gcp := (others => '0'); end if;
+                    v_y := n_ym + resize(v_gdy, 26);
                     if v_y < 0 then n_yr <= (others => '0');
                     elsif v_y >= C_LIM then n_yr <= to_signed(C_LIM - 1, 26);
                     else n_yr <= v_y; end if;
-                    l_u0 <= t_cx2m + g_dx;
-                    l_cp0 <= g_cpo - 16288;
-                    l_hon <= g_hon; l_hc <= g_hc;
+                    if n_odd = '1' then l_u0 <= f_b1 + v_gdx; else l_u0 <= f_b0 + v_gdx; end if;
+                    l_cp0 <= v_gcp - 16288;
+                    l_hon <= g_on and tg_hf; l_hc <= tg_hc;
                 when 7 =>
-                    v_v := n_yr - 32768;
-                    if v_v < 0 then v_v := (others => '0');
-                    elsif v_v >= 127 * 65536 then v_v := to_signed(127 * 65536 - 1, 26); end if;
-                    n_vv <= unsigned(v_v(22 downto 11));
+                    n_yb <= n_yr - 32768;
                     l_hrow <= unsigned(n_yr(22 downto 17));
                     l_grp <= n_vy(17 downto 10);
                     if n_rpw(25 downto 23) = "000" then l_wok <= '1'; else l_wok <= '0'; end if;
                     l_wrow <= n_rpw(22 downto 16);
                 when 8 =>
+                    v_v := n_yb;
+                    if v_v < 0 then v_v := (others => '0');
+                    elsif v_v >= 127 * 65536 then v_v := to_signed(127 * 65536 - 1, 26); end if;
+                    n_vv <= unsigned(v_v(22 downto 11));
+                when 9 =>
+                    if n_grem = 0 then tg_go <= '1'; end if;   -- last line of the group: draw the next
                     l_ra0 <= resize(shift_right(resize(n_vv(11 downto 5), 8) + 1, 1), 6);
                     l_ra1 <= n_vv(11 downto 6);
                     l_r0p <= n_vv(5);
@@ -844,13 +963,20 @@ begin
     ---------------------------------------------------------------------------
     p_beam : process(clk)
         variable v_cn : signed(23 downto 0);
+        variable v_nx : signed(23 downto 0);
     begin
         if rising_edge(clk) then
+            -- b_u = store column + 0.5 (Q16); b_t = b_u modulo 128 columns, folded back from 64,
+            -- so the store reads mirrored about columns -0.5 and 63.5 (seamless edges)
+            if g_start = '1' then v_nx := l_u0;
+            elsif g_avid = '1' then v_nx := b_u + signed(resize(t_rx, 24));
+            else v_nx := b_u; end if;
+            if v_nx(22) = '1' then b_t <= not unsigned(v_nx(21 downto 0)); else b_t <= unsigned(v_nx(21 downto 0)); end if;
             if g_start = '1' then
                 b_u <= l_u0; b_cp <= l_cp0; b_first <= '1';
                 b_cst <= '1'; b_cell <= unsigned(l_cp0(23 downto 16));
             elsif g_avid = '1' then
-                b_u <= b_u + signed(resize(t_cx, 24));
+                b_u <= b_u + signed(resize(t_rx, 24));
                 v_cn := b_cp + signed(resize(t_cc, 24));
                 b_cp <= v_cn; b_first <= '0';
                 if v_cn(23 downto 16) /= b_cp(23 downto 16) then
@@ -932,7 +1058,11 @@ begin
     -- Pixel path
     ---------------------------------------------------------------------------
     p_pix : process(clk)
-        variable v_uq : signed(23 downto 0);
+        variable v_ut : unsigned(21 downto 0);
+        variable v_ux : unsigned(4 downto 0);
+        variable v_ca, v_cb, v_mc : unsigned(4 downto 0);
+        variable v_cpar : std_logic;
+        variable v_cn4 : unsigned(3 downto 0);
         variable v_c  : unsigned(5 downto 0);
         type t_q4 is array (0 to 3) of unsigned(5 downto 0);
         variable v_b  : t_q4;
@@ -948,8 +1078,6 @@ begin
         variable v_na : signed(9 downto 0);
         variable v_hz : unsigned(1 downto 0);
         variable v_pg : unsigned(7 downto 0);
-        variable v_bd : unsigned(2 downto 0);
-        variable v_dk : std_logic;
         variable v_h  : unsigned(1 downto 0);
         variable v_hv : unsigned(9 downto 0);
         variable v_sel : unsigned(3 downto 0);
@@ -958,7 +1086,7 @@ begin
         variable v_dl : unsigned(9 downto 0);
         variable v_ks : unsigned(15 downto 0);
         variable v_y8 : unsigned(7 downto 0);
-        variable v_du, v_dv, v_t9 : signed(9 downto 0);
+        variable v_u8, v_v8 : unsigned(7 downto 0);
         variable v_sk : unsigned(5 downto 0);
         variable v_cu, v_cv : signed(13 downto 0);
         variable v_du11, v_dv11 : signed(10 downto 0);
@@ -966,28 +1094,43 @@ begin
     begin
         if rising_edge(clk) then
             -- 1: column, fraction, bank and hue addresses; fragment hashes (this cell, next cell)
-            v_uq := b_u;
-            if v_uq < 0 then v_uq := (others => '0');
-            elsif v_uq >= 63 * 65536 then v_uq := to_signed(63 * 65536 - 1, 24); end if;
-            v_c := unsigned(v_uq(21 downto 16));
-            a_b0 <= l_ra0 & resize(shift_right(resize(v_c, 7) + 1, 1), 5);
-            a_b1 <= l_ra0 & v_c(5 downto 1);
-            a_b2 <= l_ra1 & resize(shift_right(resize(v_c, 7) + 1, 1), 5);
-            a_b3 <= l_ra1 & v_c(5 downto 1);
+            -- u = t - 0.5 column, clamped to [0, 63) as in v0.5; the bank columns (c + 1) / 2 and
+            -- c / 2 straight from t's bits (m = t / 2 columns), so no decrement on the address path
+            v_ut := b_t;
+            v_mc := v_ut(21 downto 17);
+            if v_ut(21 downto 15) = "0000000" then
+                v_c := (others => '0'); v_ux := (others => '0'); v_ca := (others => '0'); v_cb := (others => '0'); v_cpar := '0';
+            elsif v_ut(21 downto 15) = "1111111" then
+                v_c := to_unsigned(62, 6); v_ux := (others => '1'); v_ca := to_unsigned(31, 5); v_cb := to_unsigned(31, 5); v_cpar := '0';
+            else
+                if v_ut(15) = '1' then v_c := v_ut(21 downto 16); else v_c := v_ut(21 downto 16) - 1; end if;
+                v_ux := (not v_ut(15)) & v_ut(14 downto 11);
+                if v_ut(16) = '1' and v_ut(15) = '1' then v_ca := v_mc + 1; else v_ca := v_mc; end if;
+                if v_ut(16) = '0' and v_ut(15) = '0' then v_cb := v_mc - 1; else v_cb := v_mc; end if;
+                v_cpar := not (v_ut(16) xor v_ut(15));
+            end if;
+            a_b0 <= l_ra0 & v_ca;
+            a_b1 <= l_ra0 & v_cb;
+            a_b2 <= l_ra1 & v_ca;
+            a_b3 <= l_ra1 & v_cb;
             a_hue <= l_hrow & v_c;
-            p1_cp <= v_c(0); p1_fx <= unsigned(v_uq(15 downto 11));
+            p1_cp <= v_cpar; p1_fx <= v_ux;
             v_ks := f_nseed xor x"7777";
             ha_1 <= f_h1((b_cell & l_grp) xor v_ks);
             p_cst(1) <= b_cst;
-            -- the tear's smear: take a new colour when the column has moved by l_hc
-            if b_first = '1' or v_c - p1_cl >= l_hc then
-                p_tk(1) <= '1'; p1_cl <= v_c;
-            else
-                p_tk(1) <= '0';
-            end if;
+            p_ast(1) <= b_cst and (b_first or not b_cell(0));
+            p1_c <= v_c; p1_first <= b_first;
 
-            -- 2: (store reads) hashes
+            -- 2: (store reads) hashes; the tear's smear: take a new colour once the column has
+            -- changed l_hc times (either way) since the last take
             p2_cp <= p1_cp; p2_fx <= p1_fx;
+            p2_cl <= p1_c;
+            if p1_c /= p2_cl then v_cn4 := p2_cn + 1; else v_cn4 := p2_cn; end if;
+            if p1_first = '1' or v_cn4 >= l_hc then
+                p_tk(2) <= '1'; p2_cn <= (others => '0');
+            else
+                p_tk(2) <= '0'; p2_cn <= v_cn4;
+            end if;
             ha_2 <= f_h2(ha_1);
             p_cst(2) <= p_cst(1);
 
@@ -1045,8 +1188,8 @@ begin
             p5_fx <= p4_fx;
             if p4_mx > 12 then v_m := resize(p4_mx - 12, 7); else v_m := (others => '0'); end if;
             if v_m(6 downto 1) > 4 then p5_b4 <= to_unsigned(4, 3); else p5_b4 <= v_m(3 downto 1); end if;
-            -- dark-band hue: the hashed hue in busy cells (busy >= 2 quarters), else the map; Split = blue
-            if f_blue = '1' or p_kz(4) = '1' then p_hue(5) <= "000";
+            -- dark-band hue: the hashed hue in busy cells (busy >= 2 quarters), else the map
+            if p_kz(4) = '1' then p_hue(5) <= "000";
             elsif p4_mx >= 16 then p_hue(5) <= resize(p4_hz, 3);
             else p_hue(5) <= resize(p4_hm, 3); end if;
             p5_na <= p4_na;
@@ -1104,54 +1247,40 @@ begin
             -- 12: + fragments + colour-cycle offset
             p12_ph <= p11_pg + unsigned(p11_no) + f_rot(15 downto 8);
 
-            -- 13: band (0 = the dark band)
-            v_bd := (others => '0');
-            if p12_ph >= 37 then v_bd := to_unsigned(1, 3); end if;
-            if p12_ph >= 74 then v_bd := to_unsigned(2, 3); end if;
-            if p12_ph >= 110 then v_bd := to_unsigned(3, 3); end if;
-            if p12_ph >= 147 then v_bd := to_unsigned(4, 3); end if;
-            if p12_ph >= 183 then v_bd := to_unsigned(5, 3); end if;
-            if p12_ph >= 220 then v_bd := to_unsigned(6, 3); end if;
-            p13_bd <= v_bd;
-            if v_bd = 0 then p13_dk <= '1'; else p13_dk <= '0'; end if;
+            -- 13: band (0 = the dark band): the block-RAM lookup r_bd = {dark, band - 1} of p12_ph
+            -- (K2 Ink: the photo's thresholds 37, 74, 110, 147, 183, 220 at 50 %)
 
-            -- 14: Stairs (dark band held per cell), dark-band hue, palette index, the tear's smear
-            if p_cst(13) = '1' then p14_dh <= p13_dk; end if;
-            v_dk := p13_dk or (f_stair and p14_dh and not p_cst(13));
-            v_h := p_hue(13)(1 downto 0);
-            if v_dk = '1' then v_sel := "10" & v_h; else v_sel := '0' & (p13_bd - 1); end if;
-            if l_hon = '1' and p_tk(13) = '0' then
+            -- 14: dark-band hue, palette index; Stairs All (the whole index held per cell pair); the tear's smear
+            v_h := unsigned(r_pbf(1 downto 0));
+            if r_bd(3) = '1' then v_sel := "10" & v_h; else v_sel := '0' & unsigned(r_bd(2 downto 0)); end if;
+            if r_pbf(3) = '1' then p14_ah <= v_sel; elsif f_stair = '1' then v_sel := p14_ah; end if;
+            if l_hon = '1' and r_pbf(4) = '0' then
                 p14_sel <= p14_hsel;
             else
                 p14_sel <= v_sel; p14_hsel <= v_sel;
             end if;
 
-            -- 15: palette
-            p15_c <= f_pal(p14_sel);
+            -- 15: palette, with its colourway variants precomputed per entry (f_palx)
+            p15_x <= f_palx(p14_sel);
 
             -- 16: 10-bit
-            -- colourway (K6): chroma swaps / turns / complement, mono, luma negative, vivid
-            v_y8 := unsigned(p15_c(23 downto 16));
-            v_du := signed(resize(unsigned(p15_c(15 downto 8)), 10)) - 128;
-            v_dv := signed(resize(unsigned(p15_c(7 downto 0)), 10)) - 128;
+            -- colourway (K6): chroma swaps / turns / complement, mono, luma negative, vivid, as a mux
+            -- of the precomputed variants (offsets clamped to +-127, + 128, exactly as v0.5 computed them)
+            if f_pl = 6 then v_y8 := unsigned(p15_x(55 downto 48)); else v_y8 := unsigned(p15_x(63 downto 56)); end if;
             case to_integer(f_pl) is
-                when 1 => v_du := (others => '0'); v_dv := (others => '0');
-                when 2 => v_t9 := v_du; v_du := v_dv; v_dv := v_t9;
-                when 3 => v_du := -v_du; v_dv := -v_dv;
-                when 4 => v_t9 := v_du; v_du := -v_dv; v_dv := v_t9;
-                when 5 => v_t9 := v_du; v_du := v_dv; v_dv := -v_t9;
-                when 6 => v_y8 := 251 - v_y8;
-                when 7 => v_du := shift_left(v_du, 1); v_dv := shift_left(v_dv, 1);
-                when others => null;
+                when 1 =>      v_u8 := x"80";                          v_v8 := x"80";                           -- Ink
+                when 2 =>      v_u8 := unsigned(p15_x(39 downto 32)); v_v8 := unsigned(p15_x(47 downto 40));   -- Swap
+                when 3 =>      v_u8 := unsigned(p15_x(31 downto 24)); v_v8 := unsigned(p15_x(23 downto 16));   -- Comp
+                when 4 =>      v_u8 := unsigned(p15_x(23 downto 16)); v_v8 := unsigned(p15_x(47 downto 40));   -- Turn
+                when 5 =>      v_u8 := unsigned(p15_x(39 downto 32)); v_v8 := unsigned(p15_x(31 downto 24));   -- Twist
+                when 7 =>      v_u8 := unsigned(p15_x(15 downto 8));  v_v8 := unsigned(p15_x(7 downto 0));     -- Vivid
+                when others => v_u8 := unsigned(p15_x(47 downto 40)); v_v8 := unsigned(p15_x(39 downto 32));   -- Rorschach, Night
             end case;
-            if v_du > 127 then v_du := to_signed(127, 10); elsif v_du < -127 then v_du := to_signed(-127, 10); end if;
-            if v_dv > 127 then v_dv := to_signed(127, 10); elsif v_dv < -127 then v_dv := to_signed(-127, 10); end if;
-            v_du := v_du + 128; v_dv := v_dv + 128;
             -- chroma neutral off the generated avid, so the 8-sums below resync in every blanking interval
             p16_y <= v_y8 & "00";
             if s_gav_sr(14) = '1' then
-                p16_u <= unsigned(v_du(7 downto 0)) & "00";
-                p16_v <= unsigned(v_dv(7 downto 0)) & "00";
+                p16_u <= v_u8 & "00";
+                p16_v <= v_v8 & "00";
             else
                 p16_u <= to_unsigned(512, 10); p16_v <= to_unsigned(512, 10);
             end if;
@@ -1161,13 +1290,11 @@ begin
             -- adjacent 8-sums; luma [1 3 4 4 3 1]/16 = box4 smear * [1 2 1]).  The running
             -- 8-sums snap back to neutral once 8 blank samples are in, so a glitched sample
             -- can't offset the chroma for good.
-            s_csu(0) <= p16_u; s_csv(0) <= p16_v;
-            for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
             if s_bxh = "00000000" then
                 s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
             else
-                s_boxu <= s_boxu + p16_u - s_csu(7);
-                s_boxv <= s_boxv + p16_v - s_csv(7);
+                s_boxu <= s_boxu + p16_u - (unsigned(r_cbf(15 downto 8)) & "00");
+                s_boxv <= s_boxv + p16_v - (unsigned(r_cbf(7 downto 0)) & "00");
             end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u22 <= v_sc(13 downto 4);
@@ -1203,12 +1330,12 @@ begin
             s_y24 <= s_y23; s_u24 <= unsigned(v_cu(9 downto 0)); s_v24 <= unsigned(v_cv(9 downto 0));
 
             -- delays
-            for i in 3 to 13 loop p_cst(i) <= p_cst(i - 1); end loop;
-            for i in 2 to 13 loop p_tk(i) <= p_tk(i - 1); end loop;
-            for i in 7 to 8 loop p_n(i) <= p_n(i - 1); end loop;
-            for i in 6 to 13 loop p_hue(i) <= p_hue(i - 1); end loop;
+
             if resize(p3_sk, 7) >= c_klv then p_kz(4) <= '1'; else p_kz(4) <= '0'; end if;   -- K6 reveal, stage 4
             for i in 5 to 10 loop p_kz(i) <= p_kz(i - 1); end loop;
+            for i in 2 to 5 loop p_ast(i) <= p_ast(i - 1); end loop;
+            for i in 3 to 5 loop p_tk(i) <= p_tk(i - 1); end loop;
+            for i in 7 to 8 loop p_n(i) <= p_n(i - 1); end loop;
         end if;
     end process p_pix;
 

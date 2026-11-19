@@ -1,4 +1,5 @@
-# Rorschach - Heirloom #4, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20221124_22_54_05.
+# Rorschach Diag - Heirloom #4, v0.6.0 (2026-11-03, phase-2 diag): K2 Ink (dark band width), K4 drift,
+# K5 to 8 folds, S8 Stairs Hue / All, S9 Quad mirror, P12 slip. v0.5.0 (2026-10-21): rebuilt from the photo WIN_20221124_22_54_05.
 # Camera video folded top to bottom (a frame-store mirror) through an 8-colour cyclic colourizer:
 # cream / peach / pink / orchid / lavender / pale cyan bands, and a dark band in blue or red
 # sample-and-held in 42-px cells; busy fragments and frame-store tears either side of the fold.
@@ -8,13 +9,13 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.rorschach"
 program_name = "Rorschach"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mirror", "Color", "Glitch"]
 program_type = "processing"
-description = "Camera folded into a pastel colourizer inkblot: red/blue stair-steps, busy fragments, frame-store tears."
+description = "Camera folded into a pastel colourizer inkblot: ink width, quad mirror, drift and slip, stair mosaic, frame-store tears."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -32,19 +33,19 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Palette"
-value_labels = ["Rorschach", "Ink", "Swap", "Comp", "Turn", "Twist", "Night", "Vivid"]
-initial_value_label = "Rorschach"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_3"
-name_label = "Detail"
+name_label = "Ink"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 614
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Palette"
+value_labels = ["Rorschach", "Ink", "Swap", "Comp", "Turn", "Twist", "Night", "Vivid"]
+initial_value_label = "Rorschach"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -60,9 +61,9 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_5"
 name_label = "Fold"
 control_mode = "linear"
-display_min_value = 25
+display_min_value = 12
 display_max_value = 100
-initial_value = 323
+initial_value = 423
 display_float_digits = 0
 suffix_label = "%"
 
@@ -87,14 +88,14 @@ initial_value_label = "Mirror"
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Stairs"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+value_labels = ["Hue", "All"]
+initial_value_label = "Hue"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Split"
-value_labels = ["Hue", "Blue"]
-initial_value_label = "Hue"
+name_label = "Quad"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -120,15 +121,15 @@ initial_value = 358
 display_float_digits = 0
 suffix_label = "%"
 
-# --- Presets (hand-written placeholders) ---
+# --- Presets (hand-written placeholders; preset 0 = the defaults in Osc, the photo) ---
 
 [[preset]]
 name = "Photo"
 rotary_potentiometer_1 = 387
-rotary_potentiometer_3 = 614
+rotary_potentiometer_2 = 512
 rotary_potentiometer_4 = 600
-rotary_potentiometer_5 = 323
-rotary_potentiometer_2 = 0
+rotary_potentiometer_5 = 423
+rotary_potentiometer_3 = 0
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
@@ -138,28 +139,28 @@ linear_potentiometer_12 = 358
 
 [[preset]]
 name = "Ink Card"
-rotary_potentiometer_1 = 200
-rotary_potentiometer_3 = 300
+rotary_potentiometer_1 = 250
+rotary_potentiometer_2 = 820
 rotary_potentiometer_4 = 512
-rotary_potentiometer_5 = 323
-rotary_potentiometer_2 = 128
+rotary_potentiometer_5 = 423
+rotary_potentiometer_3 = 128
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 1
 toggle_switch_10 = 0
-toggle_switch_11 = 0
+toggle_switch_11 = 1
 linear_potentiometer_12 = 0
 
 [[preset]]
 name = "Kaleido"
 rotary_potentiometer_1 = 640
-rotary_potentiometer_3 = 614
-rotary_potentiometer_4 = 760
+rotary_potentiometer_2 = 512
+rotary_potentiometer_4 = 880
 rotary_potentiometer_5 = 0
-rotary_potentiometer_2 = 384
+rotary_potentiometer_3 = 384
 toggle_switch_7 = 0
-toggle_switch_8 = 1
-toggle_switch_9 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
 toggle_switch_10 = 0
 toggle_switch_11 = 1
 linear_potentiometer_12 = 200
@@ -167,13 +168,69 @@ linear_potentiometer_12 = 200
 [[preset]]
 name = "Shredded"
 rotary_potentiometer_1 = 500
-rotary_potentiometer_3 = 800
+rotary_potentiometer_2 = 512
 rotary_potentiometer_4 = 700
-rotary_potentiometer_5 = 323
-rotary_potentiometer_2 = 0
+rotary_potentiometer_5 = 423
+rotary_potentiometer_3 = 0
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 1
 linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Mosaic"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 700
+rotary_potentiometer_4 = 760
+rotary_potentiometer_5 = 423
+rotary_potentiometer_3 = 896
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 358
+
+[[preset]]
+name = "Ink Flood"
+rotary_potentiometer_1 = 387
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 300
+rotary_potentiometer_3 = 768
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 358
+
+[[preset]]
+name = "Slipstream"
+rotary_potentiometer_1 = 450
+rotary_potentiometer_2 = 512
+rotary_potentiometer_4 = 960
+rotary_potentiometer_5 = 423
+rotary_potentiometer_3 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Camera Quad"
+rotary_potentiometer_1 = 387
+rotary_potentiometer_2 = 600
+rotary_potentiometer_4 = 760
+rotary_potentiometer_5 = 423
+rotary_potentiometer_3 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 358

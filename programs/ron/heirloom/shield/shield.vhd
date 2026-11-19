@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Shield v0.5.0 -- Heirloom #38, rebuilt from the photo WIN_20230529_22_56_41.
+-- Shield v0.6.0 (phase-2 diag) -- Heirloom #38, rebuilt from the photo WIN_20230529_22_56_41.
 -- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The photo: two shields side by side (axes 941.7 px apart), each a nest of U-shaped bands with
@@ -22,18 +22,23 @@
 --   F_k falls through 530 after exceeding 552 (faded on the steep F1 side by the line's crease
 --   peak), a dark one-shot where F rises out of the stripe zone.
 --
---   K1  Shields   shields across (0.87 .. 6.5; the photo 2.04)
+--   K1  Shields   shields across, exponential 0.51 .. 8.1 (the photo's 2.04 at 512)
 --   K2  Bands     nested bands per shield (plain stripes .. x3.6)
 --   K3  Stripes   stripe count (one stripe .. 26 per frame; the photo 7.3)
 --   K4  Speed     bipolar: bands stream out of the tips, the stripes roll
 --   K5  Pillars   how far the pillars (F1) climb: none .. they take over
---   K6  Etch      how far the camera (or the Osc) bends the bands
---   S7  Line      the white / dark one-shot lines
+--   K6  Etch      how far the camera (or the Osc) bends the bands AND the stripes
+--   S7  Pairs     Same / Facing: every second shield (with its pillars) upside down
 --   S8  Tincture  the photo / Azure (chroma inverted)
 --   S9  Flip      shields upside down
---   S10 Stripes   on (the photo) / off
+--   S10 Rows      Level / Brick: the stripe square wave patched into the H ramp's phase, orange and red
+--                 rows shifted +-1/8 shield
 --   S11 Source    Video / Osc
 --   P12 DEPTH     V parabola: flat banners (0) .. the photo (365) .. deep cascading V's (1023)
+--
+-- Per-shield parameter sets (v0.6): the line engine runs twice per line, set A (the shields left of
+-- every second seam) and set B (the others: Facing flips their V parabola and F1 line terms); the
+-- pixel path picks the set by the shield parity, bit 24 xor bit 23 of the 25-bit tile phase.
 --
 -- Engine: vblank-zone sequencer (one serial multiplier, shared glide), a per-line engine kicked at each
 -- line start that computes the NEXT line (V parabola * depth, F1's line term, crease peak, stripe bit,
@@ -152,7 +157,7 @@ architecture shield of program_top is
     signal c_ldw  : unsigned(2 downto 0) := to_unsigned(3, 3);
 
     -- knobs: glided (Q3), raw speed, switches
-    signal s_g1 : unsigned(12 downto 0) := to_unsigned(213 * 8, 13);
+    signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
@@ -164,12 +169,13 @@ architecture shield of program_top is
     signal s_k4 : unsigned(9 downto 0) := to_unsigned(700, 10);
     signal s_vm : unsigned(8 downto 0) := (others => '0');
     signal s_vneg : std_logic := '0';
-    signal s_line, s_pal, s_flip, s_strp, s_src : std_logic := '0';
+    signal s_face, s_pal, s_flip, s_brk, s_src : std_logic := '0';
 
     -- per-field constants
     signal z_a    : unsigned(22 downto 0) := (others => '0');
-    signal c_step : unsigned(16 downto 0) := to_unsigned(17810, 17);     -- tile phase per pixel (Q24)
-    signal c_phi0 : unsigned(23 downto 0) := to_unsigned(16029365, 24);  -- phase at the hold point
+    signal c_k1f  : unsigned(10 downto 0) := to_unsigned(373, 11);       -- K1 count factor (183 per shield)
+    signal c_step : unsigned(17 downto 0) := to_unsigned(17810, 18);     -- tile phase per pixel (Q24)
+    signal c_phi0 : unsigned(24 downto 0) := to_unsigned(25370097, 25);  -- phase at the hold point (2 tiles)
     signal c_gb   : unsigned(12 downto 0) := to_unsigned(1404, 13);      -- band gain
     signal c_fs   : unsigned(22 downto 0) := to_unsigned(114063, 23);    -- stripe phase per line (Q24)
     signal c_ps0  : unsigned(23 downto 0) := (others => '0');            -- stripe phase at line 0
@@ -218,27 +224,34 @@ architecture shield of program_top is
     signal e_ps   : unsigned(23 downto 0) := (others => '0');
     signal e_lf   : std_logic_vector(15 downto 0) := x"ACE1";
     signal e_j    : signed(2 downto 0) := (others => '0');
+    signal e_pass : std_logic := '0';                                    -- 0 = shield set A, 1 = set B
     signal m_a    : unsigned(31 downto 0) := (others => '0');
     signal m_b    : unsigned(15 downto 0) := (others => '0');
     signal m_acc  : unsigned(39 downto 0) := (others => '0');
-    signal n_g    : unsigned(12 downto 0) := (others => '0');
-    signal n_c1   : unsigned(13 downto 0) := (others => '0');
-    signal n_w1   : unsigned(2 downto 0) := (others => '0');
+    signal n_g, n_g2   : unsigned(12 downto 0) := (others => '0');
+    signal n_c1, n_c12 : unsigned(13 downto 0) := (others => '0');
+    signal n_w1, n_w12 : unsigned(2 downto 0) := (others => '0');
     signal n_s    : std_logic := '0';
-    signal n_phs  : unsigned(23 downto 0) := (others => '0');
-    signal l_g    : unsigned(12 downto 0) := (others => '0');
-    signal l_c1   : unsigned(13 downto 0) := (others => '0');
-    signal l_w1   : unsigned(2 downto 0) := (others => '0');
-    signal l_s    : std_logic := '0';
-    signal l_phs  : unsigned(23 downto 0) := (others => '0');
+    signal n_ps12 : unsigned(11 downto 0) := (others => '0');            -- stripe phase, top 12 bits
+    signal n_phs  : unsigned(24 downto 0) := (others => '0');
+    signal l_g, l_g2   : unsigned(12 downto 0) := (others => '0');
+    signal l_c1, l_c12 : unsigned(13 downto 0) := (others => '0');
+    signal l_w1, l_w12 : unsigned(2 downto 0) := (others => '0');
+    signal l_ps12 : unsigned(11 downto 0) := (others => '0');
+    signal l_phs  : unsigned(24 downto 0) := (others => '0');
 
     -- beam
-    signal b_phi  : unsigned(23 downto 0) := (others => '0');
+    signal b_phi  : unsigned(24 downto 0) := (others => '0');
     signal b_hold : unsigned(6 downto 0) := (others => '0');
     signal b_px   : unsigned(10 downto 0) := (others => '0');
 
     -- pixel path
     signal p1_tri : unsigned(10 downto 0) := (others => '0');
+    signal p1_par, p2_par, p3_par, p4_par, p5_par, p6_par, p7_par, p8_par : std_logic := '0';
+    signal p9_par, p10_par, p11_par, p12_par, p13_par : std_logic := '0';
+    signal p5_g   : unsigned(12 downto 0) := (others => '0');
+    signal p7_c1  : unsigned(13 downto 0) := (others => '0');
+    signal p10_sp, p11_sp, p12_sp, p13_sp : std_logic := '0';
     signal p2_a, p2_b : unsigned(10 downto 0) := (others => '0');
     signal p3_u, p4_u : unsigned(10 downto 0) := (others => '0');
     signal p4_tip : unsigned(4 downto 0) := (others => '0');
@@ -268,9 +281,9 @@ architecture shield of program_top is
     signal p13_z, p13_m, p13_t, p13_lb, p13_lh, p13_dz, p13_f1s : std_logic := '0';
     signal p13_ri : unsigned(6 downto 0) := (others => '0');
     signal p13_n  : unsigned(2 downto 0) := (others => '0');
-    type t_kd is array (0 to 9) of std_logic_vector(7 downto 0);
+    type t_kd is array (0 to 9) of std_logic_vector(9 downto 0);
     signal p_kd   : t_kd := (others => (others => '0'));
-    signal p14_k  : std_logic_vector(7 downto 0) := (others => '0');
+    signal p14_k  : std_logic_vector(9 downto 0) := (others => '0');
     signal p14_z, p14_dz, p14_zp : std_logic := '0';
     signal p14_ri : unsigned(6 downto 0) := (others => '0');
     signal p15_arm : std_logic := '0';
@@ -410,10 +423,10 @@ begin
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
-                s_line <= not registers_in(6)(0);       -- S7 Line: on by default (switch up = off)
+                s_face <= registers_in(6)(0);           -- S7 Pairs: Same / Facing
                 s_pal  <= registers_in(6)(1);
                 s_flip <= registers_in(6)(2);
-                s_strp <= not registers_in(6)(3);       -- S10 Stripes: on by default
+                s_brk  <= registers_in(6)(3);           -- S10 Rows: Level / Brick
                 s_src  <= registers_in(6)(4);
                 s_xs   <= s_xsr;
                 s_ysf  <= s_ys;
@@ -495,13 +508,14 @@ begin
                     when 294 => z_sel <= to_unsigned(11, 4); z_pre <= '1';
                     when 318 => z_sel <= to_unsigned(12, 4); z_pre <= '1';
                     when 342 => z_sel <= to_unsigned(13, 4); z_pre <= '1';
+                    when 366 => z_sel <= to_unsigned(14, 4); z_pre <= '1';
                     when others => null;
                 end case;
             end if;
             z_ld <= z_pre;
             if z_pre = '1' then
                 case to_integer(z_sel) is
-                    when 0  => z_fa <= resize(s_g1(12 downto 3), 40) + 160;  z_fb <= resize(c_skx, 16);   -- step
+                    when 0  => z_fa <= resize(c_k1f, 40);                    z_fb <= resize(c_skx, 16);   -- step
                     when 1  => z_fa <= resize(c_step, 40);                   z_fb <= resize(c_npx, 16);   -- phi0
                     when 2  => z_fa <= resize(s_g2(12 downto 3), 40) + 64;   z_fb <= resize(s_g2(12 downto 3), 16) + 64;  -- bands^2
                     when 3  => z_fa <= resize(z_a, 40);                      z_fb <= to_unsigned(4440, 16);
@@ -517,7 +531,8 @@ begin
                         else z_fa <= resize(512 - s_g5(12 downto 3), 40); end if;
                         z_fb <= to_unsigned(410, 16);
                     when 12 => z_fa <= resize(s_g6(12 downto 3), 40);        z_fb <= to_unsigned(108, 16); -- etch (x1.25: 86 -> 108, c_eg 0 .. 107)
-                    when others => z_fa <= resize(s_gp(12 downto 3), 40);    z_fb <= to_unsigned(2873, 16); -- depth
+                    when 13 => z_fa <= resize(s_gp(12 downto 3), 40);        z_fb <= to_unsigned(2873, 16); -- depth
+                    when others => z_fa <= to_unsigned(373, 40);             z_fb <= resize(s_g1(10 downto 3), 16) + 256;  -- K1 mantissa
                 end case;
             end if;
             if z_ld = '1' then
@@ -536,10 +551,10 @@ begin
                         if s_vneg = '1' then c_fl <= c_fl + resize(c_dfl, 24); c_rl <= c_rl + resize(c_drl, 24);
                         else c_fl <= c_fl - resize(c_dfl, 24); c_rl <= c_rl - resize(c_drl, 24); end if;
                     when 21 => c_fl8 <= c_fl(23 downto 8);
-                    when 50  => c_step <= f_acc(22 downto 6);
+                    when 50  => c_step <= f_acc(23 downto 6);
                     when 74  =>
                         v_t := f_acc;
-                        c_phi0 <= to_unsigned(C_PH960, 24) - v_t(24 downto 1);
+                        c_phi0 <= to_unsigned(C_PH960, 25) - v_t(25 downto 1);
                     when 98  => z_a <= f_acc(22 downto 0);
                     when 122 => c_gb <= f_acc(32 downto 20);
                     when 146 => z_a <= f_acc(22 downto 0);
@@ -556,6 +571,14 @@ begin
                         else c_a1 <= to_unsigned(C_A1K, 14) + f_acc(19 downto 6); end if;
                     when 338 => c_eg <= f_acc(17 downto 10);
                     when 362 => c_d10 <= f_acc(21 downto 10);
+                    -- K1: count factor 373 * 2^((k - 512) / 256), linear mantissa (used by next field's step)
+                    when 386 =>
+                        case s_g1(12 downto 11) is
+                            when "00"   => c_k1f <= resize(f_acc(19 downto 10), 11);
+                            when "01"   => c_k1f <= resize(f_acc(19 downto 9), 11);
+                            when "10"   => c_k1f <= f_acc(18 downto 8);
+                            when others => c_k1f <= f_acc(17 downto 7);
+                        end case;
                     when others => null;
                 end case;
             end if;
@@ -662,6 +685,7 @@ begin
         variable v_b  : std_logic;
         variable v_lf : std_logic_vector(15 downto 0);
         variable v_j  : signed(2 downto 0);
+        variable v_w  : unsigned(2 downto 0);
     begin
         if rising_edge(clk) then
             e_zk <= '0';
@@ -670,12 +694,14 @@ begin
             if e_zk = '1' then
                 e_vy <= (others => '0');
                 e_lc <= (others => '0');
+                e_pass <= '0';
                 e_ps <= c_ps0 - c_fs;          -- line 0 adds it back
                 e_lf <= x"ACE1";
                 e_j  <= (others => '0');
             elsif g_start = '1' then
                 e_vy <= e_vy + resize(s_ysf, 19);
                 e_lc <= (others => '0');
+                e_pass <= '0';
             elsif e_lc /= 255 then
                 e_lc <= e_lc + 1;
             end if;
@@ -684,9 +710,11 @@ begin
             m_a <= m_a(30 downto 0) & '0';
             m_b <= '0' & m_b(15 downto 1);
 
+            -- two passes per line: lc 1..107 for set A, then lc restarts at 1 for set B (Facing flips
+            -- its y); the once-per-line work (stripe phase, wobble, start phase) runs in pass A only
             case to_integer(e_lc) is
                 when 1 =>
-                    if s_flip = '1' then
+                    if (s_flip xor (e_pass and s_face)) = '1' then
                         if e_vy > 276224 then v_ye := (others => '0'); else v_ye := to_unsigned(276224, 19) - e_vy; end if;
                     else
                         v_ye := e_vy;
@@ -717,45 +745,57 @@ begin
                     elsif v_c > 16383 then e_c1 <= (others => '1');
                     else e_c1 <= unsigned(v_c(13 downto 0)); end if;
                 when 105 =>
-                    n_g  <= e_g;
-                    n_c1 <= e_c1;
+                    if e_pass = '0' then n_g <= e_g; n_c1 <= e_c1; else n_g2 <= e_g; n_c12 <= e_c1; end if;
                     e_fc <= resize(e_g, 15) - resize(shift_right(e_g, 2), 15) - resize(shift_right(e_g, 7), 15)
                             + resize(shift_right(e_c1, 2), 15) + resize(shift_right(e_c1, 7), 15);
                 when 106 =>
-                    if e_fc <= C_FC0 then n_w1 <= to_unsigned(4, 3);
-                    elsif e_fc <= C_FC1 then n_w1 <= to_unsigned(3, 3);
-                    elsif e_fc <= C_FC2 then n_w1 <= to_unsigned(2, 3);
-                    elsif e_fc <= C_FC3 then n_w1 <= to_unsigned(1, 3);
-                    else n_w1 <= to_unsigned(0, 3); end if;
-                    v_ps := e_ps + resize(c_fs, 24);
-                    e_ps <= v_ps;
-                    n_s  <= v_ps(23) and s_strp;
-                    -- wobble: one LFSR step per line, a +-2 px walk
-                    v_b := e_lf(0) xor e_lf(2) xor e_lf(3) xor e_lf(5);
-                    v_lf := v_b & e_lf(15 downto 1);
-                    e_lf <= v_lf;
-                    v_j := e_j;
-                    case v_lf(2 downto 0) is
-                        when "000"  => if e_j < 2 then v_j := e_j + 1; end if;
-                        when "001"  => if e_j > -2 then v_j := e_j - 1; end if;
-                        when "010"  => if e_j > 0 then v_j := e_j - 1; elsif e_j < 0 then v_j := e_j + 1; end if;
-                        when others => null;
-                    end case;
-                    e_j <= v_j;
+                    if e_fc <= C_FC0 then v_w := to_unsigned(4, 3);
+                    elsif e_fc <= C_FC1 then v_w := to_unsigned(3, 3);
+                    elsif e_fc <= C_FC2 then v_w := to_unsigned(2, 3);
+                    elsif e_fc <= C_FC3 then v_w := to_unsigned(1, 3);
+                    else v_w := to_unsigned(0, 3); end if;
+                    if e_pass = '0' then n_w1 <= v_w; else n_w12 <= v_w; end if;
+                    if e_pass = '0' then
+                        v_ps := e_ps + resize(c_fs, 24);
+                        e_ps <= v_ps;
+                        n_s  <= v_ps(23);
+                        n_ps12 <= v_ps(23 downto 12);
+                        -- wobble: one LFSR step per line, a +-2 px walk
+                        v_b := e_lf(0) xor e_lf(2) xor e_lf(3) xor e_lf(5);
+                        v_lf := v_b & e_lf(15 downto 1);
+                        e_lf <= v_lf;
+                        v_j := e_j;
+                        case v_lf(2 downto 0) is
+                            when "000"  => if e_j < 2 then v_j := e_j + 1; end if;
+                            when "001"  => if e_j > -2 then v_j := e_j - 1; end if;
+                            when "010"  => if e_j > 0 then v_j := e_j - 1; elsif e_j < 0 then v_j := e_j + 1; end if;
+                            when others => null;
+                        end case;
+                        e_j <= v_j;
+                    end if;
                 when 107 =>
-                    case to_integer(e_j) is
-                        when 2      => n_phs <= c_phi0 + shift_left(resize(c_step, 24), 1);
-                        when 1      => n_phs <= c_phi0 + resize(c_step, 24);
-                        when -1     => n_phs <= c_phi0 - resize(c_step, 24);
-                        when -2     => n_phs <= c_phi0 - shift_left(resize(c_step, 24), 1);
-                        when others => n_phs <= c_phi0;
-                    end case;
+                    if e_pass = '0' then
+                        case to_integer(e_j) is
+                            when 2      => n_phs <= c_phi0 + shift_left(resize(c_step, 25), 1);
+                            when 1      => n_phs <= c_phi0 + resize(c_step, 25);
+                            when -1     => n_phs <= c_phi0 - resize(c_step, 25);
+                            when -2     => n_phs <= c_phi0 - shift_left(resize(c_step, 25), 1);
+                            when others => n_phs <= c_phi0;
+                        end case;
+                        e_pass <= '1';
+                        e_lc   <= to_unsigned(1, 8);
+                    elsif s_brk = '1' then
+                        -- S10 Brick: the stripe square wave into the H ramp's phase, rows +-1/8 shield
+                        if n_s = '1' then n_phs <= n_phs - to_unsigned(2097152, 25);
+                        else n_phs <= n_phs + to_unsigned(2097152, 25); end if;
+                    end if;
                 when others => null;
             end case;
 
             -- hand-over in the blanking, once the previous line has left every stage that reads l_*
             if g_avid = '0' and s_gav_sr(20) = '0' and s_gav_sr(0) = '0' then
-                l_g <= n_g; l_c1 <= n_c1; l_w1 <= n_w1; l_s <= n_s; l_phs <= n_phs;
+                l_g <= n_g; l_c1 <= n_c1; l_w1 <= n_w1; l_phs <= n_phs;
+                l_g2 <= n_g2; l_c12 <= n_c12; l_w12 <= n_w12; l_ps12 <= n_ps12;
             end if;
         end if;
     end process p_line;
@@ -776,7 +816,7 @@ begin
                 if b_hold /= 0 then
                     b_hold <= b_hold - 1;
                 else
-                    b_phi <= b_phi + resize(c_step, 24);
+                    b_phi <= b_phi + resize(c_step, 25);
                 end if;
             end if;
             s_lb_ra <= b_px;
@@ -789,14 +829,19 @@ begin
     p_pix : process(clk)
         variable v_t  : unsigned(10 downto 0);
         variable v_d  : signed(12 downto 0);
-        variable v_k  : std_logic_vector(7 downto 0);
+        variable v_k  : std_logic_vector(9 downto 0);
         variable v_cnt : unsigned(2 downto 0);
         variable v_ix : unsigned(10 downto 0);
+        variable v_sp : unsigned(11 downto 0);
         variable v_y, v_u, v_v : signed(12 downto 0);
     begin
         if rising_edge(clk) then
-            -- 1: triangle (0 at the shield axis, 2047 at the seam)
+            -- 1: triangle (0 at the shield axis, 2047 at the seam); shield parity (set B = 1)
             if b_phi(23) = '1' then p1_tri <= not b_phi(22 downto 12); else p1_tri <= b_phi(22 downto 12); end if;
+            p1_par <= b_phi(24) xor b_phi(23);
+            p2_par <= p1_par; p3_par <= p2_par; p4_par <= p3_par; p5_par <= p4_par; p6_par <= p5_par;
+            p7_par <= p6_par; p8_par <= p7_par; p9_par <= p8_par; p10_par <= p9_par; p11_par <= p10_par;
+            p12_par <= p11_par; p13_par <= p12_par;
             -- 2-3: u = tri * 0.9199 (quarter px)
             p2_a <= p1_tri - shift_right(p1_tri, 4);
             p2_b <= shift_right(p1_tri, 6) + shift_right(p1_tri, 9);
@@ -807,22 +852,24 @@ begin
             p4_tip <= C_SH_TIP(to_integer(p3_u(7 downto 2)));
             if p3_u(10 downto 8) = "000" then p4_tv <= '1'; else p4_tv <= '0'; end if;
             p4_lm <= p3_lm;
-            -- 5: u' = u + tip
+            -- 5: u' = u + tip ; this shield's V parabola term
             if p4_tv = '1' then p5_ur <= p4_u + resize(p4_tip, 11); else p5_ur <= p4_u; end if;
             p5_lm <= p4_lm;
+            if p4_par = '1' then p5_g <= l_g2; else p5_g <= l_g; end if;
             -- 6: F2 = u' + g ; 3 u' and u'/8 - u'/64
-            p6_f2 <= resize(p5_ur, 14) + l_g;
+            p6_f2 <= resize(p5_ur, 14) + p5_g;
             p6_s3 <= shift_left(resize(p5_ur, 13), 1) + resize(p5_ur, 13);
             p6_sb <= resize(shift_right(p5_ur, 3), 13) - resize(shift_right(p5_ur, 6), 13);
             p6_lm <= p5_lm;
-            -- 7: s1 u' = 2.8906 u' ; etch partials
+            -- 7: s1 u' = 2.8906 u' ; etch partials ; this shield's F1 line term
             p7_f2 <= p6_f2;
             p7_s1u <= p6_s3 - p6_sb;
             p7_ea <= resize(p6_lm(3 downto 0) * c_eg, 12);
             p7_eb <= resize(p6_lm(7 downto 4) * c_eg, 12);
+            if p6_par = '1' then p7_c1 <= l_c12; else p7_c1 <= l_c1; end if;
             -- 8: F1 = C1 - s1 u' ; etch sum
             p8_f2 <= p7_f2;
-            p8_f1 <= signed(resize(l_c1, 15)) - signed(resize(p7_s1u, 15));
+            p8_f1 <= signed(resize(p7_c1, 15)) - signed(resize(p7_s1u, 15));
             p8_le <= resize(p7_ea, 16) + shift_left(resize(p7_eb, 16), 4);
             -- 9: F = min(F2, F1)
             if p8_f1 < 0 then
@@ -836,6 +883,10 @@ begin
             -- 10: + etch, wrapped at 1024 px
             p10_fw <= p9_f(11 downto 0) + p9_et;
             p10_f1s <= p9_f1s;
+            -- 10: this pixel's stripe bit: the line's stripe phase bent by the same luma (x4 / 4096 cycle)
+            v_sp := l_ps12 + (p9_et(9 downto 0) & "00");
+            p10_sp <= v_sp(11);
+            p11_sp <= p10_sp; p12_sp <= p11_sp; p13_sp <= p12_sp;
             -- 11: level tests, ramp offset, band product partials
             if p10_fw >= C_TZ then p11_z <= '1'; else p11_z <= '0'; end if;
             if p10_fw >= C_TM then p11_m <= '1'; else p11_m <= '0'; end if;
@@ -861,7 +912,7 @@ begin
             p13_z <= p12_z; p13_m <= p12_m; p13_t <= p12_t; p13_lb <= p12_lb; p13_lh <= p12_lh; p13_dz <= p12_dz;
             p13_f1s <= p12_f1s; p13_ri <= p12_ri;
             -- 14: keyer path delayed D pixels (10 / 7 / 5); ramp path of this pixel
-            p_kd(0) <= std_logic_vector(p13_n) & p13_f1s & p13_m & p13_t & p13_lb & p13_lh;
+            p_kd(0) <= p13_sp & p13_par & std_logic_vector(p13_n) & p13_f1s & p13_m & p13_t & p13_lb & p13_lh;
             for i in 1 to 9 loop p_kd(i) <= p_kd(i - 1); end loop;
             case c_dsel is
                 when "00"   => v_k := p_kd(9);
@@ -879,13 +930,15 @@ begin
             else
                 v_cnt := p15_cnt;
                 if p15_arm = '1' and p14_k(1) = '1' then v_cnt := c_lww; end if;
-                if v_cnt /= 0 then p15_ln <= s_line; p15_cnt <= v_cnt - 1; else p15_ln <= '0'; p15_cnt <= v_cnt; end if;
+                if v_cnt /= 0 then p15_ln <= '1'; p15_cnt <= v_cnt - 1; else p15_ln <= '0'; p15_cnt <= v_cnt; end if;
                 if p14_k(1) = '1' then p15_arm <= '0'; elsif p14_k(0) = '1' then p15_arm <= '1'; end if;
             end if;
             v_cnt := p15_dcnt;
             if p14_z = '1' and p14_zp = '0' and p14_dz = '1' and s_gav_sr(13) = '1' then v_cnt := c_ldw; end if;
-            if v_cnt /= 0 then p15_dk <= s_line; p15_dcnt <= v_cnt - 1; else p15_dk <= '0'; p15_dcnt <= v_cnt; end if;
-            if p14_k(4) = '1' then p15_w <= l_w1; else p15_w <= to_unsigned(4, 3); end if;
+            if v_cnt /= 0 then p15_dk <= '1'; p15_dcnt <= v_cnt - 1; else p15_dk <= '0'; p15_dcnt <= v_cnt; end if;
+            if p14_k(4) = '0' then p15_w <= to_unsigned(4, 3);
+            elsif p14_k(8) = '1' then p15_w <= l_w12;
+            else p15_w <= l_w1; end if;
             if p14_k(2) = '1' then
                 r_pa <= s_pal & to_unsigned(145, 8);
             elsif p14_k(3) = '1' then
@@ -893,7 +946,7 @@ begin
             elsif p14_z = '1' then
                 r_pa <= s_pal & '0' & p14_ri;
             else
-                r_pa <= s_pal & "1000" & l_s & unsigned(p14_k(7 downto 5));
+                r_pa <= s_pal & "1000" & p14_k(9) & unsigned(p14_k(7 downto 5));
             end if;
             -- 16: ROM data (EBR); 17: fabric copy
             p16_ln <= p15_ln; p16_dk <= p15_dk; p16_w <= p15_w;

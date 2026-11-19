@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-WARP v0.5.0 - build hook.  Emits warp_pkg.vhd (pure Python, no dependencies).
+WARP v0.6.0 (phase-2 diag) - build hook.  Emits warp_pkg.vhd (pure Python, no dependencies).
 
 Fitted to the source photo (WIN_20230909_23_29_18) in .heirloom_work/rb_warp (dfit4.py / protof.py):
 
@@ -94,6 +94,19 @@ def tables():
         tim.append(dict(ys=YS[i], sx=sx, x0=240 * 16 if sd else 0, vp=334 if sd else 94,
                         oxi=int(round(sx * 65536 / 10240.0)), zi=int(round(YS[i] * 65536 / 24.0 / 256))))
     m = [int(ch, 16) for ch in MAPHEX]
+    # v0.6.0: the unfitted knots under the left margin (a flat run of 8s, up to 13 per row in the
+    # upper half) get a reflection of the row's next knots, so the K3 slide (which carries these
+    # columns into view) shows a continuous warp, not a flat band.  Only knots that reach no pixel
+    # outside the fully opaque margin are replaced (knot k reaches x < 16 (k + 1); opaque for
+    # x < edge - 4 on the lines the knot row is interpolated into), so the defaults are unchanged.
+    for r in range(136):
+        row = m[r * 120:(r + 1) * 120]
+        lead = 0
+        while lead < 120 and row[lead] == 8: lead += 1
+        emin = min(ed[min(y // 16, 67)] * 4 for y in range(max(0, 8 * r - 8), 8 * r + 8))
+        n = min(lead, max(0, (emin - 4) // 16))
+        for k in range(n):
+            m[r * 120 + k] = row[2 * n - 1 - k]
     me = [0] * 8192; mo = [0] * 8192
     for r in range(136):
         for c in range(120):

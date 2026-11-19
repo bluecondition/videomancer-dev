@@ -1,4 +1,4 @@
-# Plume - Heirloom #19, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230315_00_58_54.
+# Plume - Heirloom #19, v0.6.0 diag (2026-11-03, phase 2): rebuilt from the photo WIN_20230315_00_58_54.
 # A red plume of hooked chevrons pointing right, cut by chirped vertical seams, over wobbling green
 # stripes and a blue gradient, folded top to bottom.  See plume.vhd and SUMMARY.md.
 
@@ -6,13 +6,13 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.plume"
 program_name = "Plume"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Mirror", "Color"]
 program_type = "processing"
-description = "A red plume of hooked chevrons cuts wavy green stripes, folded top to bottom; video bends the seams and stripes."
+description = "A red plume of hooked chevrons cuts wavy green stripes, folded top to bottom; video bends seams, stripes, outline."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -30,8 +30,8 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Reach"
 control_mode = "linear"
-display_min_value = 40
-display_max_value = 160
+display_min_value = 0
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
@@ -58,7 +58,7 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Tear"
+name_label = "Wobble"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -84,15 +84,15 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Wedge"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Hooks"
+value_labels = ["Plume", "All"]
+initial_value_label = "Plume"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Ribbons"
-value_labels = ["Dark", "Filled"]
-initial_value_label = "Dark"
+name_label = "Ground"
+value_labels = ["Stripes", "Camera"]
+initial_value_label = "Stripes"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -117,15 +117,15 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Plume"
+name = "Photo"
 
 [[preset]]
-name = "Calm Stripes"
+name = "Calm Water"
 linear_potentiometer_12 = 0
 rotary_potentiometer_4 = 560
 
 [[preset]]
-name = "Deep Wake"
+name = "Split Wake"
 linear_potentiometer_12 = 1023
 rotary_potentiometer_4 = 800
 rotary_potentiometer_5 = 700
@@ -136,11 +136,25 @@ toggle_switch_7 = 1
 rotary_potentiometer_2 = 380
 
 [[preset]]
-name = "Blue Plume"
-toggle_switch_10 = 1
-toggle_switch_9 = 1
+name = "Hook Field"
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 700
+linear_potentiometer_12 = 700
 
 [[preset]]
-name = "Clean Lines"
-rotary_potentiometer_5 = 0
-rotary_potentiometer_1 = 700
+name = "Blinds"
+toggle_switch_9 = 1
+rotary_potentiometer_3 = 700
+rotary_potentiometer_6 = 500
+
+[[preset]]
+name = "Blue Storm"
+toggle_switch_10 = 1
+rotary_potentiometer_5 = 1000
+rotary_potentiometer_4 = 950
+
+[[preset]]
+name = "Sliver"
+rotary_potentiometer_2 = 0
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_3 = 300

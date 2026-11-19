@@ -1,19 +1,21 @@
-# Streak - Heirloom #7, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230129_00_40_34.
+# Streak - Heirloom #7, v0.6.0 (2026-11-09, phase-2 diag): the v0.5.0 photo rebuild (WIN_20230129_00_40_34)
+# with wider element controls: bipolar Taper, 7..478 px Blocks, Mosaic Below/Above, Red Bands/Plaid, and
+# P12 tearing every band sideways on its own LFO above the photo setting.
 # Smeared colour streaks cut into bands that thin down the frame (a swept band clock), a red
 # 8-step sequence per band, and below a diagonal the picture frozen into a mosaic of held blocks.
 # See streak.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 44
+processing_delay_clks = 42
 program_id = "com.czartroniks.streak"
 program_name = "Streak"
-program_version = "0.5.2"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Glitch", "Color", "Signal"]
 program_type = "processing"
-description = "Smeared colour streaks in bands that thin down the frame; below a diagonal the picture freezes into held mosaic blocks."
+description = "Smeared colour streaks in tapering bands that tear sideways; across a diagonal the picture freezes into mosaic blocks."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -31,9 +33,9 @@ suffix_label = ""
 parameter_id = "rotary_potentiometer_2"
 name_label = "Taper"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 900
+initial_value = 962
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +45,7 @@ name_label = "Blocks"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 738
+initial_value = 723
 display_float_digits = 0
 suffix_label = "%"
 
@@ -80,14 +82,14 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Mosaic"
-value_labels = ["Blocks", "Lines"]
-initial_value_label = "Lines"
+value_labels = ["Below", "Above"]
+initial_value_label = "Below"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Strips"
-value_labels = ["Sparse", "Dense"]
-initial_value_label = "Sparse"
+name_label = "Red"
+value_labels = ["Bands", "Plaid"]
+initial_value_label = "Bands"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -130,9 +132,27 @@ linear_potentiometer_12 = 0
 rotary_potentiometer_5 = 150
 
 [[preset]]
-name = "Frozen"
-rotary_potentiometer_5 = 1023
-rotary_potentiometer_3 = 760
+name = "Torn Bands"
+linear_potentiometer_12 = 870
+rotary_potentiometer_4 = 560
+
+[[preset]]
+name = "Thick Floor"
+rotary_potentiometer_2 = 0
+rotary_potentiometer_1 = 420
+rotary_potentiometer_5 = 420
+
+[[preset]]
+name = "Sky Mosaic"
+toggle_switch_7 = 1
+rotary_potentiometer_3 = 860
+rotary_potentiometer_5 = 470
+
+[[preset]]
+name = "Red Plaid"
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 520
+linear_potentiometer_12 = 300
 
 [[preset]]
 name = "Storm"

@@ -1,4 +1,5 @@
 # Ovals - Heirloom #50, rebuilt 2026-10-27 (v0.5.0, v0.5.1 2026-10-28) from WIN_20231003_23_01_50.
+# v0.6.0 (2026-11-03, phase-2 diag): K1 Stagger, K2 Links x0.25..x4, S8 Glow Bottom / Rows, S9 Wave Arc / Cusp.
 # Chains of vesica ovals on a striped hot-pink ground: violet / green rainbow ropes, a double oval in the
 # middle, nested diamonds and cyan stars between the columns, a white glow below.  See ovals.vhd, ovals.py.
 
@@ -6,7 +7,7 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.ovals"
 program_name = "Ovals"
-program_version = "0.5.4"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -18,13 +19,13 @@ core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Columns"
+name_label = "Stagger"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
@@ -85,14 +86,14 @@ initial_value_label = "On"
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Glow"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+value_labels = ["Bottom", "Rows"]
+initial_value_label = "Bottom"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Twist"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Wave"
+value_labels = ["Arc", "Cusp"]
+initial_value_label = "Arc"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -120,23 +121,38 @@ suffix_label = "%"
 name = "Photo"
 
 [[preset]]
-name = "Knotted Ropes"
-linear_potentiometer_12 = 0
-rotary_potentiometer_4 = 700
+name = "Braid"
+rotary_potentiometer_1 = 1023
 
 [[preset]]
-name = "Big Links"
-linear_potentiometer_12 = 1023
-rotary_potentiometer_1 = 300
+name = "Rock"
+rotary_potentiometer_1 = 0
+linear_potentiometer_12 = 700
 
 [[preset]]
-name = "Chain Mail"
-rotary_potentiometer_1 = 900
-rotary_potentiometer_2 = 900
-rotary_potentiometer_5 = 300
+name = "Cusp Chain"
+toggle_switch_9 = 1
 
 [[preset]]
-name = "Ice Weave"
+name = "Glow Beads"
+toggle_switch_8 = 1
+rotary_potentiometer_2 = 700
+
+[[preset]]
+name = "Ice Cusps"
 toggle_switch_9 = 1
 toggle_switch_10 = 1
-rotary_potentiometer_3 = 900
+rotary_potentiometer_1 = 800
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Tall Rock"
+rotary_potentiometer_1 = 150
+rotary_potentiometer_2 = 200
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Dense Lattice"
+rotary_potentiometer_2 = 1000
+rotary_potentiometer_3 = 800
+rotary_potentiometer_5 = 300

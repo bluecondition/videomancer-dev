@@ -1,7 +1,13 @@
 # Rorschach — Heirloom #4, rebuilt from the photo
 
-**v0.5.0 (2026-10-21): built, NOT flashed.** Rebuilt from `photos/WIN_20221124_22_54_05_Pro.jpg`
-after Ron judged v0.1.0 too abstract. Osc mode now redraws the photo itself:
+**v0.6.2 (2026-11-19): phase 2 FINAL — Ron prefers the diag in every case, so it is merged into production** (`out/rev_b/ron/heirloom/rorschach.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; this exact build not flashed). It is the phase-2 round plus the K6 camera pass; status lines below that say "diag" or "production untouched" are history. The replaced v0.5.3 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`.
+
+**v0.6.0 (2026-11-03, phase 2): diag preview built, awaiting Ron's preview** (see [Phase 2](#phase-2-v060);
+`Rorschach Diag`, `out/rev_b/ron/_diag/rorschach_diag_v0.6.0.vmprog`, copy in `out/rev_b/ron/heirloom/_diag/`).
+Production v0.5.1 (`programs/ron/heirloom/rorschach/`) is untouched. Phase-2 working files:
+`.heirloom_work/rb_rorschach/p2/` (sweep.py, sweep2.py, check.sh, psim.sh, prof/, cmp_p2.png).
+v0.5.0 (2026-10-21): built, NOT flashed. Rebuilt from `photos/WIN_20221124_22_54_05_Pro.jpg`
+after Ron judged v0.1.0 too abstract. Osc mode redraws the photo itself:
 - the folded pastel inkblot with the blue "head" at the right edge;
 - the blue arrowheads and the red/blue cross on the fold;
 - the blue-and-cyan "river";
@@ -10,6 +16,100 @@ after Ron judged v0.1.0 too abstract. Osc mode now redraws the photo itself:
 
 Video mode puts the camera through the same processing chain. Work files:
 `.heirloom_work/rb_rorschach/` (`notes.md`, `protof.py`, `imodel.py`, `sheet.png`, `cmp_final.png`).
+
+## Phase 2 (v0.6.0)
+No notes from Ron for rorschach (free hand, 2026-11-03 batch). v0.5 already had no global X/Y zoom, but five of
+its twelve controls were colourizer settings and two switches were nearly invisible on the control sheet (Stairs
+On held only the dark band; Split only turned the few red cells blue). The round gives the photo's own elements
+their parameters and adds motion. The dark shapes (head, arrowheads, river) get a size control, the frame-store
+mirror gets a second axis, the copies can slide and slip against each other, and the sample-and-hold covers the
+whole picture.
+- **The store is now read with mirrored edges** (period two widths, about columns −0.5 and 63.5), so sideways
+  drift, slip, Quad and tears never show a seam or a smeared edge column.
+- **The default frame is bit-exact with v0.5.1 away from the tears.** In GHDL (1080p, decimation 2, Osc, defaults)
+  527 of 540 rows are identical to the production render. The other 13 are torn rows: a torn line shifted past a
+  screen edge now reads mirrored content instead of the clamped edge column, which also re-phases that line's smear.
+
+| Was (v0.5) | Now (v0.6.0) | Full sweep, in screen terms |
+|---|---|---|
+| K2 Level: colourizer offset (the bands crawl through the cycle; 0 = the photo) | **K2 Ink** (renamed): the dark band's width, square law, photo at 50 % (bit-exact). The six pastel bands share the rest equally | 0 = no dark band at all: the head, arrowheads, river and red/blue stairs (~15 % of the frame) turn pastel. 50 % = the photo (37/256 of each colour cycle). 75 % = 2× (29 %). 100 % = 4× (58 %): blue/red masses cover over half the frame, the pastels thin to contour lines. The static colour offset is gone; K4 still cycles the bands through every offset |
+| K4 Speed: bipolar colour cycling, still at the centre | **+ sideways drift.** Beyond ±92 of the centre (the default 600 sits just inside), the inkblot also slides sideways in the cycle's direction, square law, through the mirrored edges | 0 for K4 418..606 (the photo stays put at the default). 60 s per screen width at 700, 21 s at 768, 9 s at 850, 3.2 s at either end. With Quad on, the halves flow into / out of the centre line |
+| K5 Fold: fold line 25 .. 100 % of the height | **12.5 .. 100 %**, linear; default moved 323 → 423 (the same 48.7 % fold, bit-exact) | 0 = eight folded copies stacked down the frame (v0.5: four). 100 % = unfolded |
+| S8 Stairs: Off / On (On held the dark band per 42-px cell: nearly invisible) | **Stairs: Hue / All.** Hue = the photo (only the dark band's hue stair-steps). All = every colour sample-and-held into 84-px blocks (two of the photo's 42.25-px cells) | All: every contour becomes a staircase with 84-px risers and the busy strips turn into block mosaics |
+| S9 Split: Hue / Blue (Blue turned the red/magenta/green dark cells blue) | **S9 Quad** (renamed): Off / On. The whole scene squeezed into the left half and mirrored into the right | On: a four-way symmetric inkblot. The blue head meets its mirror image at the centre (top and bottom), the river and arrows pair off. The all-blue option is gone |
+| P12 Tear: frame-store tears (0 = clean fold, 35 % = the photo, 100 % = slabs) | **+ slip.** Above the photo's 35 %, every second copy (the mirrored half; alternate copies in Repeat / multi-fold) tears away sideways, linear | 0 at ≤ 35 %. ~216 px at 50 %, ~575 px at 75 %, ~935 px (half the width) at 100 %. 0 % and 35 % look as before |
+
+Unchanged: K1 Bands, K3 Detail, K6 Palette, S7 Mirror (drift and slip follow the copies in Repeat too), S10 Negative,
+S11 Source.
+
+**Presets** (hand-written placeholders):
+- **Photo**: the defaults in Osc.
+- **Ink Card**: a real Rorschach card. Quad, mono Ink colourway, wide ink, fewer bands, clean, no tears, still.
+- **Kaleido**: eight folds, Quad, drifting right, Comp colourway.
+- **Shredded**: P12 100 % (slabs plus a half-width slip), Detail high.
+- **Mosaic**: Stairs All, more ink and bands, Vivid.
+- **Ink Flood**: Ink 100 %, Night colourway, fold higher.
+- **Slipstream**: Repeat, fast drift, P12 63 % slip.
+- **Camera Quad**: Video, Quad, gentle drift, a little more ink.
+
+**Engine (new).**
+- **Mirrored edges.** The beam stage folds the store column (Q16, s = u + 0.5) modulo 128 columns, back from 64
+  (one xor level after the existing adder, registered as `b_t`). Stage 1 forms the bank columns (c + 1) / 2 and
+  c / 2 straight from the folded bits (m ± 1 on 5 bits), with v0.5's clamps from raw bits. A sweep over the whole
+  default range matches v0.5's clamp bit for bit.
+- **Drift.** Serial-multiplier slot 10 squares the depth (|K4 − 512| − 92). The product / 8 accumulates into a
+  23-bit column offset that wraps at two widths.
+- **Slip.** At zc 326..327, (P12 − 358) × 3072 Q16. The line engine adds it to the start of every line whose copy
+  parity is odd (`n_odd` flips at each bounce or wrap).
+- **Quad.** The read step is doubled and the line starts at half a step, so the right half mirrors about the
+  centre. The camera write side keeps its own step.
+- **Ink.**
+  - Slots 11–12: d = K2² × 150 / 2²⁰. Slot 13: (256 − d) / 6 in Q8.
+  - At zc 512..767 a fill engine writes a 256 × 4 block-RAM lookup, phase → {dark, band − 1}, one phase per clock.
+    The thresholds are T₁ = d, T_k = d + ⌈(k − 1)(256 − d)/6⌉.
+  - The lookup replaces the six per-pixel comparators. At 50 % it equals the photo's decoder for all 256 phases.
+- **Stairs All.** Stage 14 holds the whole palette index from the start of each cell pair.
+- **Smear.** The tear's smear now takes a new colour once the column has *changed* l_hc times since the last take,
+  so it works in either direction across a mirror line. For v0.5's monotonic columns this is identical.
+
+**Fit.** The first build placed 7,526 LC (98 %), and HD Analog missed on all 6 router2 seeds (best 66.5 MHz;
+critical paths all routing). It was fitted with no feature lost:
+- the output chroma filter's delay lines moved into a block-RAM ring, written from its own copy register so
+  `p16` stays beside the colourway logic;
+- the stage 5 → 13 fields (smear take, cell-pair start, dark hue) moved into a second ring on the same pointer;
+- the Ink lookup RAM replaces six variable comparators, and the Ink curve runs on the serial multiplier;
+- the line engine reads the tear draws directly. The next draw starts on the group's last line, so the draw
+  sequence is unchanged and the 77 copy registers are gone;
+- the colourway is a per-entry precomputed table (`f_palx`: Y, 251 − Y and the clamped U, V, −U, −V, 2U, 2V)
+  muxed in stage 16. It is exact for all 16 entries × 8 colourways and replaces the subtract / negate / clamp
+  chain, which was the critical path;
+- the line engine's store-row subtract and clamp are split across two states.
+
+Latency (24) and pixel depth are unchanged, so the U/V parity holds. Router2 still scattered (63–82 MHz on HD
+Analog seeds) while router1 gave 85.85 MHz, so the diag is built with router1.
+
+**Build** (router1, `NEXTPNR_ROUTER="--router router1" .heirloom_work/diag_build.sh rorschach`, 2026-11-03): all six on seed 1.
+HD Analog 85.85, SD Analog 82.39, HD HDMI 82.01, SD HDMI 81.92, HD Dual 84.26, SD Dual 85.27 MHz. 7,209–7,218 / 7,680 LC (94 %,
++~270 over v0.5.1), 27 / 32 EBR (+3: two delay rings and the Ink lookup), no `emulate_transparency`. iceunpack OK ×6, and the
+packed config carries the new labels and presets. No pin-skew screen.
+
+**Checks.**
+- GHDL analyse / elaborate / synth front end: pass.
+- Python sweeps at RTL widths (`p2/sweep.py`, `p2/sweep2.py`):
+  - Ink square law and fill engine: no overflow, monotonic at every K2, all six bands present, the photo's
+    thresholds exact at 50 %;
+  - fold f_av 135..1081, 526 at the default, kstep fits 18 bits at every raster;
+  - drift: 0 across K4 418..606, max 21,945 Q16 / field;
+  - slip: max 2,042,880 Q16 (22 bits);
+  - the stage-1 column mapping is bit-exact with v0.5 over the whole default range, Quad mirrors to 0.03 column,
+    and a drifted mirror seam is continuous.
+- GHDL renders (1080p decimation 2, Osc), `p2/cmp_p2.png`:
+  - the default frame against production v0.5.1 in the same settings: 527 / 540 rows identical; the 13 torn rows
+    differ as described above;
+  - the final RTL is pixel-identical to the previous fit render;
+  - one extreme frame: Quad + Stairs All, with Ink / Fold / P12 three fields into their glides. The mirrored head
+    is in the centre, the blocks show, and the lower copy is slipped.
+- Not simulated: drift and slip in motion (the per-field accumulators), Video mode with the new features, SD.
 
 ## Reading of the photo (measured)
 - **A fold, not a quad mirror.** Flip-correlation finds one axis: rows r and 1051 − r (axis 525.5).
@@ -79,11 +179,11 @@ Video mode puts the camera through the same processing chain. Work files:
 | Control | Photo element it drives |
 |---|---|
 | K1 Bands | number of colour bands: colourizer gain 0.5–4 cycles, square law (1 = the photo; Video ×2) |
-| K2 Palette | Rorschach (the photo) / Ink / Swap / Comp / Turn / Twist / Night / Vivid (moved from K6 in v0.5.2; the colourizer offset, was K2 Level, is fixed at 0 = the photo, K4 still cycles it) |
-| K3 Detail | the busy-strip fragments: 0 = clean blobs, 60 % = the photo; above that they spill into the smooth bands, and at 100 % the inkblot dissolves into fragments |
+| K2 Level | colourizer offset: the bands crawl through the cream → … → pale cyan → dark cycle (0 = the photo) |
+| K3 Palette | Rorschach (the photo) / Ink / Swap / Comp / Turn / Twist / Night / Vivid (moved from K6 in v0.6.1; the busy-strip fragments, was K3 Detail, are fixed at the photo's 60 %) |
 | K4 Speed | colour cycling, bipolar, still at the centre (±8); default slow forward (one cycle per ~33 s) |
 | K5 Fold | the fold line, 25–100 % of the frame height (48.7 % = the photo; low = repeated folds, 100 % = unfolded) |
-| K6 Camera | camera strength (v0.5.2), 0..100 %, default 50 %. Below 50 % the source (camera in Video, the photo's scene in Osc) shows only where the photo's own inkblot phase is under a level, chosen so the revealed share grows linearly with the knob; the rest is the flat ground a black input gives (phase 0: the dark band, colour-cycled). 0 = no camera, 25 % = about half the frame, 50 % = the shipped look; above 50 % the chroma is boosted, ×1.875 at 100 % (clamped at the palette's own ±508). Glided |
+| K6 Camera | camera strength (v0.6.1), 0..100 %, default 50 %. Below 50 % the source (camera in Video, the photo's scene in Osc) shows only where the photo's own inkblot phase is under a level, chosen so the revealed share grows linearly with the knob; the rest is the flat ground a black input gives (phase 0: the dark band, colour-cycled). 0 = no camera, 25 % = about half the frame, 50 % = the shipped look; above 50 % the chroma is boosted, ×1.875 at 100 % (clamped at the palette's own ±508). Glided |
 | S7 Mirror | Mirror (the photo) / Repeat: the half above the fold reflected, or repeated |
 | S8 Stairs | Off (the photo: only the hue stair-steps) / On: the whole dark band sample-and-held into 42-px blocks |
 | S9 Split | Hue (red / blue / magenta / green dark band) / Blue (all blue) |
@@ -173,33 +273,53 @@ shows soft blobs of the camera, not its fine detail.
   pixel may read a cell during its write (undefined EBR data: at most a 1-px speckle, no state
   affected). Watch for it on hardware.
 
+
+## Open questions for Ron (2026-11-03 batch)
+
+1. Ink replaced Level (the static colour offset). Is K4's colour cycling enough to reach every arrangement, or
+   should Level come back (for example as a half-cycle offset on a switch)?
+2. Quad squeezes the whole scene into each half, so the head meets its mirror in the centre. The alternative is
+   unsqueezed: the left half mirrored at full scale, with the head off-screen. Which one?
+3. Stairs All uses 84-px blocks (two of the photo's cells). Would you rather have the photo's own 42-px cell
+   (finer), or coarser?
+4. Should P12's slip start at 0 % instead of above the photo's 35 %? 0..35 % would then also slide the copies,
+   and the photo would sit at a small slip.
+
+**Hardware watch list:**
+- **Renamed:** K2 Level → Ink, S9 Split → Quad. S8's values Off / On → Hue / All. K5's default raw value moved
+  323 → 423 (the same fold), so production presets or captured values for K5 don't carry over as-is.
+- **Router1** build, all seed 1, HD 82–86 MHz. No pin-skew seed screening was run; if HD HDMI shows lines,
+  re-seed that config.
+- **27 EBR** (+3).
+- **Output chroma filter:** the 8-sum now subtracts a block-RAM ring's sample, with the resync kept. If thin
+  wrong-colour lines or a constant cast appear, suspect the ring first.
+- **Drift and slip in motion** were not simulated (the per-field accumulators). Check that the inkblot slides
+  smoothly with K4 beyond ±92 of the centre, and that the mirror seams stay seamless at the screen edges.
+- The v0.5 note on Video read-during-write still applies.
+
+**Next step:** wait for Ron's preview notes. Rebuild the diag with
+`NEXTPNR_ROUTER="--router router1" .heirloom_work/diag_build.sh rorschach` (scoped clean + shared build queue).
+On approval: `./heirloom_diag.sh merge rorschach`, then repack the previewed diag bitstreams under the production
+TOML instead of re-routing:
+- copy `build/programs/ron/rorschach_diag/rev_b/bitstreams/*.bin` into a scratch dir with the production TOML's
+  `program_config.bin`;
+- `vmprog_pack.py --no-sign --hardware rev_b --toml-path programs/ron/heirloom/rorschach/rorschach.toml <dir>
+  out/rev_b/ron/heirloom/rorschach.vmprog`.
+
+Then update the production SUMMARY / README / PHASE2 row and commit that program's files.
+
 ## K6 camera pass (2026-11-15)
-Ron: K6 is the camera strength in every program, default 50 %. Rorschach's camera *is* the picture (the store
-holds the posterized camera), so 50 % keeps the shipped look. **v0.5.2.**
-- **K6 Camera** (0..100 %, default 512), glided as a sixth slot of the time-shared glide unit (1/8 per field, ±4).
-  A plain gain on the camera would only duplicate K1 Bands (the camera's phase is already luma × gain), so:
-  - **Below 50 %: a reveal keyed by the photo's own inkblot.** The Osc scene ROM is read for every pixel anyway;
-    where its phase (the corner the lerp starts from) is at or above a level, the pixel takes the flat ground a
-    black input gives (phase 0 = the dark band, hue blue, no fragments; the colour cycle and tears still act).
-    The level comes from a 32-step table built from the scene's phase histogram, so the revealed share grows
-    linearly with the knob: 0 % = flat ground everywhere (exactly the black-input picture), 25 % = about half
-    the frame shows the camera through inkblot-shaped (mirrored) windows, 50 % = all of it, the shipped look
-    (bit-exact). In Osc the same windows reveal the photo's scene.
-  - **Above 50 %: chroma boost** ×(1 + n/8), n = (k − 512)/64 = 0..7 (×1.875 at 100 %), on the conditioned
-    chroma, split over the last two stages (d·n by gated shifts at stage 23 beside the blanking gate, + d·n/8 and the
-    clamp at the palette's own 512 ± 508 in the stage-24 output register): the pastels turn candy-coloured, luma
-    untouched (no washout). The reveal compare sits at stage 4 (the scene corner is registered at stage 3). No extra
-    pipeline stage; latency 24 unchanged. (The first build did all of the boost in stage 23: 66 MHz on every HD
-    config; it was split before the build that shipped.)
-- **K6's old function (Palette) moved to K2** (same eight labels; presets' K6 keys moved to K2). **K2 Level was the
-  weakest knob**: a static offset of the colour cycle that K4 Speed sweeps through anyway; it is **fixed at 0** (the
-  photo).
-- GHDL renders (720p60, decimation 2, selfie, K2 = Rorschach, K6 glide bypassed in a sim-only copy):
-  `.heirloom_work/rb_rorschach/k6/k6sheet.png`.
-- **Build (v0.5.2, 2026-11-15):** router1, all six configs seed 1. HD Analog 87.32, HD HDMI 86.16, HD Dual 82.67 MHz
-  (worst HD); SD Analog 75.35, SD HDMI 81.17, SD Dual 77.05 MHz; 7189–7211 / 7680 LC (93.9 %), 24/32 EBR.
-  `out/rev_b/ron/heirloom/rorschach.vmprog`. NOT flashed.
-
-## K6 top +25 % and default 100 % (2026-11-15)
-
-Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).
+Ron: K6 is the camera strength in every program, default 50 %. The same design as production v0.5.2. **v0.6.1.**
+- **K6 Camera** (0..100 %, default 512), a sixth glide slot. Below 50 % the source (camera, or the Osc scene) shows
+  only where the photo scene's phase is under a level (32-step table from the scene's phase histogram, so the
+  revealed share grows linearly); elsewhere the flat ground of a black input (phase 0, blue dark band). 0 % = flat
+  ground, 25 % ≈ half the frame, 50 % = the shipped look. Above 50 % the chroma is boosted ×(1 + n/8), ×1.875 at
+  100 %, clamped at 512 ± 508. The key follows the diag's mirrored edges, Quad and folds (it reads the same store
+  addresses).
+- **K6's old function (Palette) moved to K3.** K2 is Ink in the diag (strong), so the weakest knob here is **K3
+  Detail** (the sheet: min and default look the same; only its top end changes the picture) — **fixed at 614** (the
+  photo's fragments, no spill). P12 Tear remains the destruction climax.
+- **Build (v0.6.1, 2026-11-15):** router1, all six configs seed 1. HD Analog 78.44 (worst HD), HD HDMI 83.30, HD Dual
+  85.39 MHz; SD Analog 83.15, SD HDMI 82.39, SD Dual 85.49 MHz; 7478–7490 / 7680 LC (97.5 %), 27/32 EBR. (The first
+  K6 build did the whole chroma boost in stage 23 and missed at 67 MHz; the boost is split over stages 23/24 and the
+  reveal compare moved to stage 4.) Preview `out/rev_b/ron/_diag/rorschach_diag_v0.6.1.vmprog`. NOT flashed.

@@ -1,7 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Tartan v0.5.0 -- Heirloom #25, rebuilt 2026-10-27 from the photo WIN_20230410_01_13_24.
+-- Tartan v0.6.0 (phase-2 diag, 2026-11-09) -- Heirloom #25, rebuilt 2026-10-27 from the photo
+-- WIN_20230410_01_13_24.
 --
 -- The photo: a big A-frame of nested diagonal stripes (apex at x 984, legs 0.9 lines per px:
 -- "/" on the left, "\" on the right) cut by horizontal bands that alternate between a bright
@@ -12,28 +13,32 @@
 -- of every dark band on the left.
 --
 -- The patch, as fitted (tartan.py has the tables):
---   u      = g ( +-(x - xc) - s y ) + scroll + curl + Bend * luma      the A-frame coordinate
+--   u      = g ( +-(x - xc - d) - s y ) + scroll + curl + Bend * luma  the A-frame coordinate
+--   d      = the band's apex offset (slide + shred), per line
 --   phase  = roll + b y + c sin(2 pi (y - y0) / 729)                   FM row oscillator
 --   band   = frac(phase) < duty ? bright : dark
 --   colour = BAR[side][u][band]                                          two measured colourizers
 --   fringe = the last 7 px before a dark-band edge into black -> yellow
 --
---   K1  Stripes  colourizer gain: the nested A-frames (0.35 .. 3x, 1 = the photo)
+--   K1  Stripes  colourizer gain: the nested A-frames (x0.25 .. x4 exponential, 1 = the photo)
 --   K2  Slope    A-frame leg slope (0.2 .. 2.5 lines per px, 0.9 = the photo)
 --   K3  Rows     row-oscillator frequency (3 .. 40 bands per frame, 12.3 = the photo)
 --   K4  Squeeze  FM depth: even bands .. bands thin in the middle (the photo) .. folding
---   K5  Speed    bipolar: the A-frames climb, the bands roll, the squeeze drifts
+--   K5  Speed    bipolar: the A-frames climb, the bands roll, the squeeze drifts; past the
+--                photo's speed every band's apex also slides sideways on its own oscillator
 --   K6  Bend     the picture (or the Osc lattice) bends the stripes
---   S7  Fringe   the yellow fringes into black (On)
---   S8  Mirror   the left family on both sides: a seamless symmetric A
---   S9  Tear     the dotted sync glitch and a line slip at the top of each dark band (On)
+--   S7  Weave    Plain / Twill: the dark bands draw the A upside down (a V)
+--   S8  Peaks    One / Four: four mirrored A-frames across the width
+--   S9  Tear     Photo (the dotted sync glitch, one band in four slipped) / Shred (every band
+--                torn sideways by its own random offset, re-rolled every 128 fields)
 --   S10 Palette  Photo / Night
 --   S11 Source   Video / Osc
 --   P12 SHADE    the dark-band duty: 0 = all bright, 50 % = the photo, 100 % = all dark
 --
 -- Engine: vblank-zone sequencer (one serial multiplier, shared glide), per-line engine kicked
 -- at each line start (computes the NEXT line: V, the FM phase with a quarter-sine ROM, the band
--- type, the tear), beam DDA (A = g (x - xc)), 32-stage pixel path.  Virtual 1080-line
+-- type, the tear, the band's apex offset and the beam start A0 = g d0), beam DDA (A = g (x - xc),
+-- folding every 480 px under Peaks), 32-stage pixel path.  Virtual 1080-line
 -- coordinates (SD shows the centre 4:3).  Generated avid; output conditioning (Y/U/V
 -- [1 2 .. 2 1]/32 at 1080, /16 at 720p and SD; luma 13/16) before the blanking gate.  Colours in
 -- the hardware convention (u = Cr, v = Cb).
@@ -124,19 +129,31 @@ architecture tartan of program_top is
     signal s_g4 : unsigned(12 downto 0) := to_unsigned(498 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(341 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_g5 : unsigned(12 downto 0) := to_unsigned(700 * 8, 13);      -- K5, glided (the band slide only)
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_k5 : unsigned(9 downto 0) := to_unsigned(700, 10);
     signal s_vm : unsigned(9 downto 0) := (others => '0');
     signal s_vneg, s_vstill : std_logic := '0';
-    signal s_fr, s_mir, s_tear, s_pal, s_src : std_logic := '0';
+    signal s_tw, s_pk, s_shr, s_pal, s_src : std_logic := '0';          -- Twill, Peaks, Shred
+    constant s_tear : std_logic := '1';                                    -- the photo's tear: always on
 
     -- per-field constants
     signal c_sq    : unsigned(19 downto 0) := (others => '0');
     signal c_g8    : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal c_s8    : unsigned(9 downto 0) := to_unsigned(230, 10);
-    signal c_gs    : unsigned(10 downto 0) := to_unsigned(230, 11);
-    signal c_a0    : signed(22 downto 0) := (others => '0');
+    signal c_gs    : unsigned(11 downto 0) := to_unsigned(230, 12);
+    signal c_gp    : unsigned(19 downto 0) := (others => '0');               -- g8 * 960 (one Peaks period)
+    signal c_astw  : signed(22 downto 0) := (others => '0');                 -- A step across a Peaks fold
+    signal c_vgh   : unsigned(20 downto 0) := (others => '0');               -- V g at line 1080 (Twill)
+    signal c_d0    : signed(12 downto 0) := to_signed(-1969, 13);            -- x0 - xc (+ 2 periods under Peaks)
+    signal c_dthr  : signed(12 downto 0) := to_signed(478, 13);              -- 480 - xs: fold when d >= this
+    signal c_dstw  : signed(12 downto 0) := to_signed(-958, 13);             -- xs - 960
+    signal c_samp  : unsigned(9 downto 0) := (others => '0');                -- slide amplitude, half px
+    signal c_trate : unsigned(7 downto 0) := to_unsigned(64, 8);             -- slide phase rate per field
+    signal c_tneg  : std_logic := '0';
+    signal c_seed2 : unsigned(15 downto 0) := x"5EED";
+    signal s_t     : unsigned(17 downto 0) := (others => '0');               -- slide phase (Q2: the band rates are (4 + m) / 4)
     signal c_ast   : unsigned(11 downto 0) := to_unsigned(512, 12);
     signal c_b20   : unsigned(15 downto 0) := to_unsigned(11888, 16);
     signal c_c20   : unsigned(20 downto 0) := to_unsigned(969108, 21);
@@ -185,6 +202,17 @@ architecture tartan of program_top is
     signal e_del  : signed(6 downto 0) := (others => '0');
     signal e_dot, e_slip, e_sl1 : std_logic := '0';
     signal e_cor  : std_logic := '1';
+    signal e_bs   : std_logic := '0';                          -- this line starts a band
+    signal e_bm   : unsigned(1 downto 0) := (others => '0');   -- band index mod 4 (slide rate)
+    signal e_boff : unsigned(15 downto 0) := (others => '0');  -- band phase offset
+    signal e_ph   : unsigned(17 downto 0) := (others => '0');
+    signal e_trn  : std_logic := '0';
+    signal e_d1   : signed(11 downto 0) := (others => '0');    -- slide, half px
+    signal e_lf2  : unsigned(15 downto 0) := x"5EED";          -- Shred draws (independent of the photo's slips)
+    signal e_dd   : signed(12 downto 0) := (others => '0');    -- the line's start d = x0 - xc - offset
+    signal e_dn   : std_logic := '0';
+    signal n_a0   : signed(22 downto 0) := (others => '0');
+    signal n_d0   : signed(12 downto 0) := to_signed(-1969, 13);
     signal m_a    : unsigned(35 downto 0) := (others => '0');
     signal m_b    : unsigned(15 downto 0) := (others => '0');
     signal m_acc  : unsigned(35 downto 0) := (others => '0');
@@ -194,6 +222,7 @@ architecture tartan of program_top is
     -- beam
     signal b_x2  : unsigned(11 downto 0) := (others => '0');
     signal b_a9  : signed(22 downto 0) := (others => '0');
+    signal b_d   : signed(12 downto 0) := (others => '0');     -- x - xc - offset (folded under Peaks), half px
     signal l_w, l_dot, l_lowr : std_logic := '1';
     signal l_l9  : unsigned(20 downto 0) := (others => '0');
 
@@ -276,6 +305,9 @@ begin
         variable v_s  : signed(10 downto 0);
         variable v_m  : unsigned(9 downto 0);
         variable v_fs : unsigned(15 downto 0);
+        variable v_k  : unsigned(10 downto 0);
+        variable v_5  : signed(10 downto 0);
+        variable v_a  : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -314,9 +346,9 @@ begin
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
-                s_fr   <= registers_in(6)(0);
-                s_mir  <= registers_in(6)(1);
-                s_tear <= registers_in(6)(2);
+                s_tw   <= registers_in(6)(0);
+                s_pk   <= registers_in(6)(1);
+                s_shr  <= registers_in(6)(2);
                 s_pal  <= registers_in(6)(3);
                 s_src  <= registers_in(6)(4);
                 s_xs   <= s_xsr;
@@ -361,6 +393,7 @@ begin
             -- motion (last field's rates), duty, LFSR seed
             case to_integer(s_zc) is
                 when 20 =>
+                    if c_tneg = '1' then s_t <= s_t - resize(c_trate, 18); else s_t <= s_t + resize(c_trate, 18); end if;
                     if s_vneg = '1' then
                         s_scr <= s_scr - resize(c_rs, 21); s_roll <= s_roll - resize(c_rr, 20); s_thoff <= s_thoff - resize(c_rd, 16);
                     else
@@ -372,22 +405,63 @@ begin
                     if s_gp(12 downto 3) > 1019 then c_alld <= '1'; else c_alld <= '0'; end if;
                     v_fs := x"ACE1" xor shift_left(resize(s_fc(10 downto 5), 16), 3) xor shift_left(resize(s_fc(10 downto 5), 16), 9);
                     c_seed <= v_fs;
+                    c_seed2 <= x"5EED" xor shift_left(resize(s_fc(10 downto 7), 16), 5) xor shift_left(resize(s_fc(10 downto 7), 16), 11);
                 when others => null;
             end case;
 
+            -- K5 glide (zc 22-24, the shared glide registers), the K1 curve, the slide, Peaks
+            if s_zone = '1' then
+                case to_integer(s_zc) is
+                    when 22 => s_gm <= s_g5; s_gd <= signed(resize(unsigned(registers_in(4)) & "000", 15)) - signed(resize(s_g5, 15));
+                    when 23 =>
+                        if s_gd > 16 or s_gd < -16 then s_gd <= shift_right(s_gd, 3); else s_gd <= (others => '0'); end if;
+                    when 24 => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                    when 25 =>
+                        -- K1: g = 2^((k + 5 - 512) / 256), an octave per quarter turn, linear within it
+                        -- (k = 507 -> exactly 256 = the photo; 64 .. 1022 = x0.25 .. x4)
+                        v_k := resize(s_g1(12 downto 3), 11) + 5;
+                        if v_k > 1023 then v_k := to_unsigned(1023, 11); end if;
+                        case to_integer(v_k(9 downto 8)) is
+                            when 0      => c_g8 <= to_unsigned(64, 10) + resize(v_k(7 downto 2), 10);
+                            when 1      => c_g8 <= to_unsigned(128, 10) + resize(v_k(7 downto 1), 10);
+                            when 2      => c_g8 <= to_unsigned(256, 10) + resize(v_k(7 downto 0), 10);
+                            when others => c_g8 <= to_unsigned(512, 10) + (v_k(7 downto 0) & '0');
+                        end case;
+                    when 26 =>
+                        -- the band slide: zero up to the photo's speed (|v| <= 188, K5 324 .. 700),
+                        -- then 3 half px per step (+-486 px at the ends); its phase rate rises with it
+                        v_5 := signed(resize(s_g5(12 downto 3), 11)) - 512;
+                        if v_5 < 0 then v_a := unsigned(resize(-v_5, 10)); else v_a := unsigned(v_5(9 downto 0)); end if;
+                        if v_a > 188 then v_a := v_a - 188; else v_a := (others => '0'); end if;
+                        c_samp  <= v_a + shift_left(v_a, 1);
+                        c_trate <= to_unsigned(64, 8) + resize(v_a(9 downto 1), 8);
+                        c_tneg  <= v_5(10);
+                    when 27 =>
+                        if s_pk = '1' then
+                            c_d0 <= signed(resize(s_x0, 13)) - 1969 + 1920;
+                        else
+                            c_d0 <= signed(resize(s_x0, 13)) - 1969;
+                        end if;
+                        c_dthr <= 480 - signed(resize(s_xs, 13));
+                        c_dstw <= signed(resize(s_xs, 13)) - 960;
+                    when 196 =>
+                        c_astw <= signed(resize(c_ast, 23)) - signed(resize(c_gp, 23));
+                    when others => null;
+                end case;
+            end if;
+
             -- serial products: slot k loads at zc = 32 + 24 k, 16 iterations,
             -- result stable from load + 17 (stores at load + 18)
-            if s_zone = '1' and (s_zc = 32 or s_zc = 56 or s_zc = 80 or s_zc = 104 or s_zc = 128 or s_zc = 152 or
+            if s_zone = '1' and (s_zc = 32 or s_zc = 80 or s_zc = 104 or s_zc = 128 or s_zc = 152 or
                s_zc = 176 or s_zc = 200 or s_zc = 224 or s_zc = 248 or s_zc = 272 or s_zc = 296 or s_zc = 320 or
                s_zc = 344 or s_zc = 368 or s_zc = 392) then
                 f_acc <= (others => '0');
                 case to_integer(s_zc) is
-                    when 32  => f_a <= resize(s_g1(12 downto 3), 36); f_b <= resize(s_g1(12 downto 3), 16);
-                    when 56  => f_a <= resize(c_sq, 36);              f_b <= to_unsigned(678, 16);
+                    when 32  => f_a <= resize(c_g8, 36);              f_b <= to_unsigned(960, 16);
                     when 80  => f_a <= resize(s_g2(12 downto 3), 36); f_b <= resize(s_g2(12 downto 3), 16);
                     when 104 => f_a <= resize(c_sq, 36);              f_b <= to_unsigned(589, 16);
                     when 128 => f_a <= resize(c_g8, 36);              f_b <= resize(c_s8, 16);
-                    when 152 => f_a <= resize(c_g8, 36);              f_b <= to_unsigned(C_XC2, 16) - resize(s_x0, 16);
+                    when 152 => f_a <= resize(c_gs, 36);              f_b <= to_unsigned(2160, 16);
                     when 176 => f_a <= resize(c_g8, 36);              f_b <= resize(s_xs, 16);
                     when 200 => f_a <= resize(s_g3(12 downto 3), 36); f_b <= resize(s_g3(12 downto 3), 16);
                     when 224 => f_a <= resize(c_sq, 36);              f_b <= to_unsigned(35924, 16);
@@ -406,12 +480,11 @@ begin
             end if;
             if s_zone = '1' then
                 case to_integer(s_zc) is
-                    when 50  => c_sq  <= f_acc(19 downto 0);
-                    when 74  => c_g8  <= to_unsigned(90, 10) + resize(f_acc(29 downto 20), 10);
+                    when 50  => c_gp  <= f_acc(19 downto 0);
                     when 98  => c_sq  <= f_acc(19 downto 0);
                     when 122 => c_s8  <= to_unsigned(51, 10) + resize(f_acc(29 downto 20), 10);
-                    when 146 => c_gs  <= f_acc(18 downto 8);
-                    when 170 => c_a0  <= -signed(resize(f_acc(21 downto 0), 23));
+                    when 146 => c_gs  <= f_acc(19 downto 8);
+                    when 170 => c_vgh <= f_acc(20 downto 0);
                     when 194 => c_ast <= f_acc(11 downto 0);
                     when 218 => c_sq  <= f_acc(19 downto 0);
                     when 242 => c_b20 <= to_unsigned(2913, 16) + resize(f_acc(35 downto 20), 16);
@@ -519,6 +592,8 @@ begin
         variable v_ph : unsigned(19 downto 0);
         variable v_x  : unsigned(15 downto 0);
         variable v_l  : unsigned(20 downto 0);
+        variable v_q  : unsigned(7 downto 0);
+        variable v_s2 : signed(11 downto 0);
     begin
         if rising_edge(clk) then
             e_zk <= '0';
@@ -530,6 +605,9 @@ begin
                 e_pw <= '1';
                 e_cor <= '1';
                 e_lfsr <= c_seed;
+                e_lf2 <= c_seed2;
+                e_bm <= (others => '0');
+                e_boff <= (others => '0');
             elsif g_start = '1' then
                 e_vy <= e_vy + resize(s_ys, 19);
                 e_lc <= (others => '0');
@@ -584,6 +662,7 @@ begin
                     if e_w = '1' and e_pw = '0' then
                         if e_vy < C_CORN then e_cor <= '1'; else e_cor <= '0'; end if;
                     end if;
+                    e_bs <= e_w xor e_pw;
                     e_pw <= e_w;
                 when 56 =>
                     e_dl <= e_vy - e_ds;
@@ -591,13 +670,65 @@ begin
                     if s_tear = '1' and e_w = '0' and e_dl < 512 then e_dot <= '1'; else e_dot <= '0'; end if;
                     if s_tear = '1' and e_w = '0' and e_sl1 = '1' and e_dl >= 512 and e_dl < 5120 then e_slip <= '1'; else e_slip <= '0'; end if;
                 when 58 =>
-                    v_l := s_scr - e_vg;
+                    if s_tw = '1' and e_w = '0' then
+                        v_l := s_scr + e_vg - c_vgh;     -- Twill: the dark bands' A upside down (a V)
+                    else
+                        v_l := s_scr - e_vg;
+                    end if;
                     if e_slip = '1' then
                         v_l := v_l + unsigned(shift_left(resize(e_del, 21), 8));   -- delta / 2 px
                     end if;
                     n_l9 <= v_l;
                     n_w <= e_w; n_dot <= e_dot;
                     n_lowr <= not e_cor;
+
+                -- the band's apex offset: slide (K5 past the photo speed) + Shred, then the
+                -- beam start d0 (folded into one Peaks period) and A0 = g8 d0
+                when 59 =>
+                    if e_bs = '1' then
+                        e_boff <= e_boff + 1443;
+                        e_bm <= e_bm + 1;
+                        if e_lf2(0) = '1' then e_lf2 <= ('0' & e_lf2(15 downto 1)) xor x"B400";
+                        else e_lf2 <= '0' & e_lf2(15 downto 1); end if;
+                    end if;
+                when 60 =>
+                    -- the band's phase (Q2) = (4 + band mod 4) T + offset: rates 1 : 1.25 : 1.5 : 1.75
+                    e_ph <= shift_left(s_t, 2) + (e_boff & "00");
+                when 61 =>
+                    if e_bm(0) = '1' then e_ph <= e_ph + s_t; end if;
+                when 62 =>
+                    if e_bm(1) = '1' then e_ph <= e_ph + shift_left(s_t, 1); end if;
+                when 63 =>
+                    -- triangle of the band's phase, -128 .. 127: |tri| into the multiplier
+                    if e_ph(17) = '1' then v_q := not e_ph(16 downto 9); else v_q := e_ph(16 downto 9); end if;
+                    e_trn <= not v_q(7);
+                    m_a <= resize(c_samp, 36);
+                    if v_q(7) = '1' then m_b <= resize(v_q(6 downto 0), 16); else m_b <= resize(not v_q(6 downto 0), 16); end if;
+                    m_acc <= (others => '0');
+                when 71 =>
+                    if e_trn = '1' then e_d1 <= -signed(resize(m_acc(16 downto 7), 12));
+                    else e_d1 <= signed(resize(m_acc(16 downto 7), 12)); end if;
+                when 72 =>
+                    e_dd <= c_d0 + resize(e_d1, 13);
+                when 73 =>
+                    if s_shr = '1' then
+                        v_s2 := signed(e_lf2(11 downto 0));                       -- +-2048
+                        e_dd <= e_dd + resize(shift_right(v_s2, 2) + shift_right(v_s2, 3), 13);   -- x3/8: +-768 half px
+                    end if;
+                when 74 | 75 | 76 =>
+                    if s_pk = '1' then
+                        if e_dd >= 480 then e_dd <= e_dd - 960;
+                        elsif e_dd < -480 then e_dd <= e_dd + 960; end if;
+                    end if;
+                when 77 =>
+                    e_dn <= e_dd(12);
+                    m_a <= resize(c_g8, 36);
+                    if e_dd(12) = '1' then m_b <= resize(unsigned(-e_dd), 16); else m_b <= resize(unsigned(e_dd), 16); end if;
+                    m_acc <= (others => '0');
+                when 92 =>
+                    if e_dn = '1' then n_a0 <= -signed(resize(m_acc(21 downto 0), 23));
+                    else n_a0 <= signed(resize(m_acc(21 downto 0), 23)); end if;
+                    n_d0 <= e_dd;
                 when others => null;
             end case;
         end if;
@@ -611,11 +742,19 @@ begin
         if rising_edge(clk) then
             if g_start = '1' then
                 b_x2 <= resize(s_x0, 12);
-                b_a9 <= c_a0;
+                b_a9 <= n_a0;
+                b_d  <= n_d0;
                 l_w <= n_w; l_dot <= n_dot; l_lowr <= n_lowr; l_l9 <= n_l9;
             elsif g_avid = '1' then
                 b_x2 <= b_x2 + s_xs;
-                b_a9 <= b_a9 + signed(resize(c_ast, 23));
+                if s_pk = '1' and b_d >= c_dthr then
+                    -- Peaks: fold back one period (960 half px) at the valley between two A-frames
+                    b_d  <= b_d + c_dstw;
+                    b_a9 <= b_a9 + c_astw;
+                else
+                    b_d  <= b_d + signed(resize(s_xs, 13));
+                    b_a9 <= b_a9 + signed(resize(c_ast, 23));
+                end if;
             end if;
         end if;
     end process p_beam;
@@ -634,22 +773,22 @@ begin
     begin
         if rising_edge(clk) then
             -- 1: side, d, source luma (signed about the Osc mean)
-            if s_mir = '1' then
-                p1_sl <= '1';
+            if s_pk = '1' then
+                p1_sl <= '1';                                   -- Peaks: the left family mirrored, every peak
             elsif l_w = '1' then
-                if b_x2 < C_SPLW then p1_sl <= '1'; else p1_sl <= '0'; end if;
+                if b_d < C_SPLW - C_XC2 then p1_sl <= '1'; else p1_sl <= '0'; end if;
             else
-                if b_x2 < C_SPLD then p1_sl <= '1'; else p1_sl <= '0'; end if;
+                if b_d < C_SPLD - C_XC2 then p1_sl <= '1'; else p1_sl <= '0'; end if;
             end if;
             p1_a9 <= b_a9;
-            p1_d2 <= signed(resize(b_x2, 13)) - C_XC2;
+            p1_d2 <= b_d;
             if s_src = '1' then p1_ls <= signed(resize(v_lb, 9)) - 63; else p1_ls <= signed(resize(v_lb, 9)); end if;
             if l_dot = '1' and b_x2 < 1040 and b_x2(5 downto 0) < 22 then p1_dot <= '1'; else p1_dot <= '0'; end if;
-            p1_dn <= (not l_w) and (not s_mir);
+            p1_dn <= (not l_w) and (not s_pk);
 
             -- 2: signed A for the family (mirror: |A|), curl operand, bend partials
             v_na := -p1_a9;
-            if s_mir = '1' then
+            if s_pk = '1' then
                 if p1_a9 < 0 then p2_sel <= unsigned(v_na(20 downto 0)); else p2_sel <= unsigned(p1_a9(20 downto 0)); end if;
             elsif p1_sl = '1' then
                 p2_sel <= unsigned(v_na(20 downto 0));
@@ -693,7 +832,7 @@ begin
             -- 9: colour code (bright / dark colourizer); top-left corner two levels down
             v_r := p8_rom;
             if l_w = '1' then v_c := unsigned(v_r(2 downto 0)); else v_c := unsigned(v_r(5 downto 3)); end if;
-            if l_w = '1' and l_lowr = '1' and p_sl(8) = '1' and s_mir = '0' and v_r(6) = '1' then
+            if l_w = '1' and l_lowr = '1' and p_sl(8) = '1' and s_pk = '0' and v_r(6) = '1' then
                 if v_c = 3 then v_c := to_unsigned(1, 3);
                 elsif v_c = 4 then v_c := to_unsigned(2, 3); end if;
             end if;
@@ -706,7 +845,7 @@ begin
 
             -- 17: fringe (the last F px before black in a dark band) and the sync-glitch dots
             v_f := '0';
-            if s_fr = '1' and l_w = '0' and p_k(16) = '0' then
+            if l_w = '0' and p_k(16) = '0' then
                 case to_integer(s_fw) is
                     when 4 => v_f := p_k(15) or p_k(14) or p_k(13) or p_k(12);
                     when 5 => v_f := p_k(15) or p_k(14) or p_k(13) or p_k(12) or p_k(11);

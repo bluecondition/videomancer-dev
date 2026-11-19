@@ -1,16 +1,24 @@
 # Radiant — pink paper rays burst from a dark halo behind a bust with a flag lens and a cup of coffee on his head (Heirloom #52)
 
-**v0.5.2 (2026-11-15): K6 camera pass (K6 = Camera, Pulse on K3, Stripe fixed), built, NOT flashed; see that section.** **v0.5.0 (2026-10-28): rebuilt from the photo, built, NOT flashed.** Source: `photos/duci.jpg`.
-v0.1.0 drew 2–8 generated rays and a halo ring around the video, without the collage's figures. This version
-rebuilds the collage itself:
+**v0.6.2 (2026-11-19): phase 2 FINAL — Ron prefers the diag in every case, so it is merged into production** (`out/rev_b/ron/heirloom/radiant.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; this exact build not flashed). It is the phase-2 round plus the K6 camera pass; status lines below that say "diag" or "production untouched" are history. The replaced v0.5.3 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`.
+
+**v0.6.1 (2026-11-15): K6 camera pass on the diag (K6 = Camera, Pulse on K2, Lift fixed), built; see that section.** **v0.6.0 (2026-11-03, phase 2): diag preview built, awaiting Ron's preview** (`Radiant Diag`,
+`out/rev_b/ron/_diag/radiant_diag_v0.6.0.vmprog`, copy in `out/rev_b/ron/heirloom/_diag/`). Production v0.5.1 is
+untouched. Phase-2 working files: `.heirloom_work/rb_radiant/p2/` (mprog_d.py machine program, gen_d.py splice,
+sweep.py, check.sh, psim.sh, renders diag2_osc.png / diag2_x1.png, the cut sort version in mprog_d_v1sort.py /
+radiant_v1sort.vhd).
+
+**v0.5.0 (2026-10-28): rebuilt from the photo, built, NOT flashed.** Source: `photos/duci.jpg`.
+v0.1.0 drew 2–8 generated rays and a halo ring around the video, without the collage's figures. v0.5 rebuilds
+the collage itself:
 - the measured layout and cut-outs (hands, bust, woman, soldier) and the four paper rays;
 - the halo disc, the cup on the head, the glasses with the flag lens, the DUCI label and the tissue ground.
 
 The live camera is printed through the cut-outs. Osc mode substitutes generated shading.
 Working files: `.heirloom_work/rb_radiant/` (`notes.md`, `proto.py`, `mprog.py`, `sheet.png`, `cmp_final.png`).
 
-## K6 camera pass (2026-11-15), v0.5.2
-- **K6 is now Camera** (0..100 %, default 50 %).
+## K6 camera pass (2026-11-15), v0.6.1
+- **K6 is now Camera** (0..100 %, default 50 %), with the same design as production v0.5.2.
 - **Class: the camera IS the picture.** The cut-outs print the camera, so K6 fades that print against the program's own
   flat paper, rather than adding a gain on top of a drawing.
 - **Law.** shade = 128 + (src − 128) · G, built as G · src + 128 (1 − G).
@@ -26,12 +34,11 @@ Working files: `.heirloom_work/rb_radiant/` (`notes.md`, `proto.py`, `mprog.py`,
   - 50 % (the default): G 1. Exactly the v0.5 print; the camera is tapped one pixel earlier.
   - 100 %: G 2, ×2 contrast about the middle step. Zones reach their darkest and lightest quantiles, but stay
     in their own colours, so nothing washes out. A dark camera (the selfie) reads darker and more mottled.
-- **Sims** (NTSC, selfie, `.heirloom_work/rb_radiant/k6/k6sheet.png`, rendered with the shipped build):
-  - 0: flat cut-outs.
-  - 25 %: a soft print.
-  - 50 %: the v0.5 print.
-  - 100 %: a deeper, higher-contrast print.
-  - Osc keeps its blotches, scaled the same way.
+- **S10 Ground = Camera** is scaled too. The ground's luma multiplier gm (5 bits) becomes
+  16 + (gm − 16) · G, the same four steps, clamped to 3..31.
+  - 0 %: the flat paint / tissue tone.
+  - 50 %: v0.6.0.
+  - 100 %: ×2 contrast.
 - **How.**
   - A 2-bit step register is updated one clock after the vblank-zone start, outside the register machine. Each
     field it moves at most one step toward the knob, and only when the knob is 4 codes past the step boundary.
@@ -42,18 +49,81 @@ Working files: `.heirloom_work/rb_radiant/` (`notes.md`, `proto.py`, `mprog.py`,
   - Stage S6 is unchanged in shape: one three-operand add of G · src + grain + (128 (1 − G) + dither). The per-field
     constant 128 (1 − G) (128, 64, 0, −128) fills the dither nibble's free upper bits, so no adder is needed for it.
   - The latency is unchanged (16).
-- **Frozen: K3 Stripe at 512** (the photo's white / pink / line mix).
-  - It was the weakest knob: in `sheet.png` its whole travel only re-colours the inside of the four thin rays.
-- **K6's old function, Pulse, moved to K3** with its range and default (25 %). It is the program's only motion.
-  Bare Halo's and Blaze's Pulse values moved with it; Blaze lost its Stripe 800.
-- **Build (v0.5.2, 2026-11-15):** router1 (`SEED=3 .kinetic_work/tools/k6build.sh heirloom radiant`).
-  - Five configs on seed 3. SD Dual is on seed 4: seed 3 stalled router1.
-  - Post-route Fmax: HD Analog 91.56, HD HDMI 89.52, HD Dual 88.95 (worst HD), SD Analog 95.81, SD HDMI 96.65,
-    SD Dual 89.48 MHz.
-  - Fit: 6951–6966 / 7680 LC (91 %), 16 / 32 EBR.
-  - Seeds 1 and 2 fail placement on some configs. A placement-only probe of all six netlists placed them all at
-    seed 3.
-  - Output: `out/rev_b/ron/heirloom/radiant.vmprog`. Not flashed.
+- **Frozen: K2 Lift at 0** (the cup sits on the head; it still rides with the bust under K4 Rise).
+  - Lift was the weakest knob here: it moves one small element, while K1 Halo, K3 Fan, K4 Rise and K5 Flank re-lay
+    the whole collage.
+- **K6's old function, Pulse, moved to K2** with its default (25 %). Ascension and Gold Icon lost their Lift values;
+  Blaze's Pulse 700 moved to K2.
+- **Sims:** `.heirloom_work/rb_radiant/k6diag/k6sheet.png` (S10 Ground Camera at K6 0 / 512 / 1023). Rendered with
+  the 8-step build; its G at those points (0, 1, 2) is the same.
+- **Build (v0.6.1, 2026-11-15):** router1, all six configs on seed 3 (`SEED=3 .kinetic_work/tools/k6build.sh diag
+  radiant`). Seeds 1 and 2 still fail placement on some configs; a placement-only probe placed all six netlists at
+  seeds 3 and 4.
+  - Post-route Fmax: HD Analog 92.32, HD HDMI 93.25, HD Dual 91.93 (worst HD), SD Analog 86.61, SD HDMI 79.19,
+    SD Dual 83.57 MHz.
+  - Fit: 7011–7024 / 7680 LC (91 %), 17 / 32 EBR.
+  - Output: `out/rev_b/ron/_diag/radiant_diag_v0.6.1.vmprog`. Not flashed.
+
+## Phase 2 (v0.6.0)
+Ron left no notes for radiant (free hand, 2026-11-03 batch). The map follows the phase-2 brief for a collage:
+per-cut-out position instead of fixed figures, the rays as one module with their own spread, bolder switches, about
+twice the range each side of the photo. The defaults still give the photo: the default frame is raw-identical to
+v0.5.1.
+
+| Control | v0.5 | v0.6.0 | Full sweep at 1080p |
+|---|---|---|---|
+| K1 Halo | radius 50–150 % | radius 25 % .. 100 % (at 50 %) .. 194 %, two slopes | disc 128 px → ~1000 px across |
+| K2 Lift | cup rises 0–0.19 H | cup rises 0–0.43 H, and rides on the bust's head when K4 moves the bust | 0 → 459 px |
+| K3 **Fan** (was Stripe) | the rays' stripe mix | the four rays' slopes ×0.3 .. ×1 (50 %) .. ×3, pivoting on the halo-centre line; paper width kept constant | outer tips at the top edge from about ±600 px in to about ±200 px; at 100 % they leave through the sides ~280 px down |
+| K4 **Rise** (was Tissue) | tissue share | bipolar, photo at 50 %: each cut-out slides up (right) / down (left) by its own travel: soldier ±0.38 H, hands ±0.33 H, bust ±0.30 H, woman ±0.22 H; glasses and cup ride with the bust, the DUCI label with the hands | right: cut edges float above the frame bottom and the hands leave the top; left: the hands come down over the halo, only the bust's head and the soldier's beret show |
+| K5 Flank | 0 = photo .. 100 % = slid out | bipolar, photo at 50 % (new default): left slides the woman and the soldier inward until they pass each other in front of the bust; right = v0.5's slide out | ±0.49 H (527 px) each; 0.27 H at 4:3 |
+| K6 Pulse | rays breathe in width | unchanged | |
+| S7 **Rays** (was Lens) | Flag / Clear lens | Under / Over: the paper strips lie over the cut-outs (hands, head, label), under the cup and glasses | |
+| S8 Cup | On / Off | unchanged | |
+| S9 **Palette** (was Halo) | Dark / Gold disc | Photo / Gold: gold disc plus pink strips with a wide dark line (v0.5's Stripe at 100 %) | |
+| S10 **Ground** (was Label) | DUCI / Coal | Paper / Camera: the camera luma printed into the maroon paint and tissue (Osc: the blob wave) | |
+| S11 Source | Video / Osc | unchanged | |
+| P12 Radiant | ray width 0..1..2.2× | ray width 0..1..3× | ~3× the photo's 57 px strip |
+
+Dropped, fixed at the photo: the continuous stripe mix (its pink end is S9 Gold), the tissue share (v0.5's
+default), the Clear lens, the label-off option. A Burst switch (rays continuing below the halo) was built first.
+It needs a per-line sort of the four ray crossings (~270 LC), which took HD Analog to 7309 LC (95 %), and placement
+failed. It was cut. Without the sort, Fan's low end stops at ×0.3, so the one ray crossing above the centre
+(TL / TR, 17/F px up) stays inside the smallest disc.
+
+How it works:
+- **Fan:** the machine scales each ray's slope (DXF = DXL0 F) and re-pivots its crossing on the halo-centre line
+  (+ (DXL0 − DXF) 597.1 / 16, added in whole half-pixels so F = 1 is exact). Width: HW = HW0 + HP (AMB(kF) − AMB(k)),
+  with AMB an alpha-max-beta-min |(1, k)|, exact HW0 at F = 1. The midpoints now sum at 15 bits (a ×3 fan wrapped
+  the 14-bit sum at the top-right).
+- **Rise:** in the figure loop the machine computes RR = (K4 − 512) RISE / 512 per figure and pushes RR × KV14 into
+  the line engine's row chain (new output O_RV); the field-start run adds them to the collage's rows. The lens-row
+  and label-row DDAs get RR × 102.75 / RR × 71.75 at the field start (r_lno / r_lro), and the cup lift adds the
+  bust's RR.
+- **Rays Over:** a ray overlay sets a bit that blocks the figure / label in the compose.
+- **Ground Camera:** the camera's luma (5 bits, floor 3) is the ground's x/16 luma multiplier.
+- **Fit:** the line engine reads each figure's x from the register file at slot stage C (r_xf registers and the
+  machine's XF state gone); the output filter's 4-deep luma copy chain is a block-RAM ring (+1 EBR).
+
+Presets: Photo (defaults), Bundle (Fan 0, Over, wide rays), Wide Fan, Ascension (Rise up, cup lifted, big halo),
+Low Tide (Rise down, flanks crossed), Gold Icon, Camera Ground, Blaze.
+
+**Build (2026-11-03):** router2, base SEED=3, 6/6. Post-route Fmax: HD Analog s3 81.23, HD HDMI s5 80.48 (s3, s4
+missed), HD Dual s3 77.39, SD Analog s3 83.71, SD HDMI s3 74.45, SD Dual s3 79.63 MHz. 6950–6965 / 7680 LC
+(90.7 %), 17/32 EBR; all six .bin pass iceunpack. Rebuild with `SEED=3` (HD HDMI placement fails at seeds 1–2).
+
+**Checks:**
+- GHDL analyse / elaborate / synth exit 0 (`p2/check.sh`).
+- RTL-width machine sweep (`p2/sweep.py`): 90,720 runs over all 7 timing modes × knob grids × P12 × S9 × pulse
+  phase. No RF word over 16 bits, no 28-bit overflow, every output fits its register, and the defaults equal v0.5.1
+  (outputs, RF tables, XF; Rise offsets 0).
+- Default frame (GHDL 720p60 dec 1, Osc) raw-identical to v0.5.1 (0 px).
+- One extreme render (Video selfie: Fan 100 %, Over, Rise 15 %, Flank 10 %, Halo 0, Ground Camera, P12 88 %): clean
+  ray convergence, the hands, label, bust, cup and glasses move together, the flanks crossed, the camera in the
+  ground.
+- Not verified: per-field motion, interlace, SD renders.
+
+The sections below are the production (v0.5.1) SUMMARY, unchanged.
 
 ## Reading of the photo (measured)
 The photo is a portrait paper collage, 3196 × 4176 (0.765:1). Measurements below are in page heights H
@@ -148,10 +218,10 @@ The photo is a portrait paper collage, 3196 × 4176 (0.765:1). Measurements belo
 |---|---|---|
 | K1 Halo | the dark red-brown halo disc | radius 50–150 % of the photo's 0.238 H (100 % at 50 %); the thin black rim follows |
 | K2 Lift | the cup of coffee on his head | 0 = sitting on the head (the photo); up to 0.19 H higher, floating up through the halo |
-| K3 Pulse | (motion) the rays | (K6 before v0.5.2) the rays breathe in width. Default 25 %: ±12.5 %, 9.3 s period. 100 %: ±50 %, 2.7 s. 0 = still |
+| K3 Stripe | the rays' stripes | 0 = white strips with a thin pink core and a hairline; 50 % = the photo's mix (pink 0.44, line 0.10 of the half width); 100 % = pink strips with a wide dark line |
 | K4 Tissue | the torn mauve tissue on the maroon paint | 0 = bare two-tone paint; 100 % = dense tissue with light overlaps and stains |
 | K5 Flank | the woman and the soldier at the page edges | 0 = the photo's positions; 100 % = slid out to the frame edges (about 0.49 H each way at 16:9, 0.27 H at 4:3) |
-| K6 Camera | the camera printed through the cut-outs | how strongly the camera (or Osc) shades the figures, in four steps: 0 = flat paper (each zone's middle step), 25 % = half contrast, 50 % = the v0.5 print (default), 100 % = ×2 contrast. See "K6 camera pass" |
+| K6 Pulse | (motion) the rays | the rays breathe in width. Default 25 %: ±12.5 %, 9.3 s period. 100 %: ±50 %, 2.7 s. 0 = still |
 | S7 Lens | the Dominica-flag lens | Flag (the photo) / Clear (the left lens shows an eye like the right) |
 | S8 Cup | the cup | On / Off (the bare head with its grey hair) |
 | S9 Halo | the disc's paper | Dark (the photo's red-brown) / Gold |
@@ -161,7 +231,6 @@ The photo is a portrait paper collage, 3196 × 4176 (0.765:1). Measurements belo
 
 - P12 glides (1/8 of the gap per field).
 - Presets: Duci (the photo), Bare Halo, Blaze, Gold Icon, Wide Stage.
-- Since v0.5.2 the rays' stripe mix (K3 Stripe) is fixed at 50 % (the photo's mix).
 - The control sheet is `.heirloom_work/rb_radiant/sheet.png` (from the proto). Every control changes the
   picture.
 
@@ -282,6 +351,29 @@ The photo is a portrait paper collage, 3196 × 4176 (0.765:1). Measurements belo
 - **Interlace.** Interlaced modes draw both fields the same (line-doubled), because the hardware delivers no
   bottom field.
 
-## K6 top +25 % and default 100 % (2026-11-15)
+## Open questions for Ron
+1. Stripe and Tissue are now fixed. One back on a knob (trade K6 Pulse or K1 Halo)?
+2. Rise moves every cut-out the same way, each at its own rate. Prefer a seesaw (side figures against the bust and
+   hands) or per-figure drift LFOs?
+3. Burst (rays continuing below the halo) needs ~270 LC for a ray sort. Worth trading the camera ground / Rise
+   glasses-and-label tracking for it?
+4. S10 Ground Camera vs the old DUCI / Coal and Flag / Clear options, or a "Dense tissue" ground?
 
-Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).
+## Hardware watch list
+- Renamed controls: K3 Stripe → Fan, K4 Tissue → Rise, S7 Lens → Rays, S9 Halo → Palette, S10 Label → Ground.
+  K5 Flank's default moved from 0 % to 50 %. K1's display is now 0–100 % (was 50–150 %).
+- The ray order is fixed (no sort). With K1 near 0, K3 near 0 and P12 high, a small sliver near the halo centre could
+  draw a ray wrong (mostly behind the bust and cup).
+- If figures sit at the wrong x, suspect the figure-x read from the register file in hblank.
+- Ground Camera with no / black input gives a dark ground (floored at 3/16 of the paint tone).
+- Cut for fit: S7 Burst (ray sort).
+
+## Next step
+On approval: `./heirloom_diag.sh merge radiant`, then repack the previewed diag bitstreams under the production TOML
+instead of re-routing:
+- copy `build/programs/ron/radiant_diag/rev_b/bitstreams/*.bin` plus the production `program_config.bin` into a
+  scratch dir;
+- `vmprog_pack.py --no-sign --hardware rev_b --toml-path programs/ron/heirloom/radiant/radiant.toml <dir>
+  out/rev_b/ron/heirloom/radiant.vmprog`.
+
+Then update the README / PHASE2 rows and commit only radiant's files and rows.

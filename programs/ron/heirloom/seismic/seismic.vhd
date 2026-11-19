@@ -2,7 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 -- 2026-11-15: K6 camera top +25 % (Ron)
 --
--- Seismic v0.5.0 -- Heirloom #44 (2026-10-27 rebuild), from WIN_20230610_00_10_54.
+-- Seismic v0.6.0 (phase-2 diag) -- Heirloom #44 (2026-10-27 rebuild), from WIN_20230610_00_10_54.
 --
 -- The photo: one FM horizontal oscillator (a chirp: its frequency is a horizontal ramp folded at
 -- x ~1100-1350, so the stripes run from 120 px down to 42 px and back out) against a clipped
@@ -18,15 +18,19 @@
 -- The frame is 24 strips of 45 lines; each strip's sweep (shift, fold, left ramp, ribbon width)
 -- steps through an 8-strip staircase (time samples of the patch).  Speed rolls the staircase.
 --
---   K1 Rows     ribbons 0.5x .. 2x (5.3 = the photo)
---   K2 Sweep    chirp rate 0.42x .. 2.34x
+--   K1 Heights  per-ribbon heights, count fixed at the photo's 5.3: left = cascade (thin crowded ribbons at the
+--               top swelling to one fat band at the bottom), centre = the photo, right = lens (the middle ribbons
+--               swell to ~680 lines, the outer ones crowd)
+--   K2 Sweep    chirp rate 0.25x .. 4x ((1 + u)^2, the photo at 50 %)
 --   K3 Lobes    gap layer: 0 = black gaps, 50 % = the photo, max = the window spans the frame
 --   K4 Speed    bipolar (still at the centre): the staircase rolls, the stripes drift, the ribbons roll
---   K5 Width    ribbon width 0.55x .. 1.45x
+--   K5 Width    ribbon width 0.25x .. 2.25x ((1 + u)^2: threads .. ribbons swallowing the gaps)
 --   K6 Melt     how far the camera (or Osc) bends the stripes and the ribbons
 --   S7 Blocks   On / Off      S8 Fold  Fold / Ramp      S9 Palette  Photo / Swap (R <-> B)
---   S10 Steps   Staircase / Shuffle      S11 Source  Video / Osc
---   P12 QUAKE   0 = calm aligned strips (no blocks); 50 % = the photo; 100 % = triple shifts + slips
+--   S10 Steps   Staircase / Shuffle (hashed strip phases, and every strip's ribbons torn up / down by up to ~50 lines)
+--   S11 Source  Video / Osc
+--   P12 QUAKE   0 = calm aligned strips (no blocks); 50 % = the photo; 100 % = triple shifts + slips, and the strips
+--               thin from 45 to 15 lines (24 -> 72 strips)
 --
 -- Engine: a small microcoded machine (one 32-bit accumulator, a 64 x 32 register file and the
 -- microcode in block RAM, one barrel shifter, one Booth serial multiplier) runs the field program
@@ -165,6 +169,7 @@ architecture seismic of program_top is
     signal f_lr1, f_lr2, f_lr3, f_lb1, f_lb2, f_lb3 : unsigned(5 downto 0) := (others => '0');
     signal f_xlw, f_xrw : unsigned(10 downto 0) := (others => '0');
     signal f_lob   : unsigned(7 downto 0) := to_unsigned(255, 8);
+    signal f_sh    : unsigned(9 downto 0) := to_unsigned(720, 10);     -- strip height, Q4 lines
 
     -- generated avid
     signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
@@ -187,12 +192,12 @@ architecture seismic of program_top is
     signal e_kr   : unsigned(4 downto 0) := (others => '0');
     signal e_hsh  : signed(7 downto 0) := (others => '0');
     signal e_w0   : std_logic := '0';
-    signal c_l0  : signed(23 downto 0) := (others => '0');      -- Q24
+    signal c_l0  : signed(25 downto 0) := (others => '0');      -- Q24
     signal c_ca  : signed(20 downto 0) := (others => '0');      -- Q20
     signal c_g0  : signed(29 downto 0) := (others => '0');      -- Q28
     signal c_xa  : signed(15 downto 0) := (others => '0');
     signal c_xf  : signed(16 downto 0) := (others => '0');
-    signal c_psi : signed(27 downto 0) := (others => '0');      -- Q20
+    signal c_psi : signed(28 downto 0) := (others => '0');      -- Q20
     signal c_phv : unsigned(11 downto 0) := (others => '0');    -- 1/4096 cycle
     signal c_hgw : unsigned(8 downto 0) := to_unsigned(112, 9);
     signal c_cy  : signed(30 downto 0) := (others => '0');
@@ -229,16 +234,16 @@ architecture seismic of program_top is
 
     -- beam
     signal b_x8  : unsigned(19 downto 0) := (others => '0');   -- Q8 virtual px
-    signal b_L   : signed(23 downto 0) := (others => '0');     -- Q24 cycles per real px
+    signal b_L   : signed(25 downto 0) := (others => '0');     -- Q24 cycles per real px
     signal b_X2  : signed(30 downto 0) := (others => '0');     -- Q8 px^2 (relative to x = 0)
     signal b_dx  : signed(23 downto 0) := (others => '0');
     signal b_ox  : unsigned(15 downto 0) := (others => '0');
-    signal b_psi : signed(27 downto 0) := (others => '0');     -- Q20
+    signal b_psi : signed(28 downto 0) := (others => '0');     -- Q20 (+-256 cycles; the pixel path saturates past 128)
     signal b_g   : signed(29 downto 0) := (others => '0');     -- fold term, Q28
     signal b_on  : std_logic := '0';
     signal b_st  : std_logic_vector(4 downto 0) := (others => '0');
-    signal bq_L, br_L : signed(19 downto 0) := (others => '0');       -- Q20 from here on
-    signal bq_fa, br_fa : signed(20 downto 0) := (others => '0');
+    signal bq_L, br_L : signed(21 downto 0) := (others => '0');       -- Q20 from here on
+    signal bq_fa, br_fa : signed(21 downto 0) := (others => '0');
     signal bq_fc, br_fc : signed(21 downto 0) := (others => '0');
     signal bt_f  : signed(21 downto 0) := (others => '0');
     signal bq_sa, bq_sc, br_sa, br_sc : std_logic := '0';
@@ -514,14 +519,15 @@ begin
                 e_V <= e_V + resize(t_sy, 24);
                 u_ent <= to_unsigned(U_LINE, 8); e_go <= '1'; e_mode <= "00"; e_s1 <= '1';
             elsif u_done = '1' and e_mode = "01" then
-                e_V <= (others => '0'); e_k <= (others => '0'); e_sb <= to_unsigned(878, 15);
+                e_V <= (others => '0'); e_k <= (others => '0'); e_sb <= resize(f_sh, 15) + 158;
                 u_ent <= to_unsigned(U_LCOMP, 8); e_go <= '1'; e_mode <= "10"; e_s1 <= '1';
             end if;
             -- strip index of the next line
             e_s2 <= e_s1; e_s3 <= e_s2;
             if e_s1 = '1' then
-                if e_V(22 downto 8) >= e_sb and e_k < 23 then
-                    e_k <= e_k + 1; e_sb <= e_sb + 720;
+                if e_V(22 downto 8) >= e_sb then      -- strips wrap mod 24 (the staircase is 8 strips)
+                    if e_k = 23 then e_k <= (others => '0'); else e_k <= e_k + 1; end if;
+                    e_sb <= e_sb + f_sh;
                 end if;
             end if;
             -- strip phase mu (staircase or shuffle, rolled by Speed) -> a = mu - 3.5 strips; slip hash
@@ -609,7 +615,8 @@ begin
                         when 6 => p_q <= resize(f_v, 19);
                         when 7 => p_q <= signed(resize(e_V(22 downto 8), 19));
                         when 8 => p_q <= resize(e_a, 19);
-                        when others => p_q <= resize(e_hsh, 19);
+                        when 9 => p_q <= resize(e_hsh, 19);
+                        when others => p_q <= (0 => f_shuf, others => '0');
                     end case;
                 end if;
                 if m_st = 2 then   -- multiply finished: the product through the barrel
@@ -647,17 +654,18 @@ begin
                                 when 9  => f_xlw <= unsigned(e_acc(10 downto 0));
                                 when 10 => f_xrw <= unsigned(e_acc(10 downto 0));
                                 when 11 => f_lob <= unsigned(e_acc(7 downto 0));
-                                when 12 => c_l0  <= e_acc(23 downto 0);
+                                when 12 => c_l0  <= e_acc(25 downto 0);
                                 when 13 => c_ca  <= e_acc(24 downto 4);
                                 when 14 => c_g0  <= e_acc(29 downto 0);
                                 when 15 => c_xa  <= e_acc(15 downto 0);
                                 when 16 => c_xf  <= e_acc(16 downto 0);
-                                when 17 => c_psi <= e_acc(31 downto 4);
+                                when 17 => c_psi <= resize(e_acc(31 downto 4), 29);
                                 when 18 => c_phv <= unsigned(e_acc(23 downto 12));
                                 when 19 => c_hgw <= unsigned(e_acc(8 downto 0));
                                 when 20 => c_cy  <= e_acc(30 downto 0);
                                 when 21 => c_oy  <= unsigned(e_acc(15 downto 0));
-                                when others => f_ginc <= e_acc(19 downto 0);
+                                when 22 => f_ginc <= e_acc(19 downto 0);
+                                when others => f_sh <= unsigned(e_acc(9 downto 0));
                             end case;
                         when OP_MUL | OP_MULI | OP_MULP =>
                             case to_integer(m_st) is
@@ -736,17 +744,17 @@ begin
             -- stage B (Q20): segment flags; FA = L + cA; FC = g >= 0 ? g : -g/2
             if signed('0' & b_x8(19 downto 4)) < resize(c_xa, 17) then bq_sa <= '1'; else bq_sa <= '0'; end if;
             if signed('0' & b_x8(19 downto 4)) >= c_xf and f_ramp = '0' then bq_sc <= '1'; else bq_sc <= '0'; end if;
-            bq_L  <= b_L(23 downto 4);
-            bq_fa <= resize(b_L(23 downto 4), 21) + c_ca;
+            bq_L  <= b_L(25 downto 4);
+            bq_fa <= b_L(25 downto 4) + resize(c_ca, 22);
             if b_g(29) = '0' then bq_fc <= resize(b_g(29 downto 8), 22); else bq_fc <= resize(shift_right(-b_g, 9), 22); end if;
             -- stage C: floors
-            if bq_fa < signed('0' & f_flr) then br_fa <= signed(resize('0' & f_flr, 21)); else br_fa <= bq_fa; end if;
+            if bq_fa < signed('0' & f_flr) then br_fa <= signed(resize('0' & f_flr, 22)); else br_fa <= bq_fa; end if;
             if bq_fc < signed('0' & f_frr) then br_fc <= signed(resize('0' & f_frr, 22)); else br_fc <= bq_fc; end if;
             br_L <= bq_L; br_sa <= bq_sa; br_sc <= bq_sc;
             -- stage D: select
-            if br_sa = '1' then bt_f <= resize(br_fa, 22);
+            if br_sa = '1' then bt_f <= br_fa;
             elsif br_sc = '1' then bt_f <= br_fc;
-            else bt_f <= resize(br_L, 22); end if;
+            else bt_f <= br_L; end if;
             -- phase (Q20): starts when the first valid F arrives (the first pixels repeat psi0)
             b_st <= b_st(3 downto 0) & g_start;
             if g_start = '1' then
@@ -754,7 +762,7 @@ begin
             elsif b_st(2) = '1' then
                 b_on <= '1';
             elsif b_on = '1' then
-                b_psi <= b_psi + resize(bt_f, 28);
+                b_psi <= b_psi + resize(bt_f, 29);
             end if;
 
             -- segment walker (2-px units): prefetch the next line's first two entries in hblank
@@ -822,6 +830,8 @@ begin
             v_dd := signed(resize(p1_L8, 9)) - signed(resize(s_avg(15 downto 8), 9));
             p1_dl <= v_dd(8 downto 1);
             p1_psi <= b_psi(27 downto 12);
+            if b_psi(28) = '0' and b_psi(27) = '1' then p1_psi(15 downto 8) <= x"60";      -- > +128 cycles: +96 (black)
+            elsif b_psi(28) = '1' and b_psi(27) = '0' then p1_psi(15 downto 8) <= x"A0"; end if;
             v_e := b_X2 + c_cy;
             p1_E <= v_e(30 downto 16);
             v_lv := b_lv; v_x := b_x8(19 downto 9);

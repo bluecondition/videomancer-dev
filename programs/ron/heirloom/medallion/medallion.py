@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-MEDALLION v0.5.0 - build hook.  Writes medallion_pkg.vhd next to this file (pure python: the
+MEDALLION v0.6.0 (phase 2 diag) - build hook.  Writes medallion_pkg.vhd next to this file (pure python: the
 builder runs it with the system python3).
 
 Fitted to the photo WIN_20230305_23_51_38 (see .heirloom_work/rb_medallion/notes.md):
@@ -29,6 +29,7 @@ Package contents (all tables also read by imodel.py):
   C_MD_TILE  2048 x 4   plaid class (0..7) at row * 256 + col
   C_MD_TCOL  8 x 32     plaid class colours {Y, U, V, 00}
   C_MD_RQM   64 x 6     z^2 / 120 (rounded peak, z < 60 h);  C_MD_RQN 48 x 5: d^2 / 96 (filleted minimum)
+  C_MD_EXP   256 x 9    round(256 * 2^(i / 256)): K2 Rings' exponential curve (v0.6.0)
 Colours are in the hardware convention (U register = Cr, V register = Cb), luma pre-scaled 16/13 for the
 shell's 13/16 output scale and capped so drawn whites come out at ~777.
 """
@@ -199,6 +200,8 @@ def write_pkg():
     arr("C_MD_RQM", "t_md_rqm", rqm, lambda v: f'to_unsigned({v}, 6)', 16)
     L.append("    type t_md_rqn is array (0 to 63) of unsigned(4 downto 0);")
     arr("C_MD_RQN", "t_md_rqn", rqn, lambda v: f'to_unsigned({v}, 5)', 16)
+    L.append("    type t_md_exp is array (0 to 255) of unsigned(8 downto 0);")
+    arr("C_MD_EXP", "t_md_exp", [round(256 * 2 ** (i / 256)) for i in range(256)], lambda v: f'to_unsigned({v}, 9)', 16)
     L.append("end package medallion_pkg;")
     with open(os.path.join(HERE, "medallion_pkg.vhd"), "w") as f:
         f.write("\n".join(L) + "\n")

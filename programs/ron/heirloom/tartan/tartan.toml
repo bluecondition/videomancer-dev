@@ -1,4 +1,4 @@
-# Tartan - Heirloom #25, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230410_01_13_24.
+# Tartan Diag - Heirloom #25, v0.6.0 phase-2 diag (2026-11-09); v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230410_01_13_24.
 # A big A-frame of nested cyan / green / orange / magenta diagonal stripes, cut by FM-squeezed
 # horizontal bands of a dark colourizer (black, cyan and green with yellow fringes).
 # See tartan.vhd and SUMMARY.md.
@@ -7,13 +7,13 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.tartan"
 program_name = "Tartan"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Glitch", "Color"]
 program_type = "processing"
-description = "Neon A-frame of nested diagonal stripes cut by squeezed dark bands with yellow-fringed black stripes."
+description = "Neon A-frame stripes cut by squeezed dark bands: sliding apexes, twill V bands, four peaks, shredded bands."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -79,21 +79,21 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Fringe"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Weave"
+value_labels = ["Plain", "Twill"]
+initial_value_label = "Plain"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Mirror"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Peaks"
+value_labels = ["One", "Four"]
+initial_value_label = "One"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Tear"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+value_labels = ["Photo", "Shred"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -129,16 +129,31 @@ name = "Dark Tartan"
 linear_potentiometer_12 = 1023
 
 [[preset]]
-name = "Even Bands"
+name = "Herringbone"
+toggle_switch_7 = 1
 rotary_potentiometer_4 = 0
+rotary_potentiometer_3 = 640
+
+[[preset]]
+name = "Mountains"
 toggle_switch_8 = 1
+rotary_potentiometer_2 = 700
+rotary_potentiometer_1 = 380
 
 [[preset]]
-name = "Folded Night"
-rotary_potentiometer_4 = 1023
-rotary_potentiometer_1 = 760
+name = "Shredded"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 420
+
+[[preset]]
+name = "Slipstream"
+rotary_potentiometer_5 = 990
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Argyle Night"
+toggle_switch_7 = 1
+toggle_switch_8 = 1
 toggle_switch_10 = 1
-
-[[preset]]
-name = "Camera Weave"
-rotary_potentiometer_6 = 700
+rotary_potentiometer_4 = 0
+rotary_potentiometer_1 = 700

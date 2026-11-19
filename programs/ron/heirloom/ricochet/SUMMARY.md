@@ -1,8 +1,55 @@
 # Ricochet — Heirloom #30
 
-**v0.5.0 (2026-10-21): rebuilt from the photo, built, NOT flashed.** Source photo:
-`photos/WIN_20230515_23_08_59_Pro.jpg`. Work files: `.heirloom_work/rb_ricochet/` (`notes.md` has the full
-measurement log; `cmp_final.png` = photo | float proto | RTL Osc | RTL Video).
+**v0.6.2 (2026-11-19): phase 2 FINAL — Ron prefers the diag in every case, so it is merged into production** (`out/rev_b/ron/heirloom/ricochet.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; this exact build not flashed). It is the phase-2 round plus the K6 camera pass; status lines below that say "diag" or "production untouched" are history. The replaced v0.5.3 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`.
+
+**v0.6.0 (2026-11-03, phase 2): diag preview built, awaiting Ron's preview** (`Ricochet Diag`,
+`out/rev_b/ron/_diag/ricochet_diag_v0.6.0.vmprog`, copy in `out/rev_b/ron/heirloom/_diag/`). Production v0.5.1
+(`programs/ron/heirloom/ricochet/`) is untouched. Phase-2 working files: `.heirloom_work/rb_ricochet/p2/`
+(sweep.py, check.sh, psim.sh, renders, pre-trim ricochet_v060a_7480lc.vhd / .vmprog).
+v0.5.0 (2026-10-21): rebuilt from the photo `photos/WIN_20230515_23_08_59_Pro.jpg`, built, NOT flashed.
+Work files: `.heirloom_work/rb_ricochet/` (`notes.md` has the full measurement log; `cmp_final.png` = photo |
+float proto | RTL Osc | RTL Video).
+
+## Phase 2 (v0.6.0)
+No notes from Ron (free hand, 2026-11-03 batch). The v0.5 knobs were all live and bold, so this round makes the
+chevron systems separate modules and widens the two knobs that stopped short. The line engine counts the
+vertical triangle's phase wraps since the top, so each line knows its system (e_sys); each system gets its own
+DDA mode (S7 Alternate) and its own sideways LFO (the K5 ricochet).
+
+| Was (v0.5) | Now (v0.6.0) | Notes |
+|---|---|---|
+| K1 Chevrons: 1 .. 6 systems per frame height (1 + 5k^2) | **0.47 .. 7.95** (1911 + (k^2 >> 4) * 15 >> 5, Q12), bit-exact at 473 | from one system taller than the frame to ~8 thin rows |
+| K2 Core: P0 20 .. 260 u (linear) | **P0 0 .. 498 u**, two slopes about the photo (4664 / 9464 Q10 per step), bit-exact at 353 | 0 = no core; top = red covers most of the frame (the reach end rides along) |
+| K5 Speed: bipolar band flow | band flow unchanged, **plus the ricochet** past the photo's speed | depth = (\|v\| - 136) * 8 hw (0 for K5 376 .. 648, the default 640 included), max +-3008 hw = the vertex sweeping +-~700 px at 1080p, the cores swelling / shrinking; even systems on tau, odd on tau2 (rates 3/4 (\|v\| - 8) and 1.375x per field, periods 12 .. 2.9 s / 8.9 .. 2.1 s), each a quarter cycle on from the last; triangle LFO |
+| S7 Point: Right / Left (dead while Twin was on) | **Point: Right / Alternate** (option relabelled) | every second system points left; with S8 Twin, bowtie and **Burst** (Twin fired from the centre: red diamond core, chevrons out to both edges) systems alternate |
+
+Unchanged: K3 Bands, K4 Seams, K6 Etch, S8 Twin, S9 Ground, S10 Palette, S11 Source, P12 Reach.
+
+**Presets:** Photo; Full Reach; Ricochet (Alternate, K5 960); Bow and Burst (Alternate, Twin, Azure, P12 620);
+Herringbone (Alternate, K1 1023, K3 700); Echoes; Red Giants (K2 900, K5 1023, P12 800); Osc Weave.
+
+**Engine (new).**
+- The DDA table has 12 entries (class * 4 + mode; mode 3 = Burst, x' = 1920 - 2n xs, reversed at the centre by
+  the existing Twin hold). The constants are loaded per line at e_lc 3 for the next line (after the beam has
+  taken this line's starts; c_dd depends only on class and Twin, so it never changes inside a field).
+- Ricochet: e_lc 51 .. 71, phase -> triangle -> depth x |tri| on the line multiplier -> next line's
+  P0 / Pe = s_p0 / s_pe - offset, latched at g_start and used at pixel stage 6. Nothing added to the pixel path;
+  latency 28 unchanged.
+- e_lc is 7 bits; e_ph carries into the 4-bit system counter.
+
+**Build** (router1, `NEXTPNR_ROUTER="--router router1" .heirloom_work/diag_build.sh ricochet`, 2026-11-03):
+6/6 seed 1. HD Analog 84.55, SD Analog 78.99, HD HDMI 82.34, SD HDMI 81.54, HD Dual 82.79, SD Dual 78.17 MHz.
+7,183 - 7,196 / 7,680 LC (93.7 %, +~330 over v0.5.1), 13 / 32 EBR. iceunpack OK x6, packed config carries the new
+labels and presets. First build 97.4 % LC (a 7th glide for the depth, per-system rates (8 + k) / 8 by a per-line
+shift-add chain, a 4-arm K1 curve); trimmed with no feature lost. No pin-skew screen.
+
+**Checks.** GHDL front end clean. p2/sweep.py at RTL widths: K1 / K2 bit-exact at their defaults and monotonic,
+no overflow (s_tmp, s_p0, s_pe, n_p0l, n_pel), depth 0 on 376 .. 648, LFO phase continuous. GHDL 720p dec 2 Osc
+defaults: diag vs production v0.5.1 0 of 230,400 px differ (pre-trim source; the trims are bit-exact at the
+default). 720p dec 1 Alternate + Twin + K1 760: bowtie / burst alternation with clean seams. Not rendered:
+the ricochet motion itself.
+
+The sections below are the production (v0.5.1) SUMMARY, unchanged.
 
 ## Reading of the photo
 One scalar field, coloured by a 1-D colouriser. Every number below was measured and fitted (`fit*.py`,
@@ -136,19 +183,35 @@ stays live.
 - **SD:** x is mapped to the full width, so on 4:3 the chevrons are 25 % narrower (steeper arms). The seam stripes
   (~11 lines at 1080) are only ~2.5 lines at 480i and will alias. 720p matches 1080.
 
-## K6 camera pass (2026-11-15)
+## Open questions for Ron
+1. Bring the plain Left mirror back (e.g. as a third state via Twin), or keep Alternate?
+2. Give the ricochet its own knob instead of the outer part of K5's travel (it would cost Core or another knob)?
+3. Slide each system as a rigid block (a true x-shift, more LC) instead of the current level shift, which also
+   swells the cores?
+4. Cap K2 Core's top at ~400 u instead of 498 u?
 
-Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+## Hardware watch list
+- Renamed option: S7 Left -> Alternate (the plain mirror is gone).
+- Alternate shows nothing with K1 below ~1 system (only one system on screen).
+- Systems offset against each other leave a horizontal crease at each seam centre (by design).
+- Ricochet depth uses the raw K5 (no glide): up to ~3 px pot-noise jitter while bouncing; no bounce within
+  8 counts of 640.
+- SD: seam stripes alias more at high K1. Timing has 8 - 10 MHz margin on all HD configs.
+
+## Next step
+On approval: `./heirloom_diag.sh merge ricochet`, then repack the previewed diag bitstreams
+(build/programs/ron/ricochet_diag/rev_b/bitstreams/) under the production TOML's program_config.bin with
+`vmprog_pack.py --no-sign --hardware rev_b` into out/rev_b/ron/heirloom/ricochet.vmprog instead of re-routing;
+update SUMMARY / README / PHASE2 and commit only ricochet's files and rows.
 
 ## K6 top +25 % and default 100 % (2026-11-15)
 
-Ron: K6 now loads at 100 % (initial_value 1023, v0.5.3) and its top end is 25 % stronger. **Bend type**: K6 Etch
-pushes the camera luma into the band field (the bands bend round the picture, bright areas push the reach), so the
-gain went up x1.25 at every knob position: the etch scale constant in the per-field serial multiply 687 -> 859
-(s_eq <= 857 of 10 bits at K6 = 1023; ~19 -> ~24 bands at full white). The Osc rides the same gain. Widths: nibble
-products <= 12.9k of 14 bits, etch sum <= 218k of 18 bits, so the field gains at most 13.7k in its 19-bit signed
-register (the field stays far from the rail). GHDL 720p dec-4 frames of bear.png at K6 = 100 %, old vs new:
-`.heirloom_work/rb_ricochet/k6b/k6b_cmp.png` (same picture; bright areas pass the reach into the flat ground sooner, no
-wrap into the cores).
-**Build:** router1, seed 1 on all six; HD Analog 86.79, HD HDMI 80.12, HD Dual 83.79 MHz (worst HD 80.12); SD 84.88 /
-81.00 / 79.81 MHz; 6852-6878 / 7680 LC (89.6 %), 13/32 EBR. `out/rev_b/ron/heirloom/ricochet.vmprog`. NOT flashed.
+Ron: K6 now loads at 100 % (initial_value 1023, v0.6.2) and its top end is 25 % stronger. **Bend type**: K6 Etch
+pushes the camera luma into the band field (the bands bend round the picture, bright areas push the reach). Same
+change as production ricochet: the etch scale constant in the per-field serial multiply 687 -> 859 (x1.25 at every
+knob position; s_eq <= 857 of 10 bits, ~19 -> ~24 bands at full white). The Osc rides the same gain. Widths as in
+production (nibble products <= 12.9k of 14 bits, etch sum <= 218k of 18 bits, the field gains at most 13.7k in 19
+bits signed). Production render: `.heirloom_work/rb_ricochet/k6b/k6b_cmp.png`.
+**Build:** router1, seed 1 on all six; HD Analog 86.79, HD HDMI 78.68, HD Dual 86.03 MHz (worst HD 78.68); SD 84.11 /
+82.96 / 85.06 MHz; 7181-7221 / 7680 LC (94.0 %), 13/32 EBR. Preview `out/rev_b/ron/_diag/ricochet_diag_v0.6.2.vmprog`.
+NOT flashed.

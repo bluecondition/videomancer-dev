@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Lotus v0.5.0 -- Heirloom #33, rebuilt from the photo WIN_20230515_23_23_36.
+-- Lotus v0.6.0 (phase 2 diag) -- Heirloom #33, rebuilt from the photo WIN_20230515_23_23_36.
 -- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The photo: two copies (period 943 px, 2.04 across) of an orange/green contour
@@ -29,24 +29,33 @@
 -- interpolates, adds the video etch, looks up the palette, keys the cushion and
 -- composes the line-start hold gradient and flash.
 --
---   K1  Lobes    copies across: 0.7 .. 5.8 (centre = the photo's 2.04)
---   K2  Stutter  the sync stutter: hold staircase, frozen blocks, sweeps, tears (0 = clean)
+-- Phase 2 (v0.6.0): the cushions run on their own oscillator (fixed at the photo's
+-- 2.04 across), so Lobes sets the eyes alone; Stutter reaches 4x; Ripple spreads a
+-- zigzag over the whole field above 50 %; the camera also swells the cushions; S8
+-- mirrors every second eye; Rings reaches 4x.
+--
+--   K1  Lobes    the EYES' oscillator: 0.51 .. 7.5 eye copies across, exponential (50 % =
+--                the photo's 2.04); the cushions keep the photo's spacing
+--   K2  Stutter  the sync stutter: hold staircase, frozen blocks, sweeps, tears
+--                (0 = clean, 50 % = the photo, 100 % = 4x)
 --   K3  Bloom    the cushions' size (0 = none)
 --   K4  Speed    bipolar contour flow (centre +-8 = still)
---   K5  Ripple   the 8x zigzag in the middle band and the seam stripes
---   K6  Etch     how far the video (or Osc) bends the contours
+--   K5  Ripple   the 8x zigzag in the middle band and the seam stripes (0 .. 2x); above
+--                50 % the zigzag also spreads over the whole field (eyes and cushions)
+--   K6  Etch     how far the video (or Osc) bends the contours; in Video mode the
+--                picture's bright areas also swell the cushions sideways
 --   S7  Palette  Photo / Night (red and blue exchanged)
---   S8  Mirror   the eyes face the other way
+--   S8  Mirror   Off / Pair: every second eye mirrored, neighbours face each other
 --   S9  Contour  Soft (the photo) / Hard two-level bands
 --   S10 Fold     the top half mirrored into the bottom: four eyes, no cushions
 --   S11 Source   Video / Osc
---   P12 RINGS    contour density 0.25x .. 3x about the eye core (534 = the photo)
+--   P12 RINGS    contour density 0.25x .. 4x about the eye core (534 = the photo)
 --
 -- Virtual 1080-line geometry (720p and 1080 identical; SD shows the centre 1440 px).
 -- Generated avid; output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16, luma [1 2 1],
 -- luma to ~777) before the blanking gate.  Latency 20 clocks in every mode.
 -- Generated colours in the hardware convention (U carries Cr, V carries Cb).
--- Build: ROUTER1 (router2 misses, 71 MHz); all seed 1 except HD Dual seed 2.
+-- Build: ROUTER1 (router2 misses, 71 MHz).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -98,13 +107,6 @@ architecture lotus of program_top is
         return r;
     end function;
     constant C_HB2 : t_hb2 := f_hb2;
-
-    -- K1 Lobes: 256 * 2^((16 i - 512) / 342)
-    type t_m8 is array(0 to 63) of integer range 0 to 1023;
-    constant C_M8 : t_m8 := (91, 94, 97, 100, 103, 107, 110, 114, 118, 121, 125, 130, 134, 138, 143, 148, 152,
-        157, 163, 168, 173, 179, 185, 191, 198, 204, 211, 218, 225, 232, 240, 248, 256, 264, 273, 282, 291, 301,
-        311, 321, 332, 343, 354, 366, 378, 390, 403, 416, 430, 444, 459, 474, 490, 506, 522, 540, 557, 576, 595,
-        614, 635, 656, 677, 700);
 
     function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
     begin
@@ -210,6 +212,8 @@ architecture lotus of program_top is
     signal f_du  : unsigned(13 downto 0) := to_unsigned(1112, 14);      -- phase per pixel (2^20 per period)
     signal f_duv : unsigned(11 downto 0) := to_unsigned(1112, 12);      -- phase per virtual px
     signal f_u0  : unsigned(19 downto 0) := (others => '0');
+    signal f_u0c : unsigned(19 downto 0) := (others => '0');            -- cushion oscillator start phase
+    signal f_par0 : std_logic := '0';                                   -- copy parity of the line-start eye (centre copy = 0)
     signal f_p2  : unsigned(15 downto 0) := (others => '0');
     signal f_gr  : unsigned(9 downto 0) := to_unsigned(256, 10);        -- Rings gain, Q8
     signal f_e8g : unsigned(8 downto 0) := to_unsigned(94, 9);          -- etch x gain (K6 x1.25, capped at 319)
@@ -219,7 +223,11 @@ architecture lotus of program_top is
     signal f_cfr : signed(20 downto 0) := (others => '0');              -- Fref + flow
     signal f_roll : unsigned(7 downto 0) := (others => '0');
     signal f_seed : unsigned(15 downto 0) := x"ACE1";
-    signal f_s8, f_b8, f_r8 : unsigned(8 downto 0) := to_unsigned(256, 9);
+    signal f_b8, f_r8 : unsigned(8 downto 0) := to_unsigned(256, 9);
+    signal f_s8 : unsigned(9 downto 0) := to_unsigned(256, 10);        -- Stutter, Q8, 0 .. 4x
+    signal f_zg : unsigned(8 downto 0) := (others => '0');              -- spread ripple (Ripple above 50 %)
+    signal f_zg2 : signed(12 downto 0) := (others => '0');              -- ... x the Rings gain
+    signal f_pex : unsigned(8 downto 0) := (others => '0');             -- Rings: extra gain above the photo
     signal f_e8 : unsigned(8 downto 0) := to_unsigned(94, 9);
 
     -- Osc source
@@ -294,7 +302,7 @@ architecture lotus of program_top is
     signal c_st   : unsigned(4 downto 0) := (others => '0');
     signal e_kick : std_logic := '0';
     signal e_kwp  : unsigned(9 downto 0) := (others => '0');
-    signal e_sp, e_l1p, e_jp : unsigned(8 downto 0) := (others => '0');
+    signal e_sp, e_l1p, e_jp : unsigned(9 downto 0) := (others => '0');
     signal e_dyt, e_dyb, e_dy : signed(11 downto 0) := (others => '0');
     signal e_vb, e_vr : signed(12 downto 0) := (others => '0');        -- 2 dy + 6, 2 dy + 22
     signal e_lfsr : unsigned(15 downto 0) := x"ACE1";
@@ -309,9 +317,9 @@ architecture lotus of program_top is
     signal l_abv, l_arv : unsigned(4 downto 0) := (others => '0');
     signal l_act : std_logic := '0';
     signal l_xhx, l_2l1x : signed(12 downto 0) := (others => '0');     -- plateau / freeze lengths - xs
-    signal l_s : unsigned(8 downto 0) := (others => '0');
+    signal l_s : unsigned(9 downto 0) := (others => '0');
     signal l_2s, l_2sm, l_2l1 : unsigned(10 downto 0) := (others => '0');
-    signal l_jump : signed(20 downto 0) := (others => '0');
+    signal l_jump : signed(22 downto 0) := (others => '0');
     signal l_dut : signed(20 downto 0) := (others => '0');
     signal l_gb : unsigned(4 downto 0) := (others => '0');
     signal l_rs, l_gs : unsigned(7 downto 0) := (others => '0');
@@ -319,7 +327,9 @@ architecture lotus of program_top is
 
     -- beam / stutter
     signal b_ut  : unsigned(19 downto 0) := (others => '0');
-    signal b_e   : signed(20 downto 0) := (others => '0');
+    signal b_e   : signed(22 downto 0) := (others => '0');
+    signal b_utc : unsigned(19 downto 0) := (others => '0');           -- cushion oscillator phase
+    signal b_cp  : std_logic := '0';                                   -- copy parity (S8 Pair)
     signal b_xh  : unsigned(11 downto 0) := (others => '0');
     signal b_md  : unsigned(2 downto 0) := (others => '0');
     signal b_cnt : unsigned(11 downto 0) := (others => '0');
@@ -335,11 +345,13 @@ architecture lotus of program_top is
     signal p1_osc : unsigned(7 downto 0) := (others => '0');
     signal p2_fr, p3_fr, p4_fr : unsigned(2 downto 0) := (others => '0');
     signal p2_kd : signed(13 downto 0) := (others => '0');
+    signal p2_lk : unsigned(11 downto 0) := (others => '0');           -- camera swell of the cushions
+    signal p3_kw : unsigned(14 downto 0) := (others => '0');
     signal p3_ak : unsigned(13 downto 0) := (others => '0');
     signal p3_lum, p4_lum : unsigned(6 downto 0) := (others => '0');
     signal p4_f, p5_f : unsigned(15 downto 0) := (others => '0');
     signal p4_sl : signed(11 downto 0) := (others => '0');
-    signal p4_dx : signed(14 downto 0) := (others => '0');
+    signal p4_dx : signed(15 downto 0) := (others => '0');
     signal p5_sp : signed(15 downto 0) := (others => '0');
     signal p4_et, p5_et : unsigned(11 downto 0) := (others => '0');
     signal p_e4  : unsigned(4 downto 0) := (others => '0');   -- etch gain code 0 .. 19
@@ -429,6 +441,9 @@ begin
         variable v_s  : signed(10 downto 0);
         variable v_m  : unsigned(9 downto 0);
         variable v_sd : unsigned(17 downto 0);
+        variable v_k  : unsigned(9 downto 0);
+        variable v_e2 : unsigned(10 downto 0);
+        variable v_u21 : unsigned(20 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -524,22 +539,52 @@ begin
                 end case;
             end if;
             if s_zone = '1' and s_zc = 20 then
-                f_m8 <= to_unsigned(C_M8(to_integer(s_g1(12 downto 7))), 10);
-                f_s8 <= s_g2(12 downto 4);
+                -- K1 Lobes (the eyes' period): 256 x 2^((k - 512) / 256), piecewise-linear
+                -- exp2 (0.25x .. 3.67x of the photo's 2.04 copies; 512 -> 256 exactly)
+                v_k := s_g1(12 downto 3);
+                v_e2 := resize(v_k(7 downto 0), 11) + 256;
+                case to_integer(v_k(9 downto 8)) is
+                    when 0 => f_m8 <= resize(v_e2(10 downto 2), 10);
+                    when 1 => f_m8 <= resize(v_e2(10 downto 1), 10);
+                    when 2 => f_m8 <= v_e2(9 downto 0);
+                    when others =>
+                        if v_e2 > 470 then f_m8 <= to_unsigned(940, 10);
+                        else f_m8 <= v_e2(8 downto 0) & '0'; end if;
+                end case;
+                -- K2 Stutter: 0 .. 1x over the lower half (as v0.5), 1 .. 4x over the upper
+                v_k := s_g2(12 downto 3);
+                if v_k(9) = '0' then
+                    f_s8 <= resize(v_k(9 downto 1), 10);
+                else
+                    f_s8 <= to_unsigned(256, 10) + resize(v_k(8 downto 0), 10) + resize(v_k(8 downto 1), 10);
+                end if;
                 f_b8 <= s_g3(12 downto 4);
                 f_r8 <= s_g5(12 downto 4);
+                -- K5 above 50 %: the zigzag spreads over the whole field, 0.75 (k - 512)
+                v_k := s_g5(12 downto 3);
+                if v_k(9) = '1' then
+                    f_zg <= v_k(8 downto 0) - resize(v_k(8 downto 2), 9);
+                else
+                    f_zg <= (others => '0');
+                end if;
                 f_e8 <= resize(s_g6(12 downto 5), 9) + resize(s_g6(12 downto 7), 9);   -- x1.25 (K6 top +25 %)
+                -- P12 above the photo (534): an extra (p - 534) / 2 on the gain (to 3.95x)
+                v_k := s_gp(12 downto 3);
+                if v_k > 534 then f_pex <= resize(shift_right(v_k - 534, 1), 9);
+                else f_pex <= (others => '0'); end if;
             end if;
 
             -- serial products: slot k loads at zc = 32 + 24 k, 16 iterations, result
             -- stable from load + 17 (stored at load + 18)
-            if s_zone = '1' and (s_zc = 32 or s_zc = 56 or s_zc = 80 or
-               s_zc = 176 or s_zc = 200 or s_zc = 224 or s_zc = 248 or s_zc = 272) then
+            if s_zone = '1' and (s_zc = 32 or s_zc = 56 or s_zc = 80 or s_zc = 104 or
+               s_zc = 176 or s_zc = 200 or s_zc = 224 or s_zc = 248 or s_zc = 272 or s_zc = 296) then
                 f_acc <= (others => '0');
                 case to_integer(s_zc) is
                     when 32  => f_a <= resize(f_dub, 28); f_b <= resize(f_m8, 16);
                     when 56  => f_a <= to_unsigned(1112, 28); f_b <= resize(f_m8, 16);
                     when 80  => f_a <= resize(f_du, 28); f_b <= resize(s_w(11 downto 1), 16);
+                    when 104 => f_a <= resize(f_dub, 28); f_b <= resize(s_w(11 downto 1), 16);
+                    when 296 => f_a <= resize(f_zg, 28); f_b <= resize(f_gr, 16);
                     when 176 => f_a <= resize(s_gp(12 downto 3), 28); f_b <= resize(s_gp(12 downto 3), 16);
                     when 200 => f_a <= resize(f_p2, 28); f_b <= to_unsigned(704, 16);
                     when 224 => f_a <= resize(s_vm, 28); f_b <= resize(s_vm, 16);
@@ -556,11 +601,18 @@ begin
                     when 50  => f_du  <= f_acc(21 downto 8);
                     when 74  => f_duv <= f_acc(19 downto 8);
                     when 98  => f_u0  <= C_UC - f_acc(19 downto 0);
+                                -- bit 20 of (centre phase - half-width phase) = parity of the
+                                -- line-start copy counted from the copy at the screen centre
+                                v_u21 := resize(C_UC, 21) - f_acc(20 downto 0);
+                                f_par0 <= v_u21(20);
+                    when 122 => f_u0c <= C_UC - f_acc(19 downto 0);
                     when 194 => f_p2  <= f_acc(19 downto 4);
-                    when 218 => f_gr  <= to_unsigned(64, 10) + resize(f_acc(25 downto 16), 10);
+                    when 218 => f_gr  <= to_unsigned(64, 10) + resize(f_acc(25 downto 16), 10) + resize(f_pex, 10);
                     when 242 => if s_vstill = '1' then f_spd <= (others => '0'); else f_spd <= f_acc(17 downto 7); end if;
                     when 266 => f_hh  <= f_acc(17 downto 9);
-                    when 290 => if f_acc(19 downto 8) > 319 then f_e8g <= to_unsigned(319, 9); else f_e8g <= f_acc(16 downto 8); end if;
+                    when 290 => if f_acc(27 downto 8) > 319 then f_e8g <= to_unsigned(319, 9);    -- etch x gain saturates
+                                else f_e8g <= f_acc(16 downto 8); end if;
+                    when 314 => f_zg2 <= signed(resize(f_acc(18 downto 7), 13));
                     when others => null;
                 end case;
             end if;
@@ -801,7 +853,7 @@ begin
             elsif e_fon = '1' then
                 if e_fe = 65 and e_fs = 1 then
                     e_fon <= '0'; e_pon <= '1'; e_pq <= (others => '0');
-                elsif e_fs = 4 then
+                elsif e_fs = 5 then
                     e_fs <= (others => '0'); e_fe <= e_fe + 1;
                 else
                     e_fs <= e_fs + 1;
@@ -867,7 +919,17 @@ begin
                         else
                             m_b <= signed(resize(unsigned(r_hb_q(7 downto 0)), 10));
                         end if;
-                    when others => m_a <= c_z3s; m_b <= signed(resize(unsigned(r_hb_q(15 downto 8)), 10));
+                    when 4 => m_a <= c_z3s; m_b <= signed(resize(unsigned(r_hb_q(15 downto 8)), 10));
+                    when others =>
+                        -- the spread ripple: K5 above 50 % x (X - 128), centred so it adds no phase offset
+                        m_a <= f_zg2;
+                        case to_integer(e_fe(2 downto 0)) is
+                            when 0 => m_b <= to_signed(-128, 10);
+                            when 1 | 7 => m_b <= to_signed(-64, 10);
+                            when 2 | 6 => m_b <= to_signed(0, 10);
+                            when 3 | 5 => m_b <= to_signed(64, 10);
+                            when others => m_b <= to_signed(127, 10);
+                        end case;
                 end case;
             elsif e_pon = '1' then
                 if e_pq(0) = '1' then m_a <= resize(c_ra, 13); else m_a <= signed(resize(c_ga, 13)); end if;
@@ -876,31 +938,31 @@ begin
                 case v_cs is
                     when 1 => m_a <= signed(resize(c_kw, 13)); m_b <= signed(resize(f_b8, 10));
                     when 2 =>
+                        m_a <= signed(resize(f_s8, 13));
                         case e_typ is
-                            when "00" => m_a <= to_signed(172, 13);
-                            when "01" => m_a <= to_signed(117, 13);
-                            when others => m_a <= to_signed(222, 13);
+                            when "00" => m_b <= to_signed(172, 10);
+                            when "01" => m_b <= to_signed(117, 10);
+                            when others => m_b <= to_signed(222, 10);
                         end case;
-                        m_b <= signed(resize(f_s8, 10));
                     when 3 =>
+                        m_a <= signed(resize(f_s8, 13));
                         case e_typ is
-                            when "00" => m_a <= to_signed(120, 13);
-                            when "01" => m_a <= to_signed(170, 13);
-                            when others => m_a <= to_signed(150, 13);
+                            when "00" => m_b <= to_signed(120, 10);
+                            when "01" => m_b <= to_signed(170, 10);
+                            when others => m_b <= to_signed(150, 10);
                         end case;
-                        m_b <= signed(resize(f_s8, 10));
                     when 4 =>
+                        m_a <= signed(resize(f_s8, 13));
                         case e_typ is
-                            when "00" => m_a <= to_signed(140, 13);
-                            when "01" => m_a <= to_signed(110, 13);
-                            when others => m_a <= to_signed(160, 13);
+                            when "00" => m_b <= to_signed(140, 10);
+                            when "01" => m_b <= to_signed(110, 10);
+                            when others => m_b <= to_signed(160, 10);
                         end case;
-                        m_b <= signed(resize(f_s8, 10));
-                    when 5 => m_a <= signed(resize(e_amp, 13)); m_b <= signed(resize(f_s8, 10));
+                    when 5 => m_a <= signed(resize(f_s8, 13)); m_b <= signed(resize(e_amp, 10));
                     when 6 => m_a <= e_vb; m_b <= to_signed(73, 10);
                     when 7 => m_a <= e_vr; m_b <= to_signed(205, 10);
                     when 8 => m_a <= signed(resize(e_kwp, 13)); m_b <= to_signed(278, 10);
-                    when 9 => m_a <= signed(resize(f_duv, 13)); m_b <= signed(resize(e_jp, 10));
+                    when 9 => m_a <= signed(resize(f_duv, 13)); m_b <= signed(resize(e_jp(9 downto 1), 10));   -- jump / 2
                     when 10 => m_a <= signed(resize(e_lfsr(14 downto 7), 13)) - 128; m_b <= signed(resize(e_amps, 10));
                     when 15 => m_a <= signed(resize(f_duv, 13)); m_b <= e_dpx;
                     when others => null;
@@ -973,7 +1035,7 @@ begin
                 case to_integer(t_k(4)) is
                     when 0 => e_acc <= resize(shift_right(m_p, 4), 21);
                     when 1 | 2 => e_acc <= e_acc + resize(shift_right(m_p, 4), 21);
-                    when 3 => e_acc <= e_acc + resize(shift_right(m_p, 5), 21);
+                    when 3 | 4 => e_acc <= e_acc + resize(shift_right(m_p, 5), 21);
                     when others =>
                         v_fp := c_k + e_acc + resize(shift_right(m_p, 5), 21);
                         e_fp <= v_fp(15 downto 0); e_fpv <= '1'; e_fpe <= t_e(4);
@@ -1065,13 +1127,13 @@ begin
                     e_vb <= shift_left(resize(e_dy, 13), 1) + 6;
                     e_vr <= shift_left(resize(e_dy, 13), 1) + 22;
                 when 5 => e_kwp <= unsigned(m_p(17 downto 8));
-                when 6 => e_sp <= unsigned(m_p(16 downto 8));
+                when 6 => e_sp <= unsigned(m_p(17 downto 8));
                     -- 1112 kw in units of 64
-                when 7 => e_l1p <= unsigned(m_p(16 downto 8));
+                when 7 => e_l1p <= unsigned(m_p(17 downto 8));
                     l_s <= e_sp;
                     l_2s <= shift_left(resize(e_sp, 11), 1);
                     l_2sm <= shift_left(resize(e_sp, 11), 1) - resize(s_xs, 11);
-                when 8 => e_jp <= unsigned(m_p(16 downto 8));
+                when 8 => e_jp <= unsigned(m_p(17 downto 8));
                     l_2l1x <= signed(shift_left(resize(e_l1p, 13), 1)) - signed(resize(s_xs, 13));
                     case e_typ is
                         when "00" =>   l_xhx <= to_signed(350, 13) - signed(resize(s_xs, 13));
@@ -1083,7 +1145,7 @@ begin
                 when 10 => l_abv <= f_clamp16(shift_right(m_p, 6));            -- (2 dy + 6) x 73 / 64
                 when 11 => l_arv <= f_clamp16(shift_right(m_p, 9));            -- (2 dy + 22) x 205 / 512
                 when 12 => l_kwu <= unsigned(m_p(17 downto 4));                -- 1112 kw / 64
-                when 13 => l_jump <= resize(m_p, 21);
+                when 13 => l_jump <= shift_left(resize(m_p, 23), 1);           -- duv x jump (jump even at <= 1x)
                 when 14 =>
                     if e_ton = '1' then e_dpx <= resize(shift_right(m_p, 7), 10); else e_dpx <= (others => '0'); end if;
                 when 19 =>
@@ -1101,10 +1163,10 @@ begin
     p_beam : process(clk)
         variable v_un  : unsigned(20 downto 0);
         variable v_xn  : unsigned(11 downto 0);
-        variable v_e   : signed(20 downto 0);
+        variable v_e   : signed(22 downto 0);
         variable v_md  : unsigned(2 downto 0);
         variable v_cnt, v_cn : unsigned(11 downto 0);
-        variable v_em, v_ej : signed(20 downto 0);
+        variable v_em, v_ej : signed(22 downto 0);
         variable v_u2  : unsigned(20 downto 0);
         variable v_cb  : signed(12 downto 0);
     begin
@@ -1112,6 +1174,7 @@ begin
             if g_start = '1' then
                 b_ut <= f_u0; b_e <= (others => '0'); b_xh <= (others => '0'); b_md <= (others => '0');
                 b_cnt <= (others => '0');
+                b_utc <= f_u0c; b_cp <= f_par0;
                 v_u2 := resize(f_u0, 21) + resize(f_du, 21);
                 b_sc <= v_u2(20);
                 if l_2sm = 0 and l_2s /= 0 then b_ft <= '1'; else b_ft <= '0'; end if;
@@ -1120,11 +1183,13 @@ begin
                 -- below only sees registered conditions
                 v_un := resize(b_ut, 21) + resize(f_du, 21);
                 v_u2 := resize(b_ut, 21) + shift_left(resize(f_du, 21), 1);
+                b_utc <= b_utc + resize(f_dub, 20);           -- the cushions: the photo's period
+                b_cp <= b_cp xor v_un(20);                    -- next copy
                 b_sc <= v_u2(20) xor v_un(20);
                 v_xn := b_xh + resize(s_xs, 12);
                 if v_xn >= l_2sm and v_xn < l_2s then b_ft <= '1'; else b_ft <= '0'; end if;
                 v_cn := b_cnt + resize(s_xs, 12);
-                v_em := b_e - signed(resize(f_du, 21));
+                v_em := b_e - signed(resize(f_du, 23));
                 v_ej := b_e + l_jump;
                 v_e := b_e; v_md := b_md; v_cnt := b_cnt; v_cb := signed(resize(b_cnt, 13));
                 if l_act = '1' then
@@ -1145,7 +1210,7 @@ begin
                             v_cnt := v_cn;
                             if v_cb >= l_xhx then v_md := "101"; end if;
                         when "101" =>
-                            if b_e <= signed(resize(f_du, 21)) then v_e := (others => '0'); v_md := "000";
+                            if b_e <= signed(resize(f_du, 23)) then v_e := (others => '0'); v_md := "000";
                             else v_e := v_em; end if;
                         when others => null;
                     end case;
@@ -1164,7 +1229,7 @@ begin
     -- Pixel path (stage k = k registers after the beam)
     ---------------------------------------------------------------------------
     p_pix : process(clk)
-        variable v_d   : signed(20 downto 0);
+        variable v_d   : signed(22 downto 0);
         variable v_u, v_ut : unsigned(19 downto 0);
         variable v_lm  : signed(11 downto 0);
         variable v_f   : unsigned(15 downto 0);
@@ -1184,6 +1249,7 @@ begin
         variable v_et  : unsigned(11 downto 0);
         variable v_sp  : signed(15 downto 0);
         variable v_kd  : unsigned(7 downto 0);
+        variable v_lk  : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             -- video tap (a few px early: invisible in a bend): (Y - 64) / 2, 2-px average
@@ -1195,27 +1261,37 @@ begin
 
             -- 1: field phase = true phase + stutter error + tear offset; Mirror; the true phase
             --    for the cushion key; Osc
-            v_d := signed(resize(b_ut, 21)) + b_e + l_dut;
+            v_d := signed(resize(b_ut, 23)) + b_e + resize(l_dut, 23);
             v_u := unsigned(v_d(19 downto 0)); v_ut := b_ut;
-            if s_mir = '1' then
+            if s_mir = '1' and b_cp = '1' then        -- Pair: every second eye mirrored about its core
                 v_u := resize(shift_left(resize(C_UPK, 21), 1) - resize(v_u, 21), 20);
             end if;
             p1_u <= v_u(19 downto 8);
-            p1_ut <= b_ut(19 downto 6);
+            p1_ut <= b_utc(19 downto 6);
             v_o := b_ut(19 downto 4) + s_ox;
             p1_osc <= f_tri8(v_o);
             -- 2: field-row address (64 entries per period) and fraction (1/8); offset from the cushion axis
             fr_ra <= r_bank & p1_u(11 downto 6);
             p2_fr <= p1_u(5 downto 3);
             p2_kd <= signed(p1_ut - C_UK(19 downto 6));
+            -- Video mode: the picture's luma swells the cushions sideways (Etch's top two gain
+            -- bits: 0 / 2 / 4 / 6 x lum phase units; ~50 px at full white at the default Etch)
+            v_lk := (others => '0');
+            if s_src = '0' then
+                if f_e8g(7) = '1' then v_lk := shift_left(resize(s_lum, 12), 2); end if;
+                if f_e8g(6) = '1' then v_lk := v_lk + shift_left(resize(s_lum, 12), 1); end if;
+                if f_e8g(8) = '1' then v_lk := shift_left(resize(s_lum, 12), 3); end if;   -- 256 .. 319 (cap): bits 7, 6 are 0
+            end if;
+            p2_lk <= v_lk;
             -- 3: field-row read; |offset|; luma / Osc (7 bit)
             v_ak := abs(resize(p2_kd, 15)); p3_ak <= unsigned(v_ak(13 downto 0));
+            p3_kw <= resize(l_kwu, 15) + resize(p2_lk, 15);
             p3_fr <= p2_fr;
             if s_src = '1' then p3_lum <= p1_osc(7 downto 1); else p3_lum <= s_lum(8 downto 2); end if;
             -- 4: fabric copy; cushion horizontal distance; etch x gain (bits 3, 2)
             p4_f <= unsigned(fr_q(31 downto 16)); p4_sl <= signed(fr_q(15 downto 4));
             p4_fr <= p3_fr; p4_lum <= p3_lum;
-            p4_dx <= signed(resize(l_kwu, 15)) - signed(resize(p3_ak, 15));
+            p4_dx <= signed(resize(p3_kw, 16)) - signed(resize(p3_ak, 16));
             p_e4 <= f_e8g(8 downto 4);
             v_et := (others => '0');
             if p_e4(3) = '1' then v_et := shift_left(resize(p3_lum, 12), 3); end if;

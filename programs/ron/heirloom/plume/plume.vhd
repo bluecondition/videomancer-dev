@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Plume v0.5.0 -- Heirloom #19, rebuilt from the photo WIN_20230315_00_58_54.
+-- Plume v0.6.0 (phase 2 diag) -- Heirloom #19, rebuilt from the photo WIN_20230315_00_58_54.
 --
 -- The photo: a red plume pointing right (a key rising at xL ~ 410-520 and falling at a
 -- chevron-shaped edge xF), folded top/bottom about the screen centre.  Outside it, horizontal
@@ -14,32 +14,37 @@
 --
 -- The program: every per-line quantity is the fitted function of the folded line y' (plume.py:
 -- one 256 x 240 line ROM, a word per two lines plus odd-line deltas).  A per-line engine (one serial
--- multiply-accumulate, 18 slots, ~370 clocks, computing the NEXT line) turns the line's quadratic seam
+-- multiply-accumulate, 19 slots, ~390 clocks, computing the NEXT line) turns the line's quadratic seam
 -- phase into a second-order forward-difference DDA (Q32), scales it by Seams, places the line's tear,
--- starts the wiggle-phase accumulators and derives the stripe phases.  The line ROM's output register
--- holds the next line's constants; they are copied to the line registers at the line start.  The pixel
--- path runs the DDA, reads the pulse / saw / cos ROMs, builds the stripe phases (parabolic wiggle sines,
--- shear, video bend), applies the channel laws, the plume window, the red key with its teeth, and
--- RGB -> YUV (luma pre-compensated 16/13 for the output scaling).
+-- starts the wiggle-phase accumulators, derives the stripe phases and bends the chevron's knee.  The line
+-- ROM's output register holds the next line's constants; they are copied to the line registers at the
+-- line start.  The pixel path runs the DDA, reads the pulse / saw / cos ROMs, builds the stripe phases
+-- (parabolic wiggle sines, shear, video bend), applies the channel laws, the plume window, the red key
+-- with its teeth, and RGB -> YUV (luma pre-compensated 16/13 for the output scaling).
 --
---   K1  Seams    seam count across the plume (x0.5 .. x2; centre = the photo)
---   K2  Reach    plume length: how far the red chevron reaches right (x0.4 .. x1.6)
---   K3  Stripes  green stripe density (x0.5 .. x2)
---   K4  Flow     bipolar, still at the centre +-8: the seams stream along the plume (default slow)
---   K5  Bend     how far the video (or Osc) bends the seams and the stripes
---   K6  Tear     line tearing in the top / bottom bands (0 = clean lines)
+--   K1  Seams    seam count across the plume (x0.25 .. x4 exponential; centre = the photo)
+--   K2  Reach    plume length: how far the red chevron reaches right (x0.125 .. x1 .. x2.5)
+--   K3  Stripes  green stripe density (x0.25 .. x4 exponential)
+--   K4  Flow     bipolar, still at the centre +-8: the seams stream along the plume (default slow,
+--                top speed x2.3 of v0.5)
+--   K5  Bend     how far the video (or Osc) bends the seams and the stripes; in Video mode the camera
+--                also pushes the plume's outline (up to ~+-250 px)
+--   K6  Wobble   the stripes' x wiggle x0 .. x1 (default) .. x4, crawling sideways above the default;
+--                the line tear x0 .. x1 .. x8, spreading from the top / bottom bands to the whole frame
 --   S7  Twin     a second plume mirrored from the right edge
---   S8  Wedge    the pink wedge on the right: On (the photo) / Off
---   S9  Ribbons  the black ribbons: Dark (the photo) / Filled with stripes
+--   S8  Hooks    Plume (the photo) / All: the seam saw also shears the ground stripes (hooks everywhere)
+--   S9  Ground   Stripes (the photo) / Camera: the camera luma replaces the ground's green level, the
+--                stripes and ribbons cut into it
 --   S10 Palette  Photo / Swap (red and blue exchanged)
 --   S11 Source   Video / Osc
---   P12 WAKE     chevron depth: 0 = the stripes run straight, 50 % = the photo, 100 % = deep hooks
+--   P12 WAKE     chevron depth: 0 = the stripes run straight and the plume is blunt, 50 % = the photo,
+--                100 % = 4x deep hooks and the knee swept back until the plume splits in two
 --
 -- Virtual 1080-line geometry (SD shows the central 1440 virtual px).  Generated avid; output
 -- conditioning (luma box-4 + [1 2 1], chroma 8-box pair, luma to ~777) before the blanking gate.
 -- Latency 24 clocks in every mode.  Generated colours in the hardware convention (U = Cr, V = Cb).
 
--- K6 camera pass 2026-11-15: K6 = Bend (camera strength, was K5), K5 = Tear (was K6); default K6 50 %.
+-- K6 camera pass 2026-11-15: K6 = Bend (camera strength, was K5), K5 = Wobble (was K6); default K6 50 %.
 -- 2026-11-15: K6 camera top +25 % (Ron): bend gain f_b5 = 1.25 x K6 / 256 (6 bits, 0 .. 39; was 0 .. 31).
 library ieee;
 use ieee.std_logic_1164.all;
@@ -105,11 +110,18 @@ architecture plume of program_top is
         if p(15) = '1' then v := p - 32768; else v := 32768 - p; end if;
         return to_signed(127, 9) - signed(resize(v(15 downto 7), 9));
     end function;
-    -- knob curve 0..1023 -> Q8 0.5 .. 1 .. 2 (piecewise linear)
-    function f_x2(g : unsigned(9 downto 0)) return unsigned is
+    -- knob curve 0..1023 -> Q8 0.25 .. 1 .. 4, exponential (one octave per quarter of the travel,
+    -- linear within it): 64 at 0, 256 at 512 (the photo, exact), 1022 at 1023
+    function f_x4(g : unsigned(9 downto 0)) return unsigned is
+        variable m : unsigned(9 downto 0);
     begin
-        if g(9) = '0' then return to_unsigned(128, 10) + resize(g(8 downto 2), 10);
-        else return to_unsigned(256, 10) + resize(g(8 downto 1), 10); end if;
+        m := to_unsigned(256, 10) + resize(g(7 downto 0), 10);
+        case to_integer(g(9 downto 8)) is
+            when 0      => return resize(m(9 downto 2), 10);
+            when 1      => return resize(m(9 downto 1), 10);
+            when 2      => return m;
+            when others => return m(8 downto 0) & '0';
+        end case;
     end function;
     -- clamp a signed value to 0..255
     function f_c8(v : signed) return unsigned is
@@ -147,17 +159,21 @@ architecture plume of program_top is
 
     -- per-field values
     signal f_sig, f_st : unsigned(9 downto 0) := to_unsigned(256, 10);    -- Q8
-    signal f_lam  : unsigned(8 downto 0) := to_unsigned(256, 9);          -- Q8
-    signal f_wake : unsigned(9 downto 0) := to_unsigned(256, 10);         -- Q8, 0 .. 3
+    signal f_lam  : unsigned(9 downto 0) := to_unsigned(256, 10);         -- Q8, 0.125 .. 2.5
+    signal f_wake : unsigned(9 downto 0) := to_unsigned(256, 10);         -- Q8, 0 .. 4
+    signal f_kn   : signed(9 downto 0) := to_signed(-1, 10);              -- 511 - P12: knee x (5/8 tri) / 256 = +320 .. -320 px at the apex
     signal f_b5   : unsigned(5 downto 0) := to_unsigned(4, 6);
-    signal f_tg   : unsigned(5 downto 0) := to_unsigned(32, 6);
+    signal f_tg   : unsigned(8 downto 0) := to_unsigned(32, 9);            -- tear gain (32 = the photo)
+    signal f_tzf  : unsigned(7 downto 0) := (others => '0');              -- tear zone floor (0 = the photo's zones)
+    signal f_kw   : unsigned(6 downto 0) := to_unsigned(16, 7);            -- wiggle gain Q4 (16 = the photo)
     signal f_tk   : unsigned(3 downto 0) := to_unsigned(3, 4);            -- teeth depth (x 1/8 px per pulse unit)
     signal f_x0   : unsigned(13 downto 0) := (others => '0');             -- virtual x of pixel 0, Q2
     signal f_fm   : unsigned(8 downto 0) := (others => '0');
+    signal f_fmb  : unsigned(10 downto 0) := (others => '0');            -- fm, + 2 (fm - 256) from fm 256 up: the speed curve's second factor
     signal f_fneg : std_logic := '0';
-    signal f_spd  : unsigned(12 downto 0) := (others => '0');             -- Q16 cycles per field
+    signal f_spd  : unsigned(14 downto 0) := (others => '0');             -- Q16 cycles per field
     signal f_flow, f_gflow : unsigned(15 downto 0) := (others => '0');
-    signal f_twin, f_nowedge, f_fill, f_swap, f_osc : std_logic := '0';
+    signal f_twin, f_hall, f_cam, f_swap, f_osc : std_logic := '0';
     signal f_ta, f_tb : unsigned(15 downto 0) := (others => '0');
 
     -- generated avid
@@ -195,7 +211,9 @@ architecture plume of program_top is
     signal e_s    : signed(13 downto 0) := (others => '0');                -- s0, Q12
     signal e_s2h  : signed(14 downto 0) := (others => '0');                -- 2 s0 + h, Q12
     signal e_r1p, e_r2p : signed(22 downto 0) := (others => '0');          -- a1 Q14, a2 Q13
-    signal e_spd  : unsigned(12 downto 0) := (others => '0');
+    signal e_spd  : unsigned(14 downto 0) := (others => '0');
+    signal e_ytri : unsigned(8 downto 0) := (others => '0');              -- 5/8 (256 - |y' - 256|), clamped at 0 (the knee profile)
+    signal e_wa   : unsigned(1 downto 0) := (others => '0');
     signal e_kx   : unsigned(10 downto 0) := (others => '0');              -- xF - xL
     -- next-line registers (written by the engine)
     signal n_th0, n_d1 : unsigned(31 downto 0) := (others => '0');
@@ -203,7 +221,8 @@ architecture plume of program_top is
     signal n_xs   : signed(14 downto 0) := (others => '0');
     signal n_xfp  : unsigned(11 downto 0) := (others => '0');
     signal n_pgs, n_dlt : unsigned(15 downto 0) := (others => '0');
-    signal n_sgw6 : unsigned(5 downto 0) := (others => '0');
+    signal n_sgw  : unsigned(6 downto 0) := (others => '0');
+    signal n_wa   : unsigned(3 downto 0) := (others => '0');
     signal n_p1, n_p2 : unsigned(17 downto 0) := (others => '0');
     -- current-line registers (pixel path)
     signal l_d2   : signed(23 downto 0) := (others => '0');
@@ -214,11 +233,12 @@ architecture plume of program_top is
     signal l_xl   : unsigned(10 downto 0) := (others => '0');
     signal l_xfp  : unsigned(11 downto 0) := (others => '0');
     signal l_bb   : unsigned(7 downto 0) := (others => '0');
-    signal l_bk3, l_wa3 : unsigned(2 downto 0) := (others => '0');
+    signal l_bk3  : unsigned(2 downto 0) := (others => '0');
+    signal l_wa   : unsigned(3 downto 0) := (others => '0');
     signal l_pgs, l_dlt : unsigned(15 downto 0) := (others => '0');
     signal l_e1   : unsigned(7 downto 0) := (others => '0');
     signal l_e26  : unsigned(6 downto 0) := (others => '0');
-    signal l_sgw6 : unsigned(5 downto 0) := (others => '0');
+    signal l_sgw  : unsigned(6 downto 0) := (others => '0');
     signal l_rl   : unsigned(7 downto 0) := (others => '0');
     signal l_pb   : unsigned(15 downto 0) := (others => '0');
 
@@ -257,13 +277,13 @@ architecture plume of program_top is
     signal q5_saw : unsigned(7 downto 0) := (others => '0');
     signal q5_cg  : signed(7 downto 0) := (others => '0');
     signal q5_el, q5_er, q5_e2 : unsigned(7 downto 0) := (others => '0');
-    signal q5_v8, q6_v8, q7_v8, q8_v8, q9_v8 : unsigned(7 downto 0) := (others => '0');
-    signal q5_sd, q6_sd, q7_sd, q8_sd, q9_sd : std_logic := '0';
+    signal q5_v8, q9_v8 : unsigned(7 downto 0) := (others => '0');
+    signal q5_sd, q9_sd : std_logic := '0';
     signal q5_fd, q6_fd : signed(13 downto 0) := (others => '0');
-    signal q6_sw  : unsigned(13 downto 0) := (others => '0');
+    signal q6_sw  : unsigned(14 downto 0) := (others => '0');
     signal q6_tth : signed(11 downto 0) := (others => '0');
     signal q6_ab  : signed(12 downto 0) := (others => '0');
-    signal q6_et4, q7_et4, q8_et4, q9_et4, q10_et4, q11_et4, q12_et4 : unsigned(3 downto 0) := (others => '0');
+    signal q6_et4, q7_et4, q11_et4, q12_et4 : unsigned(3 downto 0) := (others => '0');
     signal q7_bp, q8_bp, q9_bp, q10_bp : unsigned(7 downto 0) := (others => '0');
     signal q7_fd  : signed(13 downto 0) := (others => '0');
     signal cs1_a, cs2_a : unsigned(7 downto 0) := (others => '0');
@@ -274,6 +294,7 @@ architecture plume of program_top is
     signal q9_cgp : signed(7 downto 0) := (others => '0');
     signal q9_e2p : unsigned(13 downto 0) := (others => '0');
     signal q9_bk  : signed(11 downto 0) := (others => '0');
+    signal q1_cam : unsigned(7 downto 0) := (others => '0');
     signal q10_r, q11_r, q12_r, q13_r : unsigned(7 downto 0) := (others => '0');
     signal q10_gk : signed(13 downto 0) := (others => '0');
     signal q10_gg, q11_gg, q12_gg, q13_gg : unsigned(7 downto 0) := (others => '0');
@@ -300,6 +321,13 @@ architecture plume of program_top is
     attribute no_rw_check : boolean;
     attribute no_rw_check of rb_ram : signal is true;
     attribute no_rw_check of rs_ram : signal is true;
+    -- pixel delay ring (block RAM): the red-key inputs (q5 -> q9) and the blend weight (q7 -> q11) come back
+    -- 4 clocks after they are written (read address = write - 1, the RAM's output register, one fabric register)
+    type t_dring is array (0 to 255) of std_logic_vector(15 downto 0);
+    signal dr_ram : t_dring := (others => (others => '0'));
+    attribute no_rw_check of dr_ram : signal is true;
+    signal dr_a : unsigned(7 downto 0) := (others => '0');
+    signal dr_q, dr_q2 : std_logic_vector(15 downto 0) := (others => '0');
     signal s_wp, rbr_a, rs_ra : unsigned(7 downto 0) := (others => '0');
     signal rb_wd : std_logic_vector(29 downto 0) := "0000000000" & "1000000000" & "1000000000";
     signal rbr_q, rbr_q2 : std_logic_vector(29 downto 0) := "0000000000" & "1000000000" & "1000000000";
@@ -347,6 +375,7 @@ begin
         variable v_ng : signed(13 downto 0);
         variable v_g  : unsigned(9 downto 0);
         variable v_b8 : unsigned(7 downto 0);
+        variable v_x4 : unsigned(9 downto 0);
         variable v_t  : unsigned(17 downto 0);
     begin
         if rising_edge(clk) then
@@ -393,16 +422,26 @@ begin
                 elsif v_x < -8 then f_fneg <= '1'; v_u := unsigned(-v_x) - 8; f_fm <= v_u(8 downto 0);
                 else f_fneg <= '0'; f_fm <= (others => '0'); end if;
                 f_twin   <= registers_in(6)(0);
-                f_nowedge <= registers_in(6)(1);
-                f_fill   <= registers_in(6)(2);
+                f_hall   <= registers_in(6)(1);
+                f_cam    <= registers_in(6)(2);
                 f_swap   <= registers_in(6)(3);
                 f_osc    <= registers_in(6)(4);
-                f_tg     <= unsigned(registers_in(4)(9 downto 4));
+                -- K6 Wobble (unglided): below the default the tear and the wiggle fade to 0; above it the tear
+                -- grows to x8 and its zone floor rises to the whole frame, the wiggle grows to x4 and crawls
+                v_g := unsigned(registers_in(4));
+                if v_g(9) = '0' then
+                    f_tg <= resize(v_g(8 downto 4), 9); f_tzf <= (others => '0');
+                    f_kw <= resize(v_g(8 downto 5), 7);
+                else
+                    f_tg <= to_unsigned(32, 9) + resize(v_g(8 downto 1), 9);                       -- 32 + (k - 512) / 2
+                    f_tzf <= v_g(8 downto 1);
+                    f_kw <= to_unsigned(16, 7) + resize(v_g(8 downto 4), 7);
+                end if;
                 -- phases: + flow streams the seams right (phase down); the stripes drift at 1/4
                 if f_fneg = '1' then
-                    f_flow <= f_flow + resize(f_spd, 16); f_gflow <= f_gflow + resize(f_spd(12 downto 2), 16);
+                    f_flow <= f_flow + resize(f_spd, 16); f_gflow <= f_gflow + resize(f_spd(14 downto 2), 16);
                 else
-                    f_flow <= f_flow - resize(f_spd, 16); f_gflow <= f_gflow - resize(f_spd(12 downto 2), 16);
+                    f_flow <= f_flow - resize(f_spd, 16); f_gflow <= f_gflow - resize(f_spd(14 downto 2), 16);
                 end if;
                 f_ta <= f_ta + 151; f_tb <= f_tb - 113;
             end if;
@@ -430,10 +469,12 @@ begin
                         if gl_d > 31 or gl_d < -31 then gl_w <= '1'; else gl_w <= '0'; end if;
                     when others =>
                         if gl_w = '1' then
+                            -- the Seams / Stripes curve, shared: evaluated once as their glide writes
+                            v_x4 := f_x4(gl_n(12 downto 3));
                             case to_integer(q_gi) is
-                                when 0 => s_g(0) <= gl_n;
+                                when 0 => s_g(0) <= gl_n; f_sig <= v_x4;
                                 when 1 => s_g(1) <= gl_n;
-                                when 2 => s_g(2) <= gl_n;
+                                when 2 => s_g(2) <= gl_n; f_st <= v_x4;
                                 when 3 => s_g(3) <= gl_n;
                                 when others => s_g(4) <= gl_n;
                             end case;
@@ -442,16 +483,26 @@ begin
             end if;
 
             -- knob curves (settle long before the line engine reads them)
-            f_sig <= f_x2(s_g(0)(12 downto 3));
+            -- K2 Reach: 0.125 + 7/16 k / 256: x0.125 .. x1 (512) .. x1.87
             v_g := s_g(1)(12 downto 3);
-            f_lam <= to_unsigned(96, 9) + resize(v_g(9 downto 2), 9) + resize(v_g(9 downto 4), 9);
-            f_st  <= f_x2(s_g(2)(12 downto 3));
+            f_lam <= to_unsigned(32, 10) + resize(v_g(9 downto 1), 10) - resize(v_g(9 downto 4), 10);
             v_b8 := resize(s_g(3)(12 downto 6), 8) + resize(s_g(3)(12 downto 8), 8);   -- x1.25 (2026-11-15)
             f_b5 <= v_b8(7 downto 2);
+            -- P12 Wake: shear 0 .. 1 (photo) .. 4; the knee +320 px (blunt) .. 0 .. -320 px (swept back)
             v_g := s_g(4)(12 downto 3);
-            if v_g(9) = '0' then f_wake <= resize(v_g(8 downto 1), 10);
-            else f_wake <= to_unsigned(256, 10) + resize(v_g(8 downto 0), 10); end if;
+            if v_g(9) = '0' then
+                f_wake <= resize(v_g(8 downto 1), 10);
+            else
+                f_wake <= to_unsigned(256, 10) + resize(v_g(8 downto 0), 10) + resize(v_g(8 downto 1), 10);
+            end if;
+            f_kn <= signed(v_g(9) & not v_g(8 downto 0));                           -- 511 - k: +511 .. -1 (default) .. -512
             f_tk <= resize(f_wake(9 downto 7), 4);
+            -- K4 speed curve's second factor: fm below 256 (the v0.5 square law, default bit-exact), steeper above
+            if f_fm(8) = '1' then
+                f_fmb <= resize(f_fm, 11) + resize(f_fm(7 downto 0) & '0', 11);
+            else
+                f_fmb <= resize(f_fm, 11);
+            end if;
             -- virtual x of pixel 0 (Q2): 0 for 1920 x 4 / 1280 x 6; SD: 3840 - 720 x 4 = 960 (240 px: the central 1440)
             if t_k = 8 then f_x0 <= to_unsigned(960, 14); else f_x0 <= (others => '0'); end if;
 
@@ -511,7 +562,7 @@ begin
     -- vblank zone), computes the NEXT line into the n_* registers.
     --   1..3    y' and ROM / knot addresses, LFSR step
     --   4..37   knot interpolation (14 functions, one every 2 clocks), row ROM fields
-    --   48..299 14 multiply slots of 18 clocks: 0 load, 1..14 shift-add, 15 store, 16..17 derived
+    --   48..389 19 multiply slots of 18 clocks: 0 load, 1..15 shift-add, 16 P, 17 store (slot 18: the knee)
     ---------------------------------------------------------------------------
     p_eng : process(clk)
         variable v_y   : signed(20 downto 0);
@@ -523,6 +574,8 @@ begin
         variable v_a   : signed(25 downto 0);
         variable v_b   : signed(14 downto 0);
         variable v_pre : signed(41 downto 0);
+        variable v_w8  : unsigned(9 downto 0);
+        variable v_t9  : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
             -- kick
@@ -567,6 +620,11 @@ begin
             end if;
             if v_c = 4 then
                 e_tri <= signed(resize(e_lfsr(7 downto 0), 10)) + signed(resize(e_lfsr(15 downto 8), 10)) - 255;
+                -- the knee profile, 5/8 x (256 - |y' - 256|): 0 at the axis and the frame edge, 160 at y' 256 (the knee row)
+                if e_yp(9 downto 8) = "00" then v_t9 := e_yp(8 downto 0);
+                elsif e_yp > 512 then v_t9 := (others => '0');
+                else v_t9 := resize(to_unsigned(512, 10) - e_yp, 9); end if;
+                e_ytri <= resize(v_t9(8 downto 1), 9) + resize(v_t9(8 downto 3), 9);
             end if;
 
             -- 7: line-ROM fields that feed the multiply slots (address at 3, data at 5)
@@ -580,15 +638,21 @@ begin
                     e_kx <= unsigned(ln_q(F_KX_H downto F_KX_L));
                     e_pg <= unsigned(ln_q(F_PG_H downto F_PG_L));
                 end if;
+                e_wa <= unsigned(ln_q(F_WA3M_H downto F_WA3M_L));
+            end if;
+            -- 8: the line's wiggle amplitude x the Wobble gain (Q4; 16 = the photo, exact)
+            if v_c = 8 then
+                v_w8 := (resize(e_wa, 3) + 1) * f_kw;
+                n_wa <= v_w8(7 downto 4);                                    -- <= 15
             end if;
 
-            -- 48 ..: 18 MAC slots of 18 clocks (a slot may take the previous slot's product as its A or PRE): 0 load, 1..15 bits of B (15 = sign: subtract), 16 P, 17 store
+            -- 48 ..: 19 MAC slots of 18 clocks (a slot may take the previous slot's product as its A or PRE): 0 load, 1..15 bits of B (15 = sign: subtract), 16 P, 17 store
             if v_c = 48 then
                 e_run <= '1'; e_sl <= (others => '0'); e_ph <= (others => '0');
             elsif e_run = '1' then
                 if e_ph = 17 then
                     e_ph <= (others => '0');
-                    if e_sl = 17 then e_run <= '0'; else e_sl <= e_sl + 1; end if;
+                    if e_sl = 18 then e_run <= '0'; else e_sl <= e_sl + 1; end if;
                 else
                     e_ph <= e_ph + 1;
                 end if;
@@ -597,9 +661,10 @@ begin
                 v_a := (others => '0'); v_b := (others => '0'); v_pre := (others => '0');
                 case to_integer(e_sl) is
                     when 0  => v_a := resize(e_tri, 26);  v_b := signed(resize(f_tg, 15));
-                               if e_hold = 1 then v_pre := shift_left(resize(signed('0' & f_tg(5 downto 2)), 42), 8);
-                               elsif e_hold = -1 then v_pre := -shift_left(resize(signed('0' & f_tg(5 downto 2)), 42), 8); end if;
-                    when 1  => v_a := resize(m_acc(17 downto 8), 26); v_b := signed(resize(unsigned(ln_q(F_TZ_H downto F_TZ_L)), 15));
+                               if e_hold = 1 then v_pre := shift_left(resize(signed('0' & f_tg(8 downto 2)), 42), 8);
+                               elsif e_hold = -1 then v_pre := -shift_left(resize(signed('0' & f_tg(8 downto 2)), 42), 8); end if;
+                    when 1  => v_a := resize(m_acc(17 downto 8), 26);
+                               v_b := signed(resize(unsigned(ln_q(F_TZ_H downto F_TZ_L)) or f_tzf, 15));    -- zone, raised by the K6 floor
                     when 2  => v_a := resize(signed(ln_q(F_A1_H downto F_A1_L)), 26); v_b := signed(resize(f_sig, 15));
                     when 3  => v_a := resize(signed(ln_q(F_A2_H downto F_A2_L)), 26); v_b := signed(resize(f_sig, 15));
                     when 4  => v_a := resize(e_r2p, 26);  v_b := resize(e_s, 15);   v_pre := shift_left(resize(e_r1p, 42), 11);
@@ -618,7 +683,9 @@ begin
                     when 14 => v_a := resize(e_xs, 26);   v_b := to_signed(262, 15);  v_pre := shift_left(m_acc, 2);
                     when 15 => v_a := signed(resize(e_yp, 26)); v_b := to_signed(-385, 15); v_pre := to_signed(11469, 42);
                     when 16 => v_a := resize(e_xs, 26);   v_b := to_signed(160, 15);  v_pre := shift_left(m_acc, 2);
-                    when others => v_a := signed(resize(f_fm, 26)); v_b := signed(resize(f_fm, 15));
+                    when 17 => v_a := signed(resize(f_fm, 26)); v_b := signed(resize(f_fmb, 15));
+                    when others => v_a := signed(resize(e_ytri, 26)); v_b := resize(f_kn, 15);      -- the knee: xF' + kn tri / 256
+                               v_pre := to_signed(255, 42);                               -- rounding: kn -1 (default) adds exactly 0
                 end case;
                 m_a <= resize(v_a, 42); m_b <= v_b; m_acc <= v_pre;
             elsif e_run = '1' and e_ph >= 1 and e_ph <= 15 then
@@ -639,10 +706,11 @@ begin
                     when 9  => n_xfp <= unsigned(m_acc(19 downto 8));
                     when 10 => n_pgs <= unsigned(m_acc(19 downto 4));
                     when 11 => n_dlt <= unsigned(m_acc(19 downto 4));
-                    when 12 => n_sgw6 <= unsigned(m_acc(15 downto 10));
+                    when 12 => n_sgw <= unsigned(m_acc(16 downto 10));
                     when 14 => n_p1 <= unsigned(m_acc(17 downto 0));
                     when 16 => n_p2 <= unsigned(m_acc(17 downto 0));
-                    when 17 => e_spd <= unsigned(m_acc(17 downto 5)); n_xs <= e_xs;
+                    when 17 => e_spd <= unsigned(m_acc(19 downto 5)); n_xs <= e_xs;
+                    when 18 => n_xfp <= unsigned(signed(n_xfp) + m_acc(19 downto 8));      -- xF' + the knee
                     when others => null;
                 end case;
             end if;
@@ -671,7 +739,7 @@ begin
                 l_gk6 <= unsigned(ln_q(F_GK6_H downto F_GK6_L));
                 l_xl <= unsigned(ln_q(F_XL_H downto F_XL_L)); l_xfp <= n_xfp;
                 l_bk3 <= unsigned(ln_q(F_BK3_H downto F_BK3_L)); l_pgs <= n_pgs; l_dlt <= n_dlt;
-                l_wa3 <= resize(unsigned(ln_q(F_WA3M_H downto F_WA3M_L)), 3) + 1; l_sgw6 <= n_sgw6;
+                l_wa <= n_wa; l_sgw <= n_sgw;
                 l_rl <= not resize(unsigned(ln_q(F_RL5_H downto F_RL5_L)) & '0', 8);
                 if e_odd = '1' then
                     v_bb := unsigned(signed(ln_q(F_BB_H downto F_BB_L)) + resize(signed(ln_q(F_DBB_H downto F_DBB_L)), 8));
@@ -682,13 +750,7 @@ begin
                     v_e1 := unsigned(ln_q(F_E1_H downto F_E1_L));
                     v_e26 := unsigned(ln_q(F_E26_H downto F_E26_L));
                 end if;
-                l_bb <= v_bb;
-                if f_fill = '1' then
-                    l_e1 <= to_unsigned(231, 8);
-                    if v_e1(7) = '0' then l_e26 <= to_unsigned(57, 7); else l_e26 <= v_e26; end if;
-                else
-                    l_e1 <= v_e1; l_e26 <= v_e26;
-                end if;
+                l_bb <= v_bb; l_e1 <= v_e1; l_e26 <= v_e26;
             elsif g_avid = '1' then
                 b_xq <= b_xq + signed(resize(t_k, 15));
                 b_th <= b_th + b_d1;
@@ -714,6 +776,18 @@ begin
             rbr_q2 <= rbr_q;
         end if;
     end process p_ring;
+
+    p_dring : process(clk)
+    begin
+        if rising_edge(clk) then
+            dr_ram(to_integer(s_wp)) <= std_logic_vector(q5_v8) & q5_sd & std_logic_vector(q7_et4) & "000";
+            dr_q <= dr_ram(to_integer(dr_a));
+            dr_q2 <= dr_q;
+        end if;
+    end process p_dring;
+    q9_v8   <= unsigned(dr_q2(15 downto 8));
+    q9_sd   <= dr_q2(7);
+    q11_et4 <= unsigned(dr_q2(6 downto 3));
 
     p_sring : process(clk)
     begin
@@ -741,6 +815,7 @@ begin
         variable v_dl  : unsigned(9 downto 0);
         variable v_r, v_gg, v_b : unsigned(15 downto 0);
         variable v_iy, v_iu, v_iv : unsigned(9 downto 0);
+        variable v_ve  : signed(9 downto 0);
     begin
         if rising_edge(clk) then
             -- video tap: 2-px luma average -> signed (Y - 512) / 2 (a few px early: invisible in a bend)
@@ -753,6 +828,7 @@ begin
 
             -- 1: bend product; x; theta; wiggle parabolas (sin ~ 4 h (128 - h))
             q1_vm <= resize(q0_src * signed('0' & f_b5), 15);
+            q1_cam <= unsigned(not q0_src(8) & q0_src(7 downto 1));                   -- S9 Camera level 128 + src / 2
             q1_xi <= b_xq(14 downto 2);
             q1_th <= b_th(31 downto 22);
             q1_v1 <= b_p1(16 downto 10) * (to_unsigned(128, 8) - resize(b_p1(16 downto 10), 8)); q1_n1 <= b_p1(17);
@@ -770,9 +846,11 @@ begin
             sc_a <= q2_thf(9 downto 2);
             v_s11 := shift_left(resize(q2_s2, 12), 3) + shift_left(resize(q2_s2, 12), 1) + resize(q2_s2, 12);   -- x11
             q3_wsum <= resize(q2_s1, 10) + resize(shift_right(v_s11, 4), 10);
-            q3_vg <= q2_vg; q3_xw <= q2_xw;
+            -- the camera's push of the plume (Video mode: bend product / 32, 2 px newer: invisible)
+            if f_osc = '1' then v_ve := (others => '0'); else v_ve := q1_vm(14 downto 5); end if;
+            q3_vg <= q2_vg; q3_xw <= q2_xw - resize(v_ve, 13);
             -- 4: (ROM read) wiggle amplitude; the two distances every edge is measured from
-            q4_wv <= resize(q3_wsum * signed('0' & l_wa3), 13);
+            q4_wv <= resize(q3_wsum * signed('0' & l_wa), 13);
             q4_vg <= q3_vg;
             q4_d <= resize(q3_xw, 14) - signed(resize(l_xl, 14));        -- x - xL
             q4_e <= signed(resize(l_xfp, 14)) - resize(q3_xw, 14);       -- xF' - x
@@ -781,13 +859,12 @@ begin
             q5_pw <= signed(pw_q); q5_saw <= unsigned(sc_q(15 downto 8)); q5_cg <= signed(sc_q(7 downto 0));
             q5_el <= f_c8(shift_left(resize(q4_d, 17) - 64, 3));
             q5_er <= f_c8(shift_left(resize(q4_e, 17) + 330, 2));
-            if f_nowedge = '1' then q5_e2 <= (others => '0');
-            else q5_e2 <= f_c8(shift_left(-resize(q4_e, 17) - 780, 1)); end if;            -- x - xr + 40
+            q5_e2 <= f_c8(shift_left(-resize(q4_e, 17) - 780, 1));            -- x - xr + 40
             -- red rise (x - xL + 85, x 1.5) left of the plume, the wedge ramp (x - xr + 100, x 1.25) right of it
             if q4_e < -400 then
                 q5_sd <= '1'; v_r20 := -resize(q4_e, 20) - 720;
                 v_r20 := v_r20 + shift_right(v_r20, 2);
-                if f_nowedge = '1' then q5_v8 <= (others => '0'); else q5_v8 <= f_c8(v_r20); end if;
+                q5_v8 <= f_c8(v_r20);
             else
                 q5_sd <= '0'; v_r20 := resize(q4_d, 20) + 85;
                 q5_v8 <= f_c8(v_r20 + shift_right(v_r20, 1));
@@ -796,31 +873,31 @@ begin
             -- 6: cos address (ground stripes); narrow products; window -> 4-bit blend weight
             cs1_a <= q5_gw(15 downto 8);
             q6_gw <= q5_gw;
-            q6_sw <= q5_saw * l_sgw6;
+            q6_sw <= q5_saw * l_sgw;
             q6_tth <= resize(shift_right(q5_pw, 2) * signed('0' & f_tk(2 downto 0)), 12);
             q6_ab <= resize(shift_right(q5_pw, 1) * signed('0' & l_ab6), 13);
             if q5_el < q5_er then v_k := q5_el; else v_k := q5_er; end if;
             if q5_e2 > v_k then v_k := q5_e2; end if;
             v_e9 := resize(v_k, 9) + 16;
             q6_et4 <= v_e9(8 downto 5);
-            q6_v8 <= q5_v8; q6_sd <= q5_sd; q6_fd <= q5_fd; q6_pw <= q5_pw;
+            q6_fd <= q5_fd; q6_pw <= q5_pw;
             -- 7: plume stripe phase (shear) -> cos address; B plume; teeth; seam G term
             v_u16 := q6_gw + l_dlt - (q6_sw(11 downto 0) & "0000");
             cs2_a <= v_u16(15 downto 8);
             q7_bp <= f_c8(signed(resize(l_mb, 12)) + resize(shift_right(q6_ab, 4), 12));
             q7_fd <= q6_fd + resize(q6_tth, 14);
-            q7_et4 <= q6_et4; q7_v8 <= q6_v8; q7_sd <= q6_sd;
+            q7_et4 <= q6_et4;
             -- 8: fall ramp (x41/32 for a 200-px fall, x27/16 for 150 px); ground cos copy
             q8_frp <= resize(q7_fd, 20) + shift_right(resize(q7_fd, 20), 1);
-            q8_cgg <= signed(cs1_q);
-            q8_bp <= q7_bp; q8_et4 <= q7_et4; q8_v8 <= q7_v8; q8_sd <= q7_sd;
+            if f_hall = '1' then q8_cgg <= signed(cs2_q); else q8_cgg <= signed(cs1_q); end if;   -- S8 Hooks All: sheared stripes
+            q8_bp <= q7_bp;
             -- 9: fall clamp; plume cos copy; ground products
             q9_fr <= f_c8(q8_frp);
             q9_cgp <= signed(cs2_q);
             v_c9 := to_signed(127, 9) - resize(q8_cgg, 9);
             q9_e2p <= unsigned(v_c9(7 downto 1)) * l_e26;
             q9_bk <= resize(q8_cgg * signed('0' & l_bk3), 12);
-            q9_bp <= q8_bp; q9_et4 <= q8_et4; q9_v8 <= q8_v8; q9_sd <= q8_sd;
+            q9_bp <= q8_bp;
             -- 10: red key; plume G product; ground G and B
             if q9_sd = '1' then
                 if q9_fr > q9_v8 then v_k := q9_fr; else v_k := q9_v8; end if;
@@ -830,13 +907,14 @@ begin
             if l_rl < v_k then v_k := l_rl; end if;
             q10_r <= v_k;
             q10_gk <= resize(shift_right(q9_cgp, 1) * signed('0' & l_gk6), 14);
-            q10_gg <= f_c8(signed(resize(l_e1, 11)) - signed(resize(q9_e2p(13 downto 5), 11)));
+            if f_cam = '1' then v_k := q1_cam; else v_k := l_e1; end if;              -- S9: camera level (9 px newer) / envelope
+            q10_gg <= f_c8(signed(resize(v_k, 11)) - signed(resize(q9_e2p(13 downto 5), 11)));
             q10_bg <= f_c8(signed(resize(l_bb, 11)) - resize(shift_right(q9_bk, 3), 11));
-            q10_bp <= q9_bp; q10_et4 <= q9_et4;
+            q10_bp <= q9_bp;
             -- 11: plume G; B difference
             q11_gp <= f_c8(signed(resize(l_go, 11)) + resize(shift_right(q10_gk, 5), 11));
             q11_db <= signed(resize(q10_bp, 9)) - signed(resize(q10_bg, 9));
-            q11_gg <= q10_gg; q11_bg <= q10_bg; q11_r <= q10_r; q11_et4 <= q10_et4;
+            q11_gg <= q10_gg; q11_bg <= q10_bg; q11_r <= q10_r;
             -- 12: G difference; B blend product
             q12_dg <= signed(resize(q11_gp, 9)) - signed(resize(q11_gg, 9));
             q12_pb <= resize(q11_db * signed('0' & q11_et4), 13);
@@ -883,6 +961,7 @@ begin
             rbr_a <= s_wp - 5;
             s_yd(0) <= rb_wd(29 downto 20); s_yd(1) <= s_yd(0); s_yd(2) <= s_yd(1); s_yd(3) <= s_yd(2);
             rs_ra <= s_wp - (C_LAT - 3);
+            dr_a <= s_wp - 1;
             if s_gav_sr(17) = '0' then
                 v_iy := to_unsigned(64, 10); v_iu := to_unsigned(512, 10); v_iv := to_unsigned(512, 10);
             else

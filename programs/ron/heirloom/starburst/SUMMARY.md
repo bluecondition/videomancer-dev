@@ -1,9 +1,83 @@
 # Starburst — Heirloom #3, a mirror kaleidoscope of bowties and CMYK chevrons
 
-**v0.5.0 (2026-10-21): rebuilt from the photo (`photos/WIN_20221122_23_37_36_Pro.jpg`), built, NOT
-flashed.** v0.1/v0.2 drew a generic saddle-field kaleidoscope that Ron judged too abstract; v0.5.0
+**v0.6.2 (2026-11-19): phase 2 FINAL — Ron prefers the diag in every case, so it is merged into production** (`out/rev_b/ron/heirloom/starburst.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; this exact build not flashed). It is the phase-2 round plus the K6 camera pass; status lines below that say "diag" or "production untouched" are history. The replaced v0.5.3 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`. Ron's hardware-captured defaults from the heirloom v0.5.3 (2026-11-18) are carried over, converted to the diag's knob curves so the picture is the same: Cells 477→570, Bands 667→791, Teeth 290→483 (Speed 188, Etch 1014, Burst 438, Drift On unchanged; at Speed 188 the phase-2 mirror swing is active, since it starts past the photo's speed).
+
+**v0.6.0 (2026-11-09, phase 2): diag preview built, awaiting Ron's preview** (see [Phase 2](#phase-2-v060);
+`Starburst Diag`, `out/rev_b/ron/_diag/starburst_diag_v0.6.0.vmprog`, copy in `out/rev_b/ron/heirloom/_diag/`).
+Production v0.5.1 (`programs/ron/heirloom/starburst/`) is untouched.
+v0.5.0 (2026-10-21): rebuilt from the photo (`photos/WIN_20221122_23_37_36_Pro.jpg`), built, NOT
+flashed. v0.1/v0.2 drew a generic saddle-field kaleidoscope that Ron judged too abstract; v0.5.0
 replays the photo's own pattern through the mirrors, with its palette, teeth, feathers and starburst.
-Presets are hand-written placeholders.
+
+## Phase 2 (v0.6.0)
+No notes from Ron for starburst (free hand, 2026-11-09 batch). In v0.5 the source pattern sat still under the
+mirrors unless S10 Drift was on, K3 Teeth only retextured the band edges (×0.5..×2), K2 Bands and K1 Cells spanned
+about one octave each way, and S7 Centre only translated the lattice by half a period. The round:
+- puts K1, K2 and K3 on exponential curves with twice the octaves, the photo at 50 %;
+- makes the kaleidoscope **turn**: past the photo's speed, K4 swings the mirrors across the source (the shapes
+  under the mirrors split and re-form) and breathes the bands through the palette;
+- patches the picture into the **mirrors** (K5 past 50 %): the camera (or the Osc) bends the kaleidoscope sideways,
+  not only the bands;
+- turns S7 into a waveform switch for the two oscillators (teeth and feathers Saw / Square);
+- deepens S10 Drift, and moves Source to S11 like every other heirloom program (Mirror to S9).
+
+Every new effect is exactly zero at the default knob value; the default frame is byte-identical to v0.5.1
+(checks below). Phase-2 working files: `.heirloom_work/rb_starburst/p2/`.
+
+| Was (v0.5) | Now (v0.6.0) | Full sweep, in screen terms (1080p) |
+|---|---|---|
+| K1 Cells: 2 .. 8 cells per screen height, linear (default 356 = 4.1) | **K1 Cells**: 1 .. 4.1 (50 %) .. 16.3, exponential (an octave per quarter turn); readout −100..100, default 512 = the photo (exact) | cell 1080 → 264 → 66 lines tall (1934 → 473 → 118 px wide). 0 % = one giant cell, the grey X filling the screen with the white X's cut by the top and bottom edges; 100 % = a fine lattice about 29 cells across |
+| K2 Bands: colourizer gain ×0.5 .. ×3 (default 205) | **K2 Bands**: ×0.25 .. ×1 (50 %) .. ×4, exponential; readout −100..100, default 512 = the photo (exact) | 0 % = the field spans about 0.3 of a colour cycle: 3–4 broad bands, the X's as flat white / grey / charcoal silhouettes, most chevron colours gone. 100 % = about 5 colour cycles across the field: fine contour rings in every shape |
+| K3 Teeth: tooth / feather count ×0.5 .. ×2 (default 341) | **K3 Teeth**: ×0.25 .. ×1 (50 %) .. ×2; readout −100..100, default 512 = the photo (exact) | tooth period 132 → 33 → 17 px, feather period 84 → 21 → 11 lines (photo cells). The top stays at v0.5's ×2: above it the 80 knot columns alias the teeth |
+| K4 Speed: bipolar, still at the centre; crawl, roll, breathing ±0.025 cycle | **K4 Speed**: as before up to the photo's speed (K4 376..648); **past it the mirrors swing** across the source on the two drift LFOs, depth (\|speed\| − 128) × 133 (u) and half that (v), and the LFOs speed up; **the breathing deepens** from ±0.025 to ±0.4 cycle | at either end the source slides ±0.78 cell under the mirrors (±370 px at the photo's cells; v ±0.39 cell, ±103 lines) on 5.3 s / 6.3 s triangles: X arms split, diamonds bloom and re-form continuously; the colours sweep about five bands back and forth every ~2 s. Exactly 0 at the default 640 |
+| K6 Etch: picture bends the bands, up to ±0.27 cycle (default 245) | **K5 Etch**: 0 .. 50 % = band bend 0 .. the photo's (default 512 = the photo, exact); 50 .. 100 % = band bend to ±0.62 cycle (×8.4) **plus the mirror warp**: the same luma pushes the kaleidoscope sideways | at 100 % the camera's whites and blacks push the mirror ±0.43 cell (about ±200 px at the photo's cells; Osc ±0.22 cell, slow waves): the kaleidoscope bends around a face. Below 50 % the warp is 0 |
+| S7 Centre: Grey X / White X at the screen centre (a half-period lattice shift) | **S7 Teeth: Saw / Square** (renamed): the teeth and feather oscillators' waveform | Square = crenellations: every serrated edge becomes battlements of full depth (about twice the saw's), the grey X's feathers become steps; at high Burst and few teeth, big castle blocks. The centre is always the grey X (the photo); K4 / S10 swings pass through the white-X arrangement |
+| S9 Source: Video / Osc | **S9 Mirror: Fold / Tile** (moved from S11) | as v0.5's S11 |
+| S10 Drift: ±0.22 cell u, ±0.14 v | **S10 Drift**: ±0.44 cell u, ±0.22 v (deeper; K4's swing adds) | ±208 px / ±58 lines at the photo's cells, 10 s / 14 s |
+| S11 Mirror: Fold / Tile | **S11 Source: Video / Osc** (moved from S9, like the other heirloom programs) | — |
+
+Unchanged: K6 Palette, S8 Greys, P12 Burst.
+
+**Presets** (preset 0 = the defaults): **Photo**; **Calm Bands** (as before); **Full Burst** (as before); **Drifting
+Glass** (Drift, 3.2 cells, Acid); **Carved Face** (Etch 86 %: bands and mirrors bent by the camera, more bands);
+**Giant X** (one cell, fewer bands, Burst 68 %); **Kaleido Swing** (Speed near max + Drift, 5 cells: the
+kaleidoscope turning); **Castle** (Square teeth, few teeth, Burst 80 %, 3 cells).
+
+**Engine (new).**
+- **Exponential knobs.** One exponential, `(256 + t(7:0)) << t(10:8)` (an octave per 256 of t, linear within it;
+  t = 1024 gives 4096), run three times in the vblank direct-term clocks (zone clocks 24..31, one op per clock):
+  N16 = 65·e / 4096 (cells), TS8 = 63·e / 4096 (teeth), GQ = 328·e / 4096 (bands), all constant multiplies as
+  shift-adds. K3's right half runs at half rate (t = 1024 + d / 2), so it tops out at ×2. The old slot-12 gain
+  multiply is gone. Widened for the range: N16 9 bits, H step 14, T3 19, V step 16, GQ 11.
+- **Swing.** Zone clocks 2..6: E = max(0, \|speed\| − 128); swing depth A_u = 133·E (+ 28836 with Drift),
+  A_v = A_u / 2; breathing depth 1638 + 64·E; LFO rates 109 / 78 + E / 4. The three LFO slots of the serial
+  multiplier take these depths instead of constants. The pan is now a 17-bit modular value (two cells = 2^17), so
+  any depth folds correctly (the fold only reads bits 16..0).
+- **Mirror warp.** Pixel stage 0: (luma − 126) × W, W = (K5 − 512) / 2 (0..255), the luma being the ring's write
+  data (camera or Osc, the source pixel a few px ahead of the beam: invisible). Stage 1 adds the pan, stage 2 the
+  sum to u, stage 3 folds (no new stages: the product sits beside the mirror-phase stage).
+- **Etch** depth widened to 7 bits (15·k / 512 below 50 %, 15 + 7·d / 32 above).
+- **Square.** The column DDA's saw (teeth) and the line engine's V saw (feathers) are replaced by ±127.
+- **Chroma ring.** The output chroma filter's two 9-stage 10-bit delay lines are one 256 × 32 block-RAM ring
+  (`no_rw_check`, read = write − 6, plus a fabric register = 8 clocks): −160 FF, +2 EBR.
+- No pipeline stages added or removed: latency 36 in every mode, U/V parity unchanged.
+
+**Build** (router2, `SEED=3 MAKE_TIMEOUT=900 .heirloom_work/diag_build.sh starburst`, 2026-11-09, 13 forks sharing
+the machine): HD Analog **s4** 81.39 (seed 3 stalled the router at the 900 s timeout), SD Analog s3 79.46, HD HDMI
+s3 **75.68** (thin), SD HDMI s3 76.68, HD Dual s3 **75.13** (thin), SD Dual s3 81.94 MHz. 7,247–7,290 / 7,680 LC
+(94.6 %, +~400 over v0.5.1), 15 / 32 EBR (+2: the chroma ring); iceunpack OK ×6; the packed config carries the
+new labels and presets. No pin-skew screen. If a rebuild misses HD HDMI / HD Dual, rerun those configs on another
+seed, or try router1, before restructuring.
+
+**Checks** (working files in `.heirloom_work/rb_starburst/p2/`):
+- GHDL analyse / elaborate / synth front end: clean (`check.sh`).
+- `sweep.py`: every new knob path at RTL widths over all knob values (exp curves, step widths for every timing
+  ID, K5 split, K4 depths, LFO products, warp and etch products, the gain index): no overflow; the photo values
+  are exact (N16 65, TS8 63, GQ 328, Etch depth 15, warp 0, swing 0, breathing 1638 at the default speed).
+- Default frame (GHDL 720p60 dec 1, Osc, CMYK, 2 warm-up + 1 capture, production v0.5.1 simulated the same way):
+  raw 10-bit output **byte-identical** (0 of 921,600 px; a real frame, Y mean 479, 43 % bright).
+- Not verified in sim (reasoned from the code): the swing at depth, the mirror warp, Square, the extreme exp
+  settings.
 
 ## Reading of the photo (measured)
 Work files: `.heirloom_work/rb_starburst/` (`notes.md`, `proto.py`, `imodel.py`, `cmp_final.png`, `sheet.png`).
@@ -133,16 +207,45 @@ Glides (1/8 of the gap per field, ±3 hold) on K1, K2, K3, K5 and P12. At P12 = 
 - **The lattice is screen-centred.** The photo's is 7 px right of centre and 13 lines down from the
   capture's black top band, and its cell is 1.4 % larger than the default Cells.
 
+## Open questions for Ron (2026-11-09 batch)
+1. S7 Centre (grey X / white X at the screen centre) was replaced by the Teeth Saw / Square switch. Want Centre
+   back, for example in place of Square, or as a third option on K6's palette knob?
+2. K3 Teeth still only retextures the serrated edges and the grey X's feathers (its top is held at ×2 because the
+   80 knot columns alias finer teeth). Would you rather K3 drive something bigger, such as how far across the cell
+   the teeth reach, with P12 keeping only the depth?
+3. The K4 swing returns home on its own when Speed comes back inside 376..648 (its depth follows the excess
+   speed). Would you prefer a free-running turn that stays where you leave it?
+4. K5's mirror warp pushes the kaleidoscope sideways only. Should the camera also push it up and down (the line
+   engine would need the camera on the previous line)?
+
+## Hardware watch list
+- Renamed / moved: **S7 Centre → Teeth (Saw / Square)**; **Source moved S9 → S11** and **Mirror S11 → S9** (as in
+  every other heirloom program); K1 / K2 / K3 / K5 defaults moved to 512 (the same picture), readouts −100..100
+  (K5 0..100 %). Presets re-aimed: "Giant X", "Kaleido Swing", "Castle" are new.
+- New motion only past the photo's speed: with K4 outside 376..648 the whole pattern swings (up to ±370 px) and the
+  colours sweep. If the default picture moves more than v0.5's, K4 isn't at the default.
+- The mirror warp reads the camera a few px ahead of the beam (invisible) and is 0 below Etch 50 %.
+- Chroma filter delay now in a block-RAM ring (watch for colour shifts or thin coloured lines; none expected).
+- At K1 100 % (16 cells) the knot grid is 1.5 px per column and K2 100 % gives ~5 colour cycles: busy, by design.
+- Timing: see the build line (router2, base seed 3).
+
+## Next step
+Wait for Ron's preview notes. Rebuild the diag with `SEED=3 MAKE_TIMEOUT=900 .heirloom_work/diag_build.sh starburst`.
+On approval: `./heirloom_diag.sh merge starburst`, then repack the previewed diag bitstreams under the production
+TOML (copy `build/programs/ron/starburst_diag/rev_b/bitstreams/*.bin` into the production build dir, regenerate
+`program_config.bin` from the production TOML, `vmprog_pack.py --no-sign --hardware rev_b`) instead of re-routing;
+update the production SUMMARY / README / PHASE2 row and commit only starburst's files.
+
 ## K6 camera pass (2026-11-15)
 
-Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Etch), so K5 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K5 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: SD HDMI seed 2, HD Dual seed 2; HD worst 80.24 MHz (HD Analog 85.62, HD HDMI 80.24, HD Dual 83.72), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh starburst`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Etch), so K5 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K5 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.1, rebuilt with router1: all six seed 1; HD worst 79.17 MHz (HD Analog 84.61, HD HDMI 85.80, HD Dual 79.17), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./heirloom_diag.sh build starburst`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
 
 ## K6 top +25 % and default 100 % (2026-11-15)
 
 Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
-- **Bend.** K6 Etch adds the camera (or Osc) luma to the band field, so the picture bends the bands.
-- **Change.** The per-field etch depth is g + g/4, with g = K6 / 16 (zone clock 24): 0 .. 78, where it was 0 .. 63, so ×1.25 at every position.
-  - `s_dep` widened to 7 bits. The video product |vp| ≤ 129 × 78 = 10062 still fits its 17-bit register. F + vp/8 stays inside 15 bits (≤ 11.5 k); the colourizer index is cyclic.
-  - Up to ±0.34 cycle of bend (was ±0.27). Latency unchanged.
-- **Render.** `.heirloom_work/rb_starburst/k6b/k6b_cmp.png` (bear, 720p60 / 2, K6 100 %, K5 CMYK, glides started at the defaults in the scratch copies). The same kaleidoscope, with the bands pushed further by the picture.
-- **Build** v0.5.3, router1. HD Dual seed 2, the rest seed 1. HD Analog 84.38, HD HDMI 86.97, HD Dual 83.47 MHz (worst HD 83.47). 6851–6882 / 7680 LC. Not flashed.
+- **Bend.** K6 Etch bends the bands by the camera (or Osc) luma, and past 50 % the same luma bends the mirrors (the warp).
+- **Change.** The production change is g + g/4 on the etch depth. Here both camera gains get it, at zone clock 26 (one small op each, after the zone-25 decode), so both are ×1.25 at every position.
+  - Etch depth `s_dep`: 0 .. 157 at 100 % (was 0 .. 126), widened to 8 bits. |vp| ≤ 129 × 157 = 20253 in its 18-bit register; F + vp/8 ≤ 12.8 k in 15 bits.
+  - Mirror warp `s_wg`: 0 .. 318 (was 0 .. 255), widened to 9 bits. |vw| ≤ 41022 in its 18-bit register, added to the modular 17-bit mirror coordinate as before.
+  - Latency unchanged.
+- **Build** v0.6.2 (`k6build.sh diag starburst`), router1. HD Analog and HD HDMI seed 2, the rest seed 1. HD Analog 82.15, HD HDMI 81.63, HD Dual 87.05 MHz (worst HD 81.63). 7311–7360 / 7680 LC. `out/rev_b/ron/_diag/starburst_diag_v0.6.2.vmprog`. Not flashed. No render (diag copy).

@@ -1,7 +1,9 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Radiant v0.5.0 -- Heirloom #52 (2026-10-27), rebuilt from duci.jpg (one of Ron's portrait paper collages).
+-- Radiant v0.6.0 -- Heirloom #52 (2026-10-27), rebuilt from duci.jpg (one of Ron's portrait paper collages).
+-- Phase 2 (2026-11-03): the rays fan, the cut-outs rise / sink and slide through each other, the rays can lie
+-- over the cut-outs, and the camera can print into the ground.
 --
 -- The collage: on a dark maroon ground of paint and torn mauve tissue, four pink-and-white paper rays (white
 -- rims, pink, a dark centre line) burst from behind a dark-red halo disc.  In front: a bust in a blue suit,
@@ -19,21 +21,21 @@
 -- DDA against per-line thresholds, the ground from two integer-angle lattices of hashed shards with
 -- ragged (noise-jittered) edges.
 --
---   K1  Halo     halo disc radius (50 .. 150 %, 100 % = the collage)
---   K2  Lift     the cup rises off the head (0 = sitting on it, as in the collage)
---   K3  Pulse    the rays breathe in width (depth and rate; 0 = still)   [K6 camera pass: was K6]
---   K4  Tissue   torn tissue on the ground (bare paint .. dense)
---   K5  Flank    the woman and the soldier slide out to the frame edges
---   K6  Camera   how strongly the camera (or Osc) prints through the cut-outs: shade = mid + (src - mid) G,
---                G in four steps: 0 = flat paper (each zone's mid step), 1/2 at 256, 1 at 512 = the v0.5 print,
---                2 from 640 (x2 contrast)
---                (K6 camera pass: Stripe is fixed at 512 = the collage's mix)
---   S7  Lens     Flag / Clear (the left lens shows the eye)
+--   K1  Halo     halo disc radius (25 .. 194 %, 100 % = the collage at 50 %)
+--   K2  Pulse    the rays breathe in width (depth and rate; 0 = still)   [K6 camera pass: was K6]
+--   K3  Fan      the rays' spread about the halo: a narrow bundle (x0.3) .. the collage (50 %) .. a flat fan (x3)
+--   K4  Rise     each cut-out slides up (> 50 %) or down by its own travel; glasses, cup and label ride along
+--   K5  Flank    the woman and the soldier: slide inward across the bust (0) .. collage (50 %) .. frame edges
+--   K6  Camera   how strongly the camera (or Osc) prints through the cut-outs (and into the S10 Camera ground):
+--                shade = mid + (src - mid) G, G in four steps: 0 = flat paper, 1/2 at 256, 1 at 512 = the v0.6.0
+--                print, 2 from 640 (x2 contrast)
+--                (K6 camera pass: Lift is fixed at 0 = the cup on the head; it still rides with Rise)
+--   S7  Rays     Under / Over (the paper strips lie over the cut-outs, under the cup and glasses)
 --   S8  Cup      On / Off (the bare head)
---   S9  Halo     Dark / Gold
---   S10 Label    DUCI / Coal (no label)
+--   S9  Palette  Photo / Gold (gold halo, pink strips with a wide dark line)
+--   S10 Ground   Paper / Camera (the camera luma printed into the maroon ground)
 --   S11 Source   Video / Osc
---   P12 RADIANT  ray width: 0 = no rays (bare halo), 50 % = the collage's four strips, 100 % = 2.2x
+--   P12 RADIANT  ray width: 0 = no rays (bare halo), 50 % = the collage's four strips, 100 % = 3x
 --
 -- Geometry in virtual 1080-line units (timing-ID steps; h = half virtual px).  Engines: the per-field
 -- register machine (triplicate's: register file in one EBR, microcode in block RAM, one serial shift-add
@@ -44,7 +46,7 @@
 -- (luma [1 2 1] and to ~777, chroma [1 2 2 2 2 2 2 2 1]/16) before the blanking gate.  Latency 16, all
 -- modes.  Colours in the hardware convention (u = Cr, v = Cb).
 
--- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Pulse (was K6); K3 Stripe fixed at 512 (C_KFIX_3).
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Pulse (was K6); K2 Lift fixed at 0 (C_KFIX_2).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -57,7 +59,7 @@ use work.radiant_pkg.all;
 use work.all;
 
 architecture radiant of program_top is
-    constant C_KFIX_3 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(512, 10));   -- K6 camera pass: fixed knob
+    constant C_KFIX_2 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(0, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 16;
 
     ---------------------------------------------------------------------------
@@ -119,6 +121,7 @@ architecture radiant of program_top is
     constant L_YS : integer := 9;
     constant L_XSQ : integer := 10;
     constant L_XS2 : integer := 11;
+    constant L_STR : integer := 12;
     -- outputs
     constant O_NONE : integer := 0;
     constant O_X0 : integer := 1;
@@ -140,86 +143,112 @@ architecture radiant of program_top is
     constant O_KLU : integer := 17;
     constant O_LX0 : integer := 18;
     constant O_GTH : integer := 19;
-    constant ST_FIG : integer := 25; constant ST_FIGEND : integer := 26;
-    constant ST_RAY : integer := 59; constant ST_RAYEND : integer := 64;
+    constant O_RV : integer := 20;
+    constant O_LNO : integer := 21;
+    constant O_LRO : integer := 22;
+    constant ST_FIG : integer := 28; constant ST_FIGEND : integer := 30;
+    constant ST_RAY : integer := 70; constant ST_RAYEND : integer := 86;
     constant RF_XRAL : integer := 40;
     constant RF_ES0L : integer := 56;
     constant RF_DXL : integer := 16;
-    constant RF_EST : integer := 92;
+    constant RF_EST : integer := 108;
     constant RF_KV : integer := 80;
-    constant RF_LRS : integer := 84;
-    constant RF_LNS : integer := 85;
+    constant RF_LRS : integer := 100;
+    constant RF_LNS : integer := 101;
+    constant RF_XF : integer := 76;
     constant RV0_0 : integer := 0;
     constant RV0_1 : integer := -791031;
     constant RV0_2 : integer := -596249;
     constant RV0_3 : integer := -1218615;
     type t_mc is array (0 to 255) of std_logic_vector(63 downto 0);
     constant C_MC : t_mc := (
-        0 => x"00001001857C0002",
-        1 => x"00001001897C0006",
-        2 => x"000010018D7C000A",
-        3 => x"00001001917C000E",
-        4 => x"00001001957C0012",
-        5 => x"00001001997C0016",
-        6 => x"000010019D7C001A",
-        7 => x"00001001A17C001E",
-        8 => x"00001001A57C0022",
-        9 => x"00001001A97C0026",
-        10 => x"00001001AD7C002A",
-        11 => x"00001001B17C002E",
-        12 => x"00001401BD8581B4",
-        13 => x"000010C1B5B581BC",
-        14 => x"00011041C20DA5A0",
-        15 => x"00021001C61181C0",
-        16 => x"00120000021581C0",
-        17 => x"00005001CA1981C0",
-        18 => x"00001281CD7D99C8",
-        19 => x"00001001321D81C0",
-        20 => x"00001001362181C0",
-        21 => x"00001001D22581C0",
-        22 => x"0000140139D181CC",
-        23 => x"00001001D22981C0",
-        24 => x"000010013DD181CC",
-        25 => x"00030004017D8130",
-        26 => x"00001225417DA920",
-        27 => x"00001281D6322D88",
-        28 => x"00070380017DD5D4",
-        29 => x"00001001DA3581D4",
-        30 => x"00080380017DD9D8",
-        31 => x"00001281DD7E398C",
-        32 => x"00001401D1DD8164",
-        33 => x"00001800E17D59D0",
-        34 => x"00001201717DA958",
-        35 => x"00001401D1DD8168",
-        36 => x"00001800E57D5DD0",
-        37 => x"00001201757DA95C",
-        38 => x"00001401D1DD816C",
-        39 => x"00001800E97D61D0",
-        40 => x"00001201797DA960",
-        41 => x"00090000017DC5C4",
-        42 => x"000A040001ADB1C4",
-        43 => x"00001281517E3DA8",
-        44 => x"00001281557E41A8",
-        45 => x"00110000017E45A4",
-        46 => x"00130280017E4994",
-        47 => x"00001001E17E4DB4",
-        48 => x"00005001E65181B4",
-        49 => x"00001301E9E255E4",
-        50 => x"00001281F25E599C",
-        51 => x"00001001B9B981F0",
-        52 => x"00005401E17D81B8",
-        53 => x"00001001F5BA4DE0",
-        54 => x"00001001F66181F4",
-        55 => x"00001341FA659DF4",
-        56 => x"00001301ED7DF9E8",
-        57 => x"00001281FE6E6990",
-        58 => x"0000128202767190",
-        59 => x"00001005D1C67880",
-        60 => x"00001830A06279D0",
-        61 => x"00001324417DA820",
-        62 => x"000B1386057DEC00",
-        63 => x"000C0280017DFE04",
-        64 => x"000D0280017E0204",
+        0 => x"00001001C5BC0002",
+        1 => x"00001001C9BC0006",
+        2 => x"00001001CDBC000A",
+        3 => x"00001001D1BC000E",
+        4 => x"00001001D5BC0012",
+        5 => x"00001001D9BC0016",
+        6 => x"00001001DDBC001A",
+        7 => x"00001001E1BC001E",
+        8 => x"00001001E5BC0022",
+        9 => x"00001001E9BC0026",
+        10 => x"00001001EDBC002A",
+        11 => x"00001001F1BC002E",
+        12 => x"00001001F5BC0032",
+        13 => x"0000140201C5C1F8",
+        14 => x"000010C1F9F9C200",
+        15 => x"00011042067DE5E0",
+        16 => x"000210020A81C204",
+        17 => x"001200000285C204",
+        18 => x"000050020E89C204",
+        19 => x"00001002568DC1D8",
+        20 => x"0000124211BE0E54",
+        21 => x"000010013291C204",
+        22 => x"000010013695C204",
+        23 => x"000010021699C204",
+        24 => x"000014013A15C210",
+        25 => x"00001002169DC204",
+        26 => x"000010013E15C210",
+        27 => x"00001002528DC1D4",
+        28 => x"0000122541BDE920",
+        29 => x"0000126961BD5250",
+        30 => x"0014000C01BD2160",
+        31 => x"0015008001BEA164",
+        32 => x"0016008001BEA560",
+        33 => x"0000128226AEA9C8",
+        34 => x"00005002168DC1C8",
+        35 => x"000012821A26B214",
+        36 => x"0007038001BE1A18",
+        37 => x"000010021EB5C218",
+        38 => x"0008038001BE1E1C",
+        39 => x"000012822166B9CC",
+        40 => x"000014021621C1A4",
+        41 => x"00001800E1BD9A14",
+        42 => x"00001201B1BDE998",
+        43 => x"000014021621C1A8",
+        44 => x"00001800E5BD9E14",
+        45 => x"00001201B5BDE99C",
+        46 => x"000014021621C1AC",
+        47 => x"00001800E9BDA214",
+        48 => x"00001201B9BDE9A0",
+        49 => x"0009000001BE0A08",
+        50 => x"000A040001EDF208",
+        51 => x"0000128191BEA5E8",
+        52 => x"0000128195BEA1E8",
+        53 => x"0011000001BEBDE4",
+        54 => x"0013028001BEC6C0",
+        55 => x"0000100225BEC9F8",
+        56 => x"000050022ACDC1F8",
+        57 => x"000013022E26D228",
+        58 => x"0000128236DAD5DC",
+        59 => x"00001001FDFDC234",
+        60 => x"0000540225BDC1FC",
+        61 => x"0000100239FECA24",
+        62 => x"000010023ADDC238",
+        63 => x"000013423EE1DE38",
+        64 => x"0000130231BE3E2C",
+        65 => x"0000128242EAE5F4",
+        66 => x"0000128246F2EDF4",
+        67 => x"0000128226FAF5D0",
+        68 => x"00005002168DC1D0",
+        69 => x"000012825A26FE14",
+        70 => x"000013065DBE5820",
+        71 => x"000014126021C25C",
+        72 => x"000013C265BF0260",
+        73 => x"00001006160B0480",
+        74 => x"000010021615C264",
+        75 => x"00001830A0630614",
+        76 => x"0000132041BDEA5C",
+        77 => x"0000540225BDC25C",
+        78 => x"000010026A5ECA24",
+        79 => x"000050026F09C268",
+        80 => x"000013022B130E68",
+        81 => x"00001302722B166C",
+        82 => x"000014067671C170",
+        83 => x"0000139A78018274",
+        84 => x"000B138249BE3278",
+        85 => x"000C028001BE4248",
+        86 => x"000D028001BE4648",
         others => (others => '0')
     );
     type t_rf is array (0 to 255) of std_logic_vector(15 downto 0);
@@ -246,42 +275,65 @@ architecture radiant of program_top is
         r(73) := std_logic_vector(to_signed(1703, 16));
         r(74) := std_logic_vector(to_signed(1523, 16));
         r(75) := std_logic_vector(to_signed(2099, 16));
-        r(86) := std_logic_vector(to_signed(472, 16));
-        r(87) := std_logic_vector(to_signed(638, 16));
-        r(88) := std_logic_vector(to_signed(568, 16));
-        r(89) := std_logic_vector(to_signed(472, 16));
-        r(90) := std_logic_vector(to_signed(513, 16));
-        r(91) := std_logic_vector(to_signed(473, 16));
-        r(96) := std_logic_vector(to_signed(1, 16));
-        r(109) := std_logic_vector(to_signed(2048, 16));
-        r(131) := std_logic_vector(to_signed(-827, 16));
-        r(132) := std_logic_vector(to_signed(859, 16));
-        r(133) := std_logic_vector(to_signed(719, 16));
-        r(134) := std_logic_vector(to_signed(-40, 16));
-        r(135) := std_logic_vector(to_signed(429, 16));
-        r(136) := std_logic_vector(to_signed(383, 16));
-        r(137) := std_logic_vector(to_signed(-86, 16));
-        r(138) := std_logic_vector(to_signed(1354, 16));
-        r(139) := std_logic_vector(to_signed(4112, 16));
-        r(140) := std_logic_vector(to_signed(2056, 16));
-        r(141) := std_logic_vector(to_signed(-48, 16));
-        r(142) := std_logic_vector(to_signed(200, 16));
-        r(143) := std_logic_vector(to_signed(287, 16));
-        r(144) := std_logic_vector(to_signed(411, 16));
-        r(145) := std_logic_vector(to_signed(209, 16));
-        r(146) := std_logic_vector(to_signed(77, 16));
-        r(147) := std_logic_vector(to_signed(2, 16));
-        r(148) := std_logic_vector(to_signed(-2048, 16));
-        r(149) := std_logic_vector(to_signed(1638, 16));
-        r(150) := std_logic_vector(to_signed(375, 16));
-        r(151) := std_logic_vector(to_signed(24, 16));
-        r(152) := std_logic_vector(to_signed(-16384, 16));
-        r(153) := std_logic_vector(to_signed(4096, 16));
-        r(154) := std_logic_vector(to_signed(696, 16));
-        r(155) := std_logic_vector(to_signed(100, 16));
-        r(156) := std_logic_vector(to_signed(174, 16));
-        r(157) := std_logic_vector(to_signed(20, 16));
-        r(158) := std_logic_vector(to_signed(256, 16));
+        r(84) := std_logic_vector(to_signed(356, 16));
+        r(85) := std_logic_vector(to_signed(324, 16));
+        r(86) := std_logic_vector(to_signed(238, 16));
+        r(87) := std_logic_vector(to_signed(410, 16));
+        r(92) := std_logic_vector(to_signed(9190, 16));
+        r(93) := std_logic_vector(to_signed(9033, 16));
+        r(94) := std_logic_vector(to_signed(11776, 16));
+        r(95) := std_logic_vector(to_signed(10711, 16));
+        r(96) := std_logic_vector(to_signed(437, 16));
+        r(97) := std_logic_vector(to_signed(437, 16));
+        r(98) := std_logic_vector(to_signed(465, 16));
+        r(99) := std_logic_vector(to_signed(460, 16));
+        r(102) := std_logic_vector(to_signed(472, 16));
+        r(103) := std_logic_vector(to_signed(638, 16));
+        r(104) := std_logic_vector(to_signed(568, 16));
+        r(105) := std_logic_vector(to_signed(472, 16));
+        r(106) := std_logic_vector(to_signed(513, 16));
+        r(107) := std_logic_vector(to_signed(473, 16));
+        r(112) := std_logic_vector(to_signed(1, 16));
+        r(126) := std_logic_vector(to_signed(2048, 16));
+        r(159) := std_logic_vector(to_signed(-827, 16));
+        r(160) := std_logic_vector(to_signed(859, 16));
+        r(161) := std_logic_vector(to_signed(719, 16));
+        r(162) := std_logic_vector(to_signed(-40, 16));
+        r(163) := std_logic_vector(to_signed(-512, 16));
+        r(164) := std_logic_vector(to_signed(429, 16));
+        r(165) := std_logic_vector(to_signed(383, 16));
+        r(166) := std_logic_vector(to_signed(-86, 16));
+        r(167) := std_logic_vector(to_signed(1354, 16));
+        r(168) := std_logic_vector(to_signed(411, 16));
+        r(169) := std_logic_vector(to_signed(287, 16));
+        r(170) := std_logic_vector(to_signed(6168, 16));
+        r(171) := std_logic_vector(to_signed(1028, 16));
+        r(172) := std_logic_vector(to_signed(1583, 16));
+        r(173) := std_logic_vector(to_signed(-48, 16));
+        r(174) := std_logic_vector(to_signed(460, 16));
+        r(175) := std_logic_vector(to_signed(209, 16));
+        r(176) := std_logic_vector(to_signed(512, 16));
+        r(177) := std_logic_vector(to_signed(77, 16));
+        r(178) := std_logic_vector(to_signed(2, 16));
+        r(179) := std_logic_vector(to_signed(-2048, 16));
+        r(180) := std_logic_vector(to_signed(8192, 16));
+        r(181) := std_logic_vector(to_signed(375, 16));
+        r(182) := std_logic_vector(to_signed(24, 16));
+        r(183) := std_logic_vector(to_signed(-16384, 16));
+        r(184) := std_logic_vector(to_signed(4096, 16));
+        r(185) := std_logic_vector(to_signed(696, 16));
+        r(186) := std_logic_vector(to_signed(100, 16));
+        r(187) := std_logic_vector(to_signed(174, 16));
+        r(188) := std_logic_vector(to_signed(20, 16));
+        r(189) := std_logic_vector(to_signed(5734, 16));
+        r(190) := std_logic_vector(to_signed(1229, 16));
+        r(191) := std_logic_vector(to_signed(10683, 16));
+        r(192) := std_logic_vector(to_signed(4777, 16));
+        r(193) := std_logic_vector(to_signed(256, 16));
+        r(194) := std_logic_vector(to_signed(-8192, 16));
+        r(195) := std_logic_vector(to_signed(1630, 16));
+        r(196) := std_logic_vector(to_signed(7864, 16));
+        r(197) := std_logic_vector(to_signed(2302, 16));
         return r;
     end function;
     function f_am(base : integer; m, s : std_logic; ci : unsigned(2 downto 0); osc : std_logic) return unsigned is
@@ -365,6 +417,11 @@ architecture radiant of program_top is
     attribute no_rw_check of c_ring : signal is true;
     signal c_ra : unsigned(7 downto 0) := (others => '0');
     signal c_q : std_logic_vector(15 downto 0) := x"8080";
+    type t_yring is array (0 to 255) of std_logic_vector(9 downto 0);
+    signal y_ring : t_yring := (others => "0001000000");                     -- luma delay for the output filter
+    attribute no_rw_check of y_ring : signal is true;
+    signal y_ra : unsigned(7 downto 0) := (others => '0');
+    signal y_q : std_logic_vector(9 downto 0) := "0001000000";
     signal s_dq, s_dg, s_do : std_logic_vector(3 downto 0) := "1110";
 
     ---------------------------------------------------------------------------
@@ -380,6 +437,7 @@ architecture radiant of program_top is
     signal s_hcnt, s_wmax : unsigned(11 downto 0) := (others => '0');
     signal s_w : unsigned(10 downto 0) := to_unsigned(1920, 11);
     signal s_flag, s_cup, s_gold, s_lab, s_osc : std_logic := '0';
+    signal s_rover, s_gcam : std_logic := '0';
     signal s_fc : unsigned(7 downto 0) := (others => '0');                    -- field counter
     -- K6 Camera: the shade-gain step (G = 0, 1/2, 1, 2; 2 = the v0.5 look) and 128 (1 - G) >> 4 as a dither prefix
     signal s_cgo : std_logic := '0';
@@ -404,7 +462,6 @@ architecture radiant of program_top is
     -- per-field outputs
     signal r_x0, r_cx2, r_lx0 : signed(13 downto 0) := (others => '0');
     type t_s14x4 is array (0 to 3) of signed(13 downto 0);
-    signal r_xf : t_s14x4 := (others => (others => '0'));
     signal r_tr, r_trg : unsigned(11 downto 0) := (others => '0');
     signal r_a0 : unsigned(23 downto 0) := (others => '0');
     signal r_d0 : signed(17 downto 0) := (others => '0');
@@ -417,6 +474,7 @@ architecture radiant of program_top is
     signal r_ars : unsigned(14 downto 0) := (others => '0');
     signal r_klu : unsigned(10 downto 0) := (others => '0');
     signal r_gth : unsigned(7 downto 0) := (others => '0');
+    signal r_lno, r_lro : signed(17 downto 0) := (others => '0');            -- lens / label row offsets (K4 Rise)
 
     ---------------------------------------------------------------------------
     -- line engine
@@ -590,9 +648,10 @@ architecture radiant of program_top is
         lab : std_logic_vector(1 downto 0);
         lb : unsigned(2 downto 0);
         hi : std_logic;
+        ro : std_logic;                                                      -- S7 Over: a ray drawn over the figures
     end record;
     type t_bbv is array (5 to 8) of t_bb;
-    signal p_b : t_bbv := (others => ("00", "00", "000", '0'));
+    signal p_b : t_bbv := (others => ("00", "00", "000", '0', '0'));
     signal p_oa5 : unsigned(7 downto 0) := (others => '0');
     signal p_y14, p_u14, p_v14 : unsigned(9 downto 0) := to_unsigned(512, 10);
     -- conditioning
@@ -600,7 +659,7 @@ architecture radiant of program_top is
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(10 downto 0) := to_unsigned(1024, 11);
     signal s_gsr : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid, delayed 1..8 (s_gsr(7) gates p_u14 / p_v14)
     signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- that gate for the last 8 box inputs
-    signal s_y15, s_y16, s_y17, s_y18, s_y19, s_y20x, s_yf20 : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal s_y18, s_y19, s_y20x, s_yf20 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u20x, s_v20x : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y21 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u21, s_v21 : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -646,6 +705,15 @@ begin
             c_ra <= s_dwp - 6;
         end if;
     end process p_cring;
+    -- p_y14 delayed 3 (read 2 back, one clock later), then the fabric register s_y18 (= v0.5's 4-deep FF copy chain)
+    p_yring : process(clk)
+    begin
+        if rising_edge(clk) then
+            y_q <= y_ring(to_integer(y_ra));
+            y_ring(to_integer(s_dwp)) <= std_logic_vector(p_y14);
+            y_ra <= s_dwp - 1;
+        end if;
+    end process p_yring;
     p_sdly : process(clk)
     begin
         if rising_edge(clk) then
@@ -701,10 +769,12 @@ begin
             end if;
 
             if s_zgo = '1' then
-                s_flag <= not registers_in(6)(0);
+                s_flag <= '1';                                -- the flag lens and the label are always drawn (v0.6)
+                s_lab  <= '1';
+                s_rover <= registers_in(6)(0);
                 s_cup  <= not registers_in(6)(1);
                 s_gold <= registers_in(6)(2);
-                s_lab  <= not registers_in(6)(3);
+                s_gcam <= registers_in(6)(3);
                 s_osc  <= registers_in(6)(4);
                 if s_wmax /= 0 then s_w <= s_wmax(10 downto 0); end if;
                 s_wmax <= (others => '0');
@@ -781,15 +851,16 @@ begin
                         case q_uc.a is
                             when L_T12 => v_l := signed(resize(unsigned(registers_in(7)) & "00", 16));
                             when L_K1  => v_l := signed(resize(unsigned(registers_in(0)), 16));
-                            when L_K2  => v_l := signed(resize(unsigned(registers_in(1)), 16));
-                            when L_K3  => v_l := signed(resize(unsigned(C_KFIX_3), 16));
+                            when L_K2  => v_l := signed(resize(unsigned(C_KFIX_2), 16));
+                            when L_K3  => v_l := signed(resize(unsigned(registers_in(2)), 16));
                             when L_K4  => v_l := signed(resize(unsigned(registers_in(3)), 16));
                             when L_K5  => v_l := signed(resize(unsigned(registers_in(4)), 16));
-                            when L_K6  => v_l := signed(resize(unsigned(registers_in(2)), 16));
+                            when L_K6  => v_l := signed(resize(unsigned(registers_in(1)), 16));
                             when L_W   => v_l := signed(resize(s_w, 16));
                             when L_XS  => v_l := signed(resize(s_xs, 16));
                             when L_YS  => v_l := signed(resize(s_ys, 16));
                             when L_XSQ => v_l := signed(resize(s_xsq, 16));
+                            when L_STR => if s_gold = '1' then v_l := to_signed(1023, 16); else v_l := to_signed(512, 16); end if;
                             when others => v_l := signed(resize(s_xs & '0', 16));
                         end case;
                         m_ld <= std_logic_vector(v_l);
@@ -855,7 +926,6 @@ begin
                         when O_X0  => r_x0 <= m_res(13 downto 0);
                         when O_CX2 => r_cx2 <= m_res(13 downto 0);
                         when O_LX0 => r_lx0 <= m_res(13 downto 0);
-                        when O_XF  => r_xf(v_ci mod 4) <= m_res(13 downto 0);
                         when O_TR  => r_tr <= unsigned(m_res(11 downto 0));
                         when O_TRG => r_trg <= unsigned(m_res(11 downto 0));
                         when O_A0  => r_a0 <= unsigned(m_res(23 downto 0));
@@ -866,7 +936,9 @@ begin
                         when O_ARS => r_ars <= unsigned(m_res(14 downto 0));
                         when O_KLU => r_klu <= unsigned(m_res(10 downto 0));
                         when O_GTH => r_gth <= unsigned(m_res(7 downto 0));
-                        when others => null;
+                        when O_LNO => r_lno <= m_res(17 downto 0);
+                        when O_LRO => r_lro <= m_res(17 downto 0);
+                        when others => null;                                          -- O_RV: pushed into l_rv (p_line)
                     end case;
                 elsif m_wr2 = '1' then
                     rf_we <= '1'; rf_wa <= v_d + 8; rf_wd <= std_logic_vector(resize(m_res(27 downto 16), 16));
@@ -957,6 +1029,8 @@ begin
         variable v_pa, v_pb : signed(10 downto 0);
         variable v_sa : unsigned(15 downto 0);
         variable v_q2 : signed(10 downto 0);
+        variable v_b : signed(21 downto 0);
+        variable v_lb : signed(19 downto 0);
     begin
         if rising_edge(clk) then
             l_kickp <= '0';
@@ -990,25 +1064,35 @@ begin
                 end if;
                 -- figure rows: 4-step rotation at t 10..13 (rv(0) <- rv(1) <- .. <- rv(0) + kv, kv from the RF);
                 -- label / lens rows at t 14 / 15
+                -- field start: the collage's row at vy = 0 plus the K4 Rise offset the machine pushed into l_rv
                 if v_t >= 10 and v_t <= 13 then
                     if l_init = '1' then
                         case v_t is
-                            when 10 => v_r := to_signed(RV0_0, 22);
-                            when 11 => v_r := to_signed(RV0_1, 22);
-                            when 12 => v_r := to_signed(RV0_2, 22);
-                            when others => v_r := to_signed(RV0_3, 22);
+                            when 10 => v_b := to_signed(RV0_0, 22);
+                            when 11 => v_b := to_signed(RV0_1, 22);
+                            when 12 => v_b := to_signed(RV0_2, 22);
+                            when others => v_b := to_signed(RV0_3, 22);
                         end case;
                     else
-                        v_r := l_rv(0) + resize(signed(rf_qq), 22);
+                        v_b := resize(signed(rf_qq), 22);
                     end if;
+                    v_r := l_rv(0) + v_b;
                     l_rv(0) <= l_rv(1); l_rv(1) <= l_rv(2); l_rv(2) <= l_rv(3); l_rv(3) <= v_r;
                 end if;
-                if l_init = '0' and v_t = 14 then l_lr <= l_lr + resize(signed(rf_qq), 20); end if;
+                -- label / lens rows: per-line steps; at the field start the K4 Rise offsets (label rides the hands,
+                -- glasses the bust)
+                if v_t = 14 then
+                    if l_init = '1' then v_lb := resize(r_lro, 20); else v_lb := resize(signed(rf_qq), 20); end if;
+                    l_lr <= l_lr + v_lb;
+                end if;
                 if v_t = 14 then
                     if l_rv(0) >= 0 and l_rv(0) < 2 ** 20 then l_hin <= '1'; else l_hin <= '0'; end if;
                 end if;
                 if v_t = 20 then l_hdy <= signed(resize(l_vy, 20)) - 152858; end if;     -- halo centre 597.1 v
-                if l_init = '0' and v_t = 15 then l_ln <= l_ln + resize(signed(rf_qq), 20); end if;
+                if v_t = 15 then
+                    if l_init = '1' then v_lb := resize(r_lno, 20); else v_lb := resize(signed(rf_qq), 20); end if;
+                    l_ln <= l_ln + v_lb;
+                end if;
                 -- RF reads: normal t 0..3 ray steps, 4..6 ellipse steps (data 3 clocks later);
                 -- field start t 0..7 ray crossings (lo, hi), 8..13 ellipse offsets (lo, hi)
                 if l_init = '1' then
@@ -1058,6 +1142,12 @@ begin
                 end if;
             end if;
 
+            -- K4 Rise: in vblank the register machine pushes the four figure row offsets into the row chain;
+            -- the field-start run adds them to the collage's rows
+            if m_wr = '1' and q_uc.o = O_RV then
+                l_rv(0) <= l_rv(1); l_rv(1) <= l_rv(2); l_rv(2) <= l_rv(3); l_rv(3) <= m_res(21 downto 0);
+            end if;
+
             -- slot tables (slot s = 0 woman, 1 centre (hands or bust), 2 soldier).  Stage A counts
             -- (from t 5) slot s and word j = 0 (w3 of row r), 1 w0 r, 2 w0 r+1, 3 w1 r, 4 w1 r+1, 5 w2 r,
             -- 6 w2 r+1; stage B picks the slot's figure and row; stage C addresses the ROM; the tag
@@ -1082,6 +1172,7 @@ begin
             end case;
             v_r := l_rv(to_integer(v_tg.f));
             v_row := unsigned(v_r(19 downto 14));
+            if l_tv = '1' and l_tj = 0 then l_ra <= to_unsigned(RF_XF, 8) + resize(v_tg.f, 8); end if;   -- the figure's x (RF)
             if l_tj = 0 then
                 t_ra <= v_tg.f & v_row & "11";
             elsif l_tj(0) = '1' then
@@ -1102,7 +1193,7 @@ begin
                     if v_r >= 0 and v_r < 2 ** 20 then l_val(to_integer(l_tgE.s)) <= '1'; else l_val(to_integer(l_tgE.s)) <= '0'; end if;
                     if l_tgE.s = 1 then l_cfig <= l_tgE.f(0); end if;
                     l_wfr <= unsigned(v_r(13 downto 10));
-                    l_xfq <= r_xf(to_integer(l_tgE.f));
+                    l_xfq <= signed(rf_qq(13 downto 0));                -- XF of this slot's figure, read at stage C
                 elsif l_tgE.j(0) = '1' then
                     l_w0 <= t_qq;
                 else
@@ -1202,9 +1293,10 @@ begin
                 if v_t = 73 then l_hro <= unsigned(ln_q(14 downto 8)); l_hri <= unsigned(ln_q(6 downto 0)); end if;
                 if v_t = 11 then
                     -- crossings are final (t 3..6 rotation); midpoints between neighbours, left to right L TL TR R
-                    l_m1 <= resize(shift_right(l_xr(2)(21 downto 8) + l_xr(0)(21 downto 8), 1), 14);
-                    l_m2 <= resize(shift_right(l_xr(0)(21 downto 8) + l_xr(1)(21 downto 8), 1), 14);
-                    l_m3 <= resize(shift_right(l_xr(1)(21 downto 8) + l_xr(3)(21 downto 8), 1), 14);
+                    -- (15-bit sums: a wide fan puts the crossings at the top lines far apart)
+                    l_m1 <= resize(shift_right(resize(l_xr(2)(21 downto 8), 15) + resize(l_xr(0)(21 downto 8), 15), 1), 14);
+                    l_m2 <= resize(shift_right(resize(l_xr(0)(21 downto 8), 15) + resize(l_xr(1)(21 downto 8), 15), 1), 14);
+                    l_m3 <= resize(shift_right(resize(l_xr(1)(21 downto 8), 15) + resize(l_xr(3)(21 downto 8), 15), 1), 14);
                 end if;
                 case v_t is
                     when 72 =>
@@ -1271,6 +1363,7 @@ begin
         variable v_gr : signed(11 downto 0);
         variable v_lvl : unsigned(3 downto 0);
         variable v_c4  : signed(11 downto 0);
+        variable v_gd  : signed(6 downto 0);
         variable v_y, v_uu, v_vv : unsigned(9 downto 0);
         variable v_sy : unsigned(11 downto 0);
         variable v_sc : unsigned(11 downto 0);
@@ -1283,8 +1376,9 @@ begin
         variable v_rc : unsigned(1 downto 0);
         variable v_h8 : unsigned(7 downto 0);
         variable v_z0, v_z1, v_z2 : unsigned(3 downto 0);
-        variable v_hi : std_logic;
+        variable v_hi, v_ro : std_logic;
         variable v_n13 : signed(12 downto 0);
+        variable v_gm : unsigned(4 downto 0);
     begin
         if rising_edge(clk) then
             -- S1: beam, squared-distance DDA, label column, noise
@@ -1477,6 +1571,23 @@ begin
             else
                 p_mb4 <= to_unsigned(12, 5) + resize(p_nm3(7 downto 6), 5) + resize(p_lfsr(5 downto 5), 5);
             end if;
+            -- S10 Ground = Camera: the ground's luma multiplier (x/16) from the camera luma (Osc: the blob wave)
+            if s_gcam = '1' then
+                if s_osc = '0' then v_gm := unsigned(data_in.y(9 downto 5)); else v_gm := p_pa3(5 downto 1); end if;
+                -- K6: 16 + (gm - 16) x G, G = {0, 1/2, 1, 2} (a shift-select on the camera / Osc ground)
+                v_gd := signed(resize(v_gm, 7)) - 16;
+                case to_integer(c_cst) is
+                    when 0      => v_gd := (others => '0');
+                    when 1      => v_gd := shift_right(v_gd, 1);
+                    when 2      => null;
+                    when others => v_gd := shift_left(v_gd, 1);
+                end case;
+                v_gd := v_gd + 16;
+                if v_gd < 3 then v_gm := to_unsigned(3, 5);
+                elsif v_gd > 31 then v_gm := to_unsigned(31, 5);
+                else v_gm := unsigned(v_gd(4 downto 0)); end if;
+                p_ma4 <= v_gm; p_mb4 <= v_gm;
+            end if;
             -- K6: the shade source l (Video = the camera luma straight from the input, one pixel earlier than v0.5;
             -- Osc = the blob field)
             -- (camera: (a - 16) 17/16 = a + a / 16 - 17, a = Y >> 2; Osc: pa 2 + pb + 16; S6 clamps the sum)
@@ -1498,7 +1609,7 @@ begin
             -- overlay ROM address: 0..127 ground (level & luma x/16), 128 + coffee level, 144 + wall shade,
             -- 160 + k flat colours (4 white, 5 pink, 6 line, 7 halo, 8 ring, 9 gold, 10 rim, 13 frame, 14 eye,
             -- 16..20 flag green / yellow / black / white / red); hi = drawn over the centre figure (cup, glasses)
-            v_hi := '0';
+            v_hi := '0'; v_ro := '0';
             if p_bowl4 = "11" then v_oa := "1000" & p_ci4; v_hi := '1';
             elsif p_bowl4 = "01" then v_oa := to_unsigned(170, 8); v_hi := '1';
             elsif p_bowl4 = "10" then v_oa := "1001" & p_wsh4; v_hi := '1';
@@ -1507,16 +1618,16 @@ begin
             elsif p_gl4(3) = '1' then v_oa := "10110" & p_gl4(2 downto 0); v_hi := '1';
             elsif p_halo4 = "10" then v_oa := to_unsigned(168, 8);
             elsif p_halo4 = "01" then if s_gold = '1' then v_oa := to_unsigned(169, 8); else v_oa := to_unsigned(167, 8); end if;
-            elsif p_ray4 = "11" then v_oa := to_unsigned(166, 8);
-            elsif p_ray4 = "10" then v_oa := to_unsigned(165, 8);
-            elsif p_ray4 = "01" then v_oa := to_unsigned(164, 8);
+            elsif p_ray4 = "11" then v_oa := to_unsigned(166, 8); v_ro := s_rover;
+            elsif p_ray4 = "10" then v_oa := to_unsigned(165, 8); v_ro := s_rover;
+            elsif p_ray4 = "01" then v_oa := to_unsigned(164, 8); v_ro := s_rover;
             else
                 if (v_ta = '1' and v_tb = '1') or v_lt = '1' then v_oa := "011" & p_ma4;
                 elsif v_ta = '1' or v_tb = '1' then v_oa := "010" & p_mb4;
                 elsif p_ha4 > 160 then v_oa := "001" & p_ma4;
                 else v_oa := "000" & p_ma4; end if;
             end if;
-            p_b(5) <= (win => p_win4, lab => p_lab4, lb => p_lb4, hi => v_hi);
+            p_b(5) <= (win => p_win4, lab => p_lab4, lb => p_lb4, hi => v_hi, ro => v_ro);
             for k in 6 to 8 loop p_b(k) <= p_b(k - 1); end loop;
             p_oa5 <= v_oa;
             p_zone5 <= p_zone4; p_ldu5 <= p_ldu4;
@@ -1543,9 +1654,9 @@ begin
             -- S7: palette ROM.  S8: fabric register (py_qq, pc_qq).  S9: compose.  S10: pad (latency 16)
             v_y := unsigned(ov_hh(15 downto 6)); v_uu := unsigned(ov_hh(5 downto 0)) & unsigned(ov_ll(15 downto 12));
             v_vv := unsigned(ov_ll(11 downto 2));
-            if p_b(8).win = "01" or (p_b(8).win = "10" and p_b(8).hi = '0' and p_b(8).lab(1) = '0') then
+            if p_b(8).ro = '0' and (p_b(8).win = "01" or (p_b(8).win = "10" and p_b(8).hi = '0' and p_b(8).lab(1) = '0')) then
                 v_y := unsigned(py_qq(9 downto 0)); v_uu := unsigned(pc_qq(15 downto 8)) & "00"; v_vv := unsigned(pc_qq(7 downto 0)) & "00";
-            elsif p_b(8).lab(1) = '1' and p_b(8).hi = '0' then
+            elsif p_b(8).lab(1) = '1' and p_b(8).hi = '0' and p_b(8).ro = '0' then
                 if p_b(8).lab(0) = '1' and py_qq(10 + to_integer(p_b(8).lb)) = '1' then
                     v_y := to_unsigned(K_CREAM(0), 10); v_uu := to_unsigned(K_CREAM(1), 10); v_vv := to_unsigned(K_CREAM(2), 10);
                 else
@@ -1578,7 +1689,7 @@ begin
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 12) + s_boxud; s_u20x <= v_sc(11 downto 2);
             v_sc := resize(s_boxv, 12) + s_boxvd; s_v20x <= v_sc(11 downto 2);
-            s_y15 <= p_y14; s_y16 <= s_y15; s_y17 <= s_y16; s_y18 <= s_y17; s_y19 <= s_y18;
+            s_y18 <= unsigned(y_q); s_y19 <= s_y18;
             s_y20x <= s_y19;
             v_sy := resize(s_y18, 12) + shift_left(resize(s_y19, 12), 1) + resize(s_y20x, 12);
             s_yf20 <= v_sy(11 downto 2);

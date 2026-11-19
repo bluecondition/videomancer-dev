@@ -1,4 +1,4 @@
-# Warp - Heirloom #48, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230909_23_29_18.
+# Warp - Heirloom #48, v0.6.0 phase-2 diag (2026-11-09), from v0.5.1 (rebuilt from the photo WIN_20230909_23_29_18).
 # Orange / lavender / green stripes on a plane receding to a horizon seam, warped by a fitted phase map
 # (top-left checker, moire lenses, a band of hooks and loops), a green haze and a black/green margin.
 # See warp.vhd and SUMMARY.md.
@@ -7,7 +7,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.warp"
 program_name = "Warp"
-program_version = "0.5.3"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -21,8 +21,8 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Stripes"
 control_mode = "linear"
-display_min_value = 50
-display_max_value = 200
+display_min_value = 0
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
@@ -31,8 +31,8 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Horizon"
 control_mode = "linear"
-display_min_value = -256
-display_max_value = 256
+display_min_value = -512
+display_max_value = 512
 initial_value = 512
 display_float_digits = 0
 suffix_label = ""
@@ -55,13 +55,13 @@ initial_value_label = "Warp"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Haze"
+name_label = "Vanish"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 200
+display_min_value = -100
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -81,9 +81,9 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Margin"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Form"
+value_labels = ["Plane", "Rings"]
+initial_value_label = "Plane"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -130,3 +130,26 @@ name = "Mirror Ice"
 toggle_switch_9 = 1
 rotary_potentiometer_4 = 2
 rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Zone Plate"
+toggle_switch_8 = 1
+linear_potentiometer_12 = 300
+rotary_potentiometer_1 = 600
+
+[[preset]]
+name = "Spine"
+rotary_potentiometer_5 = 775
+toggle_switch_7 = 0
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Slide"
+rotary_potentiometer_3 = 900
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Low Sky"
+rotary_potentiometer_2 = 140
+rotary_potentiometer_6 = 760
+rotary_potentiometer_4 = 6

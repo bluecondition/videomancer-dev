@@ -1,4 +1,4 @@
-# Tangram - Heirloom #9, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230222_00_06_47.
+# Tangram - Heirloom #9, v0.6.0 phase-2 diag (2026-11-09); v0.5.0 (2026-10-21) rebuilt from the photo WIN_20230222_00_06_47.
 # An additive RGB patch: hot-pink log-chirped stripe fans (red), a stepped green zig-zag plateau and
 # lower sawtooth stripes (green), a bright blue wedge and lower V with dark fringes on navy (blue).
 # See tangram.vhd and SUMMARY.md.
@@ -7,13 +7,13 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.tangram"
 program_name = "Tangram"
-program_version = "0.5.2"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Vision", "Glitch"]
 program_type = "processing"
-description = "Pink stripe fans, a green zig-zag plateau and a blue ray wedge mixed additively; the camera bends the stripes."
+description = "Pink stripe fans, a green zig-zag plateau and a swinging blue ray wedge mixed additively; the camera bends the stripes."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -41,8 +41,8 @@ suffix_label = ""
 parameter_id = "rotary_potentiometer_3"
 name_label = "Zigzag"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 200
+display_min_value = -100
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
@@ -80,8 +80,8 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Tear"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+value_labels = ["Shred", "Photo"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -137,11 +137,22 @@ toggle_switch_10 = 1
 rotary_potentiometer_2 = 760
 
 [[preset]]
-name = "Rotated"
-toggle_switch_9 = 1
-rotary_potentiometer_3 = 900
+name = "Loose Patch"
+rotary_potentiometer_4 = 1023
 
 [[preset]]
-name = "Clean Field"
+name = "Shredded"
 toggle_switch_7 = 0
-toggle_switch_8 = 0
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Searchlight"
+rotary_potentiometer_2 = 230
+rotary_potentiometer_4 = 0
+rotary_potentiometer_1 = 300
+
+[[preset]]
+name = "Inverted Zig"
+rotary_potentiometer_3 = 0
+rotary_potentiometer_5 = 800
+toggle_switch_9 = 1

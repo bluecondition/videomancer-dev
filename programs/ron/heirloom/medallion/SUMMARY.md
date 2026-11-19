@@ -1,5 +1,72 @@
 # Medallion — Heirloom #12: fire-ring diamonds and a plaid medallion
 
+**v0.6.2 (2026-11-19): phase 2 FINAL — Ron prefers the diag in every case, so it is merged into production** (`out/rev_b/ron/heirloom/medallion.vmprog`, repacked from the diag's own v0.6.2 bitstreams, not rebuilt; this exact build not flashed). It is the phase-2 round plus the K6 camera pass; status lines below that say "diag" or "production untouched" are history. The replaced v0.5.3 vmprog is in `out/rev_b/ron/_archive/heirloom_2026-11-18/replaced_production/`.
+
+**v0.6.0 (2026-11-03, phase 2): diag preview built, awaiting Ron's preview** (`Medallion Diag`,
+`out/rev_b/ron/_diag/medallion_diag_v0.6.0.vmprog`, copy in `out/rev_b/ron/heirloom/_diag/`). Production v0.5.1
+(`programs/ron/heirloom/medallion/`) is untouched. Phase-2 working files: `.heirloom_work/rb_medallion/p2/`
+(patch_vhd.py, sweep.py, imodel6.py, sheet6_model.png, check.sh, psim.sh, renders).
+
+## Phase 2 (v0.6.0)
+Ron left no notes for medallion (free hand, 2026-11-03 batch). The map follows the phase-2 brief: the two global
+scales (K1 diamond count = an X zoom of the diamond field, K4 stripe density = a Y zoom of the stripes) become
+element parameters, the ring density gets a wider exponential range, and Etch reaches twice as far. The photo stays
+at the default position, bit-exact.
+
+### Controls: was → now
+| Control | v0.5.1 | v0.6.0 diag | Full sweep at 1080p |
+|---|---|---|---|
+| K1 | **Diamonds**: diamonds across, 1 + 5k² (2.05 at 468) | **Lean** (renamed), bipolar: each diamond's inner and outer half get their own slope. Left = the diamond centres slide out to the screen edges, right = in under the medallion. The fold and the outer peaks stay put; 2.04 diamonds (the photo's) at every setting. Photo at 50 % (512), ±4 deadband | Centres at x 152 / 1866 (0 %) .. 527 / 1466 (photo) .. 916 / 1106 px (100 %): ~375 px (20 % of the width) each way. The halves split up to 9 : 1, so the rings turn into arrowheads (out: bow tie; in: long chevrons fanning to the edges, tight centres hugging the fold) |
+| K2 | **Rings** 0.3 .. 3x, square law (1.0 at 521) | **Rings** 0.25 .. 1 .. 4x, exponential (2^(k/256), photo at 50 %) | Ring spacing ~1045 px .. 261 px (photo) .. ~65 px |
+| K3 | **Reach** | unchanged | |
+| K4 | **Stripes**: density 0.25 .. 3x (1.0 at 534) | **Bands** (renamed), bipolar per-band heights; the photo's 18 measured boundaries at 50 % (512), ±4 deadband. Left = **Cascade** (bands thin at the top, swelling down: ps' = ps − a(u² − 1), a to 0.5); right = **Lens** (the middle bands swell, the outer ones crowd: ps' = ps + b·u(u² − 1), b to 0.9). The warp keeps the phase at ±8 half-cycles (lines ~108 / 998) | Photo bands 40–72 lines. Cascade 0 %: top half ~2x as dense as the bottom (top bands ~35, bottom 94 lines). Lens 100 %: centre band 236 lines (22 % of the height), outer bands 23–28, 25 boundaries |
+| K5 | **Speed** | unchanged | |
+| K6 | **Etch** 0 .. 400 h per full luma, square law (60 at 396) | **Etch** 0 .. 800 h per full luma, square law; default moved to 280 = the same gain as v0.5's 396 | Camera bends the rings by up to ~400 px (was ~200) |
+| S7 Flip, S8 Steps, S9 Swap, S11 Source | | unchanged | |
+| S10 | **Wave** Tri / Saw | **Wave** Tri / Saw; Saw now runs on the Lean DDA (rising ramps of period H2), so Lean stays live in Saw: the teeth alternate long / short | |
+| P12 | **Medallion** | unchanged (size 0 .. 2.1x, photo at 48 %) | |
+
+### Engine changes
+- **Lean DDA.** The triangle is now a Q6 distance-to-peak DDA with a per-half step: inner halves (fold side)
+  step by xs·H2Q/L_in, outer halves by xs·H2Q/L_out (L_in + L_out = 2·H2, H2 fixed at 939 h). The half type flips
+  at each minimum (Tri) or each wrap (Saw); the minimum reflection uses 2·H2Q − max(step) − z, exact at the photo and
+  within one step elsewhere. The vblank sequencer computes m = (K1 − 512)·1502 >> 10, L_in / L_out, both slopes on
+  the serial divider (16 steps each, replacing the old H2 division), the steps, thresholds and the line-start state
+  (which half, direction, z = u·slope on the serial multiplier).
+- **Bands warp** in the line engine, before the stripe gain: three serial multiplies (ps², the Lens coefficient,
+  the warp term), +53 clocks (the engine now ends at clock 193 of SD's 858).
+- **Rings:** a 256 × 9 exp ROM (2^(i/256)), one product with 250, a 4-way shift.
+- **Etch:** gain register 9 → 10 bits, etch term 10 → 11 bits.
+- Removed: the K1 square / count products, the K4 gain products (the stripe gain is the photo's constant 255/256),
+  the old saw DDA. Latency unchanged (24); no pixel-path stage added or removed.
+
+### Presets (re-aimed; hand-written placeholders)
+Photo (the defaults), Open Field (P12 0), Test Card (P12 100 %), Arrowheads (Lean 100 %, P12 29 %), Bow Tie
+(Lean 0 %, P12 37 %), Cascade (Bands 12 %, Rings 63 %), Lens Bands (Bands 100 %, Lean 74 %), Inside Out (Swap On,
+Lean 88 %, P12 41 %).
+
+### Build
+router2 (builder default; `.heirloom_work/diag_build.sh medallion`, 2026-11-03). Post-route Fmax: HD Analog s1 75.79, SD Analog s1 68.78, HD HDMI s1 82.12, SD HDMI s1 78.34, HD Dual s3 82.07 (seeds 1–2 missed), SD Dual s1 77.91 MHz. 6959–6982 / 7680 LC (90.9 %, was 82 %), 15 / 32 EBR (+1: the Rings exp ROM). iceunpack OK × 6. No pin-skew screen; the builder's seeds are kept. vmprog 453,789 bytes.
+
+### Checks
+- GHDL analyse / elaborate / synth front end: clean (`p2/check.sh`).
+- `p2/sweep.py` (RTL widths, bit-level emulation of the new logic):
+  - every K1 value at 1080 / 720 / SD: the 16-step divider equals exact division and every signal fits;
+  - the DDA over whole lines in Tri and Saw;
+  - the Rings exp curve is monotonic, 62 .. 250 .. 998;
+  - Etch reaches 858;
+  - the Bands warp, for every K4 value × 1080 lines, fits the 12 / 13 / 14 / 15-bit line-engine signals;
+  - at the default the Lean DDA equals v0.5's triangle exactly in all three modes, and Bands is the identity.
+- Integer model `p2/imodel6.py` (v0.5's imodel plus the new paths): the default frame equals the v0.5 model (0 px).
+  Control sheet: `p2/sheet6_model.png`.
+- GHDL 720p60 (decimation 1), Osc, defaults, diag against production v0.5.1 rendered side by side: **0 px differ**
+  (the raw 10-bit output is identical). Files: `p2/diag_osc.png`, `p2/prod_osc.png`.
+- GHDL 720p60 with K1 = K4 = 1023 (glided to 631 after two fields), Speed still, black input: **bit-exact with
+  imodel6** over the interior (0 px at the tester's usual 3-px offset). This validates the Lean DDA at unequal slopes
+  and the Lens warp in RTL. File: `p2/diag_ext.png`.
+- Not verified in RTL: Saw on the Lean DDA and the Cascade branch (covered only by the bit-level emulation in
+  sweep.py); SD and 1080 renders; no hardware.
+
 **v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230305_23_51_38, built, NOT flashed.**
 The v0.1 (generic folded stripes and a posterized-video circle) was too abstract. This version is
 measured from the photo. Two diamond systems of stepped fire rings (dark red to yellow) are cut by
@@ -168,19 +235,37 @@ in the middle keys in a CMY/grey plaid.
 - `rtl_*.png`; `cmp_final.png`, `cmp_motion.png`, `cmp_flow.png`.
 - `build.log`, `notes.md`.
 
-## K6 camera pass (2026-11-15)
 
-Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 396 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+## Open questions for Ron
+1. **Lean replaced the diamond count** (1 .. 6 across). Do you want the count back, e.g. as a second mode of Lean or
+   on a switch (S8 Steps is the weakest switch)?
+2. **Bands replaced the stripe density.** Is Cascade (left) strong enough? It is a ~2 : 1 density gradient top to
+   bottom; it could go further, but past ~0.55 the bottom bands fold into one wide floor band. Or would you rather
+   have a symmetric Pinch (middle bands thin, outer bands swell) on the left?
+3. **Arm curvature** ("Bow": the diamonds' arms bowed in to 4-point stars or out to round lens rings, lozenge-style)
+   was designed but not built, since all 12 controls are taken. Worth a control?
+4. Should the camera also bend the **stripe boundaries** (Etch into the band phase), so video shows in the stripes as
+   well as the rings? That changes the default Video picture slightly.
+
+## Hardware watch list
+- **Renamed controls:** K1 Diamonds → Lean, K4 Stripes → Bands (the diag and production labels differ on purpose).
+- **Default positions moved** (same photo): K1 468 → 512, K2 521 → 512, K4 534 → 512, K6 396 → 280.
+- **Saw** (S10) looks a little different from v0.5 (it now runs on the Lean DDA).
+- **Thin timing:** HD Analog closed at 75.79 MHz on seed 1 (+1.5 MHz); HD Dual needed seed 3 (82.07). If HD Analog misbehaves on hardware, re-seed it first.
+- Nothing was cut for fit.
+
+## Next step
+On approval: `./heirloom_diag.sh merge medallion`, then repack the previewed diag bitstreams under the production
+TOML instead of re-routing (copy `build/programs/ron/medallion_diag/rev_b/bitstreams/*.bin` into the production
+build dir, regenerate `program_config.bin` from the production TOML, `vmprog_pack.py --no-sign --hardware rev_b`),
+update SUMMARY / README / PHASE2 and commit only medallion's files and rows.
 
 
 ## K6 top +25 % and default 100 % (2026-11-15)
 
-Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 % (initial 1023, v0.5.3).
-- **Classification: bend.** K6 (Etch) adds camera luma to the diamond field w: the fire rings bend round the
-  picture.
-- **Change.** Etch ×1.25 at every K6 position: the square-law constant 430 -> 537 in the serial-multiplier slot,
-  the gain register c_eq 9 -> 10 bits (0 .. 536), the etch sum 17 -> 18 bits and the etch term 10 -> 11 bits
-  (≤ 1068, was ≤ 854); w (14 bits) has room.
-- **Look check** (bear, 720p60 / 4, K6 1023, glide bypassed in scratch copies): `.heirloom_work/rb_medallion/k6b/k6b_cmp.png`:
-  the same picture, the ring zone pushed a little further out of the bright fur into the flat stripes; no wrap.
-- **Build:** router1; HD Analog s1 92.25, SD Analog s1 92.19, HD HDMI s1 89.48, SD HDMI s1 90.10, HD Dual s1 92.55, SD Dual s1 93.46 MHz; worst HD 89.48 MHz; 6277-6312 / 7680 LC; all seed 1. vmprog: out/rev_b/ron/heirloom/medallion.vmprog.
+Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 % (initial 1023, v0.6.2).
+- **Classification: bend** (Etch adds camera luma to the diamond field w), as in production.
+- **Change.** Etch ×1.25 at every K6 position: the square-law constant 860 -> 1075, the gain register c_eq
+  10 -> 11 bits (0 .. 1072), the etch sum 18 -> 19 bits and the etch term 11 -> 12 bits (≤ 2135); w (14 bits)
+  has room. The same change as production medallion (no render for the diag).
+- **Build:** router1; HD Analog s1 91.37, SD Analog s1 87.02, HD HDMI s1 84.25, SD HDMI s1 89.53, HD Dual s1 88.87, SD Dual s1 86.97 MHz; worst HD 84.25 MHz; 6968-6995 / 7680 LC; all seed 1. vmprog: out/rev_b/ron/_diag/medallion_diag_v0.6.2.vmprog.

@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Vase v0.5.0 -- Heirloom #27, rebuilt from the photo WIN_20230424_23_59_47.
+-- Vase v0.6.0 (phase 2 diag) -- Heirloom #27, rebuilt from the photo WIN_20230424_23_59_47.
 --
 -- The photo: a camera picture of a glossy lathe object (a vase: neck, upper bulb with a white
 -- highlight loop round a dark eye, waist, wide base with three vertical sheens) keyed onto black
@@ -15,33 +15,36 @@
 --
 -- The program: the object luma is a 64 x 64 table in lathe coordinates (u = (x - c) / hw) under a
 -- per-line profile; u -> asin -> + spin -> fold -> sin gives the turning texture.  A per-line
--- engine (one serial multiplier, one serial divider, 8 slots of 28 clocks) computes the next
--- line's edges, u DDA, cycle zone, bar state and colour curves in virtual 1080-line coordinates;
--- a fill engine writes the next line's y-interpolated table row (128 entries) into a ping-pong
--- line RAM.  The colouriser is RGB arithmetic (ramps from a luma ROM, clip per channel) mixed by
--- the soft red key, then RGB -> YUV.
+-- engine (one serial multiplier, one serial divider, 10 slots of 28 clocks) computes the next
+-- line's sway, edges, u DDA, cycle zone, bar state and colour curves in virtual 1080-line
+-- coordinates; a fill engine writes the next line's y-interpolated table row (128 entries) into a
+-- ping-pong line RAM.  The colouriser is RGB arithmetic (ramps from a luma ROM, clip per channel)
+-- mixed by the soft red key, then RGB -> YUV.
 --
 --   K1  Bars     fast bars per colour cycle (photo 20.7)
 --   K2  Bands    colour cycles down the frame (photo 1.94, 556 lines)
 --   K3  Roll     bipolar: the colour cycle and bars roll down / up (still at the centre)
---   K4  Spin     bipolar: the vase turns (sheens slide round the lathe)
---   K5  Key      red-key centre, left .. right of the vase axis
---   K6  Camera   surface strength (K6 camera pass, v0.5.2): the camera (Video) or the stored vase
+--   K4  Spin     bipolar: the vase turns (sheens slide round the lathe; helix and sway with it)
+--   K5  Key      red-key centre, -624 .. +527 virtual px about the vase axis (photo +67): the
+--                no-red channel slides across the vase and off it (red falls in the gaps)
+--   K6  Camera   surface strength (K6 camera pass, v0.6.1): the camera (Video) or the stored vase
 --                (Osc) x 0 .. 2 (x1 at 50 %, the shipped look), max'd with the vase's own sheens and
---                half its luma; 0 % = what the program draws with a black input
+--                half its luma; 0 % = what the program draws with a black input.  The v0.6.0 K6
+--                Gloss is dropped (fixed x1): K6 in Osc spans its dull .. glazed range
 --   S7  Swap     the red key swaps bars and gaps (red falls between the bars, the blocks go olive)
---   S8  Gloss    Photo (x1) / Glaze (x1.75 luma, the old K6 Gloss); the edge comb + overshoot lines
---                (v0.5 S8 Tear) are always on
---   S9  Blocks   the cycle's blocks / off zone (photo On) / bars all the way
+--   S8  Twin     Off / On: a second, mirrored vase (the two at 1/4 and 3/4 of the width)
+--   S9  Wrap     Rings (photo) / Helix: the bars wrap round the vase as a spiral that turns with Spin
 --   S10 Palette  photo / channel rotation (green bars on violet)
 --   S11 Source   Video (camera wrapped round the vase) / Osc (the stored glossy vase)
---   P12 BULGE    profile deviation x0 .. x2.5: straight cone .. photo (40 %) .. hourglass
+--   P12 BULGE    profile deviation x0 .. x2.5: straight cone .. photo (40 %) .. hourglass; above
+--                the photo the axis also sways (a travelling S-bend, 0 .. +-306 px, phase = 4 x spin)
 --
--- Generated avid; output conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma 13/16)
--- before the gate.  Latency 32 clocks in every mode.  u = Cr, v = Cb.
+-- The edge comb and the bar-top lines (v0.5 S8 Tear) and the photo zones (v0.5 S9 Blocks) are
+-- always on.  Generated avid; output conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16,
+-- luma 13/16) before the gate.  Latency 32 clocks in every mode.  u = Cr, v = Cb.
 
--- K6 camera pass 2026-11-15 (v0.5.2): K6 = Camera (new, glided, per-field gains on the camera write
--- side and in the fill engine); K6 Gloss moved to S8 (Photo x1 / Glaze x1.75); S8 Tear fixed On.
+-- K6 camera pass 2026-11-15 (v0.6.1): K6 = Camera (new, glided, per-field gains on the camera write
+-- side and in the fill engine); K6 Gloss dropped (fixed x1); nothing else moved.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -215,11 +218,14 @@ architecture vase of program_top is
 
     signal s_m3, s_m4 : unsigned(8 downto 0) := (others => '0');
     signal s_n3, s_n4 : std_logic := '0';
-    signal f_swp, f_blk, f_pal, f_osc, f_gl : std_logic := '0';
-    constant f_tear : std_logic := '1';   -- v0.5 S8 Tear, fixed On (K6 camera pass)
+    signal f_swp, f_twin, f_hlx, f_pal, f_osc : std_logic := '0';
     signal f_wv  : unsigned(13 downto 0) := to_unsigned(3840, 14);
     signal f_xcv : unsigned(13 downto 0) := to_unsigned(4072, 14);
-    signal f_keyx4 : signed(11 downto 0) := to_signed(272, 12);
+    signal f_keyx4 : signed(12 downto 0) := to_signed(268, 13);
+    signal f_kd  : signed(10 downto 0) := (others => '0');             -- K5 - 614
+    signal f_ks  : signed(11 downto 0) := (others => '0');             -- (K5 - 614) x 1.125
+    signal f_samp : unsigned(10 downto 0) := (others => '0');          -- sway amplitude (Q.2)
+    signal f_x0t, f_x0 : unsigned(14 downto 0) := (others => '0');     -- twin: folded beam start
     signal f_xav : signed(14 downto 0) := to_signed(4344, 15);
     signal f_b   : unsigned(8 downto 0) := to_unsigned(128, 9);
     signal f_cm  : unsigned(5 downto 0) := to_unsigned(19, 6);   -- camera gain /64 on luma/4 (19 = shipped x0.297)
@@ -240,9 +246,9 @@ architecture vase of program_top is
     signal le_ph  : unsigned(4 downto 0) := (others => '0');
     signal le_end : unsigned(3 downto 0) := to_unsigned(7, 4);
     signal lm_a  : signed(21 downto 0) := (others => '0');
-    signal lm_b  : unsigned(15 downto 0) := (others => '0');
+    signal lm_b  : unsigned(17 downto 0) := (others => '0');
     signal lm_h  : signed(22 downto 0) := (others => '0');
-    signal lm_l  : unsigned(15 downto 0) := (others => '0');
+    signal lm_l  : unsigned(17 downto 0) := (others => '0');
     signal ld_d  : unsigned(10 downto 0) := (others => '1');
     signal ld_r  : unsigned(11 downto 0) := (others => '0');
     signal ld_q  : unsigned(17 downto 0) := (others => '0');
@@ -265,6 +271,11 @@ architecture vase of program_top is
     signal n_step : unsigned(18 downto 0) := (others => '0');
     signal n_u0  : signed(29 downto 0) := (others => '0');
     signal n_V, n_top, n_vprev : std_logic := '0';
+    signal n_swp : unsigned(15 downto 0) := (others => '0');           -- sway phase of the line
+    signal n_swj : signed(11 downto 0) := (others => '0');             -- sway + centre jitter, Q.2
+    signal n_ua  : signed(16 downto 0) := (others => '0');             -- u0 operand: centre - beam start
+    signal n_bf, n_bd : unsigned(7 downto 0) := (others => '0');      -- bar phase (+ helix spin), duty
+    signal n_bz  : std_logic_vector(1 downto 0) := (others => '0');    -- zone
     -- committed line values
     signal l_L, l_R : signed(14 downto 0) := (others => '0');
     signal l_step : unsigned(18 downto 0) := (others => '0');
@@ -275,6 +286,8 @@ architecture vase of program_top is
     signal l_D0  : signed(4 downto 0) := (others => '0');
     signal l_M   : unsigned(3 downto 0) := (others => '0');
     signal l_V, l_top, l_par : std_logic := '0';
+    signal l_bf, l_bd : unsigned(7 downto 0) := (others => '0');
+    signal l_bz : std_logic_vector(1 downto 0) := (others => '0');
     signal s_ln  : unsigned(10 downto 0) := (others => '0');
 
     -- fill engine (next line's table row -> line RAM)
@@ -315,14 +328,16 @@ architecture vase of program_top is
     -- camera write side
     signal c_y1  : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal c_av1, c_av2, c_av3 : std_logic := '0';
-    signal c_d   : unsigned(9 downto 0) := (others => '0');
     signal c_p   : unsigned(13 downto 0) := (others => '0');
+    signal c_d   : unsigned(9 downto 0) := (others => '0');
     signal c_wacc : unsigned(24 downto 0) := (others => '0');
 
     ---------------------------------------------------------------------------
     -- pixel path
     ---------------------------------------------------------------------------
     signal b_xv : unsigned(14 downto 0) := (others => '0');
+    signal b_xf : unsigned(14 downto 0) := (others => '0');            -- folded beam (twin mirror)
+    signal b_dn : std_logic := '0';
     signal b_u  : signed(29 downto 0) := (others => '0');
     signal p1_uq : signed(10 downto 0) := (others => '0');
     signal p1_eL, p1_eR, p1_dk : signed(15 downto 0) := (others => '0');
@@ -511,8 +526,8 @@ begin
                 elsif v_x < -7 then s_n4 <= '1'; v_u := unsigned(-v_x) - 8; s_m4 <= v_u(8 downto 0);
                 else s_n4 <= '0'; s_m4 <= (others => '0'); end if;
                 f_swp  <= registers_in(6)(0);
-                f_gl   <= registers_in(6)(1);
-                f_blk  <= registers_in(6)(2);
+                f_twin <= registers_in(6)(1);
+                f_hlx  <= registers_in(6)(2);
                 f_pal  <= registers_in(6)(3);
                 f_osc  <= registers_in(6)(4);
                 -- roll and spin accumulate per field
@@ -561,12 +576,19 @@ begin
             end case;
             v_w := shift_left(resize(f_wv, 19), 5) - resize(f_wv, 19);           -- wv * 31
             f_xcv <= f_wv + resize(v_w(18 downto 9), 14);
+            -- K5 key centre: +67 px at 614 (the photo, exact), slope 1.125: -624 .. +527 virtual px
             v_k := s_g(2)(12 downto 3);
-            v_t := shift_left(resize(v_k, 20), 9) - shift_left(resize(v_k, 20), 5);   -- k5 * 480
-            f_keyx4 <= shift_left(resize(signed(resize(v_t(19 downto 10), 11)) - 220, 12), 2);
+            f_kd <= signed(resize(v_k, 11)) - 614;
+            f_ks <= resize(f_kd, 12) + resize(shift_right(f_kd, 3), 12);
+            f_keyx4 <= shift_left(resize(f_ks, 13) + 67, 2);
             f_xav <= signed(resize(f_xcv, 15)) + resize(f_keyx4, 15);
             v_k := s_g(3)(12 downto 3);
             f_b <= resize(shift_right(resize(v_k, 12) + shift_left(resize(v_k, 12), 2), 4), 9);
+            -- P12 above the photo (410): sway amplitude 2 (Q.2) per step, 0 .. 1226 (306 px)
+            if v_k > 410 then f_samp <= (v_k - 410) & '0'; else f_samp <= (others => '0'); end if;
+            -- twin: the beam folds at the screen centre Xc (= f_wv in Q.2) so that 3/4 W maps to the axis
+            f_x0t <= resize(f_xcv, 15) + resize(f_wv(13 downto 1), 15);
+            if f_twin = '1' then f_x0 <= f_x0t; else f_x0 <= (others => '0'); end if;
             -- K6 Camera (glided): camera gain m = k * 19 / 512 (x0 .. x2 of the shipped 19/64, 0 in Osc),
             -- stored-vase gain n = k / 32 (Q.4: x0 .. x1.94, x1 at 512)
             v_k := s_g(4)(12 downto 3);
@@ -633,14 +655,15 @@ begin
     g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
 
     ---------------------------------------------------------------------------
-    -- Per-line engine.  Line program (slots 0..7) kicked at the source avid rise
+    -- Per-line engine.  Line program (slots 0..9) kicked at the source avid rise
     -- (line 0 at zone clock 1024) computes the NEXT line, committed at the next
-    -- source avid rise.  Frame program (slots 8..10) kicked at zone clock 64.
+    -- source avid rise.  Frame program (slots 10..12) kicked at zone clock 64.
+    -- Slots 1-2 (new in v0.6): the sway, amp x 4h(1 - h) of the phase vy/4 + 4 x spin.
     -- Slots of 28 clocks: ph 0 load, 1..23 step, 26 write, 27 follow-up.
     ---------------------------------------------------------------------------
     p_line : process(clk)
         variable v_s   : signed(22 downto 0);
-        variable v_pr  : signed(38 downto 0);
+        variable v_pr  : signed(40 downto 0);
         variable v_r   : unsigned(11 downto 0);
         variable v_t   : signed(16 downto 0);
         variable v_hw  : signed(14 downto 0);
@@ -668,14 +691,15 @@ begin
                 l_A <= unsigned(r_pcq2(26 downto 22)); l_BO <= signed(r_pcq2(21 downto 15));
                 l_C <= signed(r_pcq2(14 downto 9)); l_D0 <= signed(r_pcq2(8 downto 4)); l_M <= unsigned(r_pcq2(3 downto 0));
                 l_V <= n_V; l_top <= n_top;
+                l_bf <= n_bf; l_bd <= n_bd; l_bz <= n_bz;
                 l_par <= s_ln(0);
                 s_ln <= s_ln + 1;
                 v_kick := '1';
             end if;
             if v_kick = '1' then
-                le_run <= '1'; le_sl <= (others => '0'); le_ph <= (others => '0'); le_end <= to_unsigned(7, 4);
+                le_run <= '1'; le_sl <= (others => '0'); le_ph <= (others => '0'); le_end <= to_unsigned(9, 4);
             elsif s_zone = '1' and s_zc = 64 then
-                le_run <= '1'; le_sl <= to_unsigned(8, 4); le_ph <= (others => '0'); le_end <= to_unsigned(10, 4);
+                le_run <= '1'; le_sl <= to_unsigned(10, 4); le_ph <= (others => '0'); le_end <= to_unsigned(12, 4);
             elsif le_run = '1' then
                 if le_ph = 27 then
                     le_ph <= (others => '0');
@@ -688,12 +712,12 @@ begin
             r_pcq2 <= r_pcq;
 
             if le_run = '1' then
-                -- serial multiplier (ph 1..16) and divider (ph 1..23)
-                if le_ph >= 1 and le_ph <= 16 then
+                -- serial multiplier (ph 1..18, 22 x 18 bits) and divider (ph 1..23)
+                if le_ph >= 1 and le_ph <= 18 then
                     if lm_b(0) = '1' then v_s := lm_h + resize(lm_a, 23); else v_s := lm_h; end if;
                     lm_h <= shift_right(v_s, 1);
-                    lm_l <= v_s(0) & lm_l(15 downto 1);
-                    lm_b <= '0' & lm_b(15 downto 1);
+                    lm_l <= v_s(0) & lm_l(17 downto 1);
+                    lm_b <= '0' & lm_b(17 downto 1);
                 end if;
                 if le_ph >= 1 and le_ph <= 23 then
                     if le_ph = 1 then v_r := ld_r(10 downto 0) & '1'; else v_r := ld_r(10 downto 0) & '0'; end if;
@@ -715,6 +739,7 @@ begin
                             fl_row <= n_ry(21 downto 16); fl_wy <= n_ry(15 downto 12);
                         end if;
                     end if;
+                    if le_ph = 2 then n_swp <= n_vy(17 downto 2) + (f_phi(13 downto 0) & "00"); end if;   -- + 4 x spin
                     if le_ph = 1 then
                         if n_vy(18 downto 12) >= 68 then v_j := to_unsigned(68, 7); else v_j := resize(n_vy(18 downto 12), 7) + 1; end if;
                         r_pca <= '0' & v_j;
@@ -726,16 +751,12 @@ begin
                         else v_lf := '0' & n_lf(15 downto 1); end if;
                         n_lf <= v_lf;
                     end if;
-                    if le_ph = 13 then
-                        if f_tear = '1' then
-                            v_t := signed(resize(n_lf(2 downto 0), 17)) + signed(resize(n_lf(5 downto 3), 17)) - 7;
-                            n_jl <= resize(v_t, 6) + resize(n_jlp, 6); n_jlp <= resize(v_t, 5);
-                            v_t := signed(resize(n_lf(8 downto 6), 17)) + signed(resize(n_lf(11 downto 9), 17)) - 7;
-                            n_jr <= resize(v_t, 6) + resize(n_jrp, 6); n_jrp <= resize(v_t, 5);
-                            n_jc <= signed(resize(n_lf(14 downto 12), 4)) - 3;
-                        else
-                            n_jl <= (others => '0'); n_jr <= (others => '0'); n_jc <= (others => '0');
-                        end if;
+                    if le_ph = 13 then     -- edge comb (always on since v0.6)
+                        v_t := signed(resize(n_lf(2 downto 0), 17)) + signed(resize(n_lf(5 downto 3), 17)) - 7;
+                        n_jl <= resize(v_t, 6) + resize(n_jlp, 6); n_jlp <= resize(v_t, 5);
+                        v_t := signed(resize(n_lf(8 downto 6), 17)) + signed(resize(n_lf(11 downto 9), 17)) - 7;
+                        n_jr <= resize(v_t, 6) + resize(n_jrp, 6); n_jrp <= resize(v_t, 5);
+                        n_jc <= signed(resize(n_lf(14 downto 12), 4)) - 3;
                     end if;
                 end if;
 
@@ -744,19 +765,25 @@ begin
                     lm_h <= (others => '0'); lm_l <= (others => '0');
                     ld_r <= (others => '0'); ld_q <= (others => '0');
                     case to_integer(le_sl) is
-                        when 1 => lm_a <= resize(n_ck1, 22) - resize(n_ck0, 22); lm_b <= resize(n_vy(11 downto 4), 16);
-                        when 2 => lm_a <= resize(n_dk1, 22) - resize(n_dk0, 22); lm_b <= resize(n_vy(11 downto 4), 16);
-                        when 3 => lm_a <= signed(resize(n_vy, 22)); lm_b <= to_unsigned(184, 16);
-                        when 4 => lm_a <= resize(n_dv, 22); lm_b <= resize(f_b, 16);
-                        when 5 => ld_d <= n_hw;
-                        when 6 =>
-                            lm_a <= signed(resize(n_stepv, 22)); lm_b <= resize(n_cvv, 16);
+                        -- sway: p x (32767 - |p|) for the signed phase p (|p| as p xor sign: an odd parabola
+                        -- sine, peak 2^28 at |p| = 2^14), then x the amplitude
+                        when 1 =>
+                            lm_a <= resize(signed(n_swp), 22);
+                            lm_b <= resize(unsigned(std_logic_vector(n_swp(14 downto 0)) xnor (14 downto 0 => n_swp(15))), 18);
+                        when 2 => lm_a <= resize(v_pr(29 downto 14), 22); lm_b <= resize(f_samp, 18);   -- slot 1's parabola, Q.14
+                        when 3 => lm_a <= resize(n_ck1, 22) - resize(n_ck0, 22); lm_b <= resize(n_vy(11 downto 4), 18);
+                        when 4 => lm_a <= resize(n_dk1, 22) - resize(n_dk0, 22); lm_b <= resize(n_vy(11 downto 4), 18);
+                        when 5 => lm_a <= signed(resize(n_vy, 22)); lm_b <= to_unsigned(184, 18);
+                        when 6 => lm_a <= resize(n_dv, 22); lm_b <= resize(f_b, 18);
+                        when 7 => ld_d <= n_hw;
+                        when 8 =>
+                            lm_a <= resize(n_ua, 22); lm_b <= n_stepv;
                             v_q := n_qacc(23 downto 8);
                             r_pca <= '1' & v_q(15 downto 9);
-                        when 7 => lm_a <= signed(resize(f_rb, 22)); lm_b <= n_qacc(23 downto 8) - 2004;
-                        when 8 => lm_a <= signed(resize(f_qb, 22)); lm_b <= resize(t_vsy, 16);
-                        when 9 => lm_a <= signed(resize(s_m3, 22)); lm_b <= resize(s_m3, 16);
-                        when 10 => lm_a <= signed(resize(s_m4, 22)); lm_b <= resize(s_m4, 16);
+                        when 9 => lm_a <= signed(resize(f_rb, 22)); lm_b <= resize(n_qacc(23 downto 8) - 2004, 18);
+                        when 10 => lm_a <= signed(resize(f_qb, 22)); lm_b <= resize(t_vsy, 18);
+                        when 11 => lm_a <= signed(resize(s_m3, 22)); lm_b <= resize(s_m3, 18);
+                        when 12 => lm_a <= signed(resize(s_m4, 22)); lm_b <= resize(s_m4, 18);
                         when others => null;
                     end case;
                 end if;
@@ -764,51 +791,55 @@ begin
                 -- results
                 if le_ph = 26 then
                     case to_integer(le_sl) is
-                        when 1 => n_cvo <= resize(n_ck0, 9) + resize(v_pr(16 downto 8), 9);
-                        when 2 => n_dv <= resize(n_dk0, 11) + resize(v_pr(18 downto 8), 11);
-                        when 3 => n_hwm <= to_unsigned(299, 11) + resize(unsigned(v_pr(26 downto 16)), 11);
-                        when 4 =>
+                        when 2 => n_swj <= v_pr(25 downto 14) + resize(n_jc, 12);
+                        when 3 => n_cvo <= resize(n_ck0, 9) + resize(v_pr(16 downto 8), 9);
+                        when 4 => n_dv <= resize(n_dk0, 11) + resize(v_pr(18 downto 8), 11);
+                        when 5 => n_hwm <= to_unsigned(299, 11) + resize(unsigned(v_pr(26 downto 16)), 11);
+                        when 6 =>
                             v_hw := signed(resize(n_hwm, 15)) + resize(v_pr(20 downto 7), 15);
                             if v_hw < 24 then n_hw <= to_unsigned(24, 11); else n_hw <= unsigned(v_hw(10 downto 0)); end if;
-                        when 5 => n_stepv <= ld_q;
-                        when 6 => n_u0 <= -resize(v_pr(31 downto 2), 30);
-                        when 7 =>
-                            -- zone (r_pcq2(28..27): 1 bars, 2 block) and bar duty (129 + 8 DU) from the curve word
-                            if f_blk = '1' then
-                                if (r_pcq2(28 downto 27) = "01" and unsigned(v_pr(23 downto 16)) < to_unsigned(129, 8) + (unsigned(r_pcq2(31 downto 29)) & "000"))
-                                   or r_pcq2(28 downto 27) = "10" then
-                                    v_v := '1';
-                                else
-                                    v_v := '0';
-                                end if;
+                        when 7 => n_stepv <= ld_q;
+                        when 8 => n_u0 <= -resize(v_pr(31 downto 2), 30);
+                        when 9 =>
+                            -- zone (r_pcq2(28..27): 1 bars, 2 block) and bar duty (129 + 8 DU) from the curve word;
+                            -- the pixel path re-tests the bar per pixel (Helix); the line flag keeps the bar-top lines
+                            if f_hlx = '1' then n_bf <= unsigned(v_pr(23 downto 16)) + (f_phi12(6 downto 0) & '0');
+                            else n_bf <= unsigned(v_pr(23 downto 16)); end if;
+                            n_bz <= r_pcq2(28 downto 27);
+                            n_bd <= to_unsigned(129, 8) + (unsigned(r_pcq2(31 downto 29)) & "000");
+                            if (r_pcq2(28 downto 27) = "01" and unsigned(v_pr(23 downto 16)) < to_unsigned(129, 8) + (unsigned(r_pcq2(31 downto 29)) & "000"))
+                               or r_pcq2(28 downto 27) = "10" then
+                                v_v := '1';
                             else
-                                if unsigned(v_pr(23 downto 16)) < 141 then v_v := '1'; else v_v := '0'; end if;
+                                v_v := '0';
                             end if;
                             v_v := v_v xor f_swp;
                             n_V <= v_v;
-                            n_top <= v_v and not n_vprev and f_tear;
+                            n_top <= v_v and not n_vprev and not f_hlx;
                             n_vprev <= v_v;
-                        when 8 => f_qinc <= unsigned(v_pr(26 downto 8));
-                        when 9 => f_rspd <= unsigned(v_pr(17 downto 8));
-                        when 10 => f_sspd <= unsigned(v_pr(18 downto 9));
+                        when 10 => f_qinc <= unsigned(v_pr(26 downto 8));
+                        when 11 => f_rspd <= unsigned(v_pr(17 downto 8));
+                        when 12 => f_sspd <= unsigned(v_pr(18 downto 9));
                         when others => null;
                     end case;
                 end if;
                 if le_ph = 27 then
                     case to_integer(le_sl) is
-                        when 1 =>
-                            v_cv := signed(resize(f_xcv, 16)) + resize(n_cvo, 16) + resize(n_jc, 16);
+                        when 3 =>
+                            v_cv := signed(resize(f_xcv, 16)) + resize(n_cvo, 16) + resize(n_swj, 16);
                             n_cvv <= unsigned(v_cv(13 downto 0));
-                        when 4 =>
+                        -- u0 operand: the centre's distance from the beam start (0, or the twin's folded start)
+                        when 4 => n_ua <= signed(resize(n_cvv, 17)) - signed(resize(f_x0, 17));
+                        when 6 =>
                             n_L <= signed(resize(n_cvv, 15)) - signed(resize(n_hw, 15)) + resize(n_jl, 15);
                             n_R <= signed(resize(n_cvv, 15)) + signed(resize(n_hw, 15)) + resize(n_jr, 15);
-                        when 5 =>
+                        when 7 =>
                             case to_integer(t_vsx) is
                                 when 4 => n_step <= resize(n_stepv & '0', 19);
                                 when 3 => n_step <= resize(n_stepv, 19) + resize(n_stepv(17 downto 1), 19);
                                 when others => n_step <= resize(n_stepv, 19);
                             end case;
-                        when 7 =>
+                        when 9 =>
                             n_vy <= n_vy + resize(t_vsy, 19);
                             n_qacc <= n_qacc + resize(f_qinc, 24);
                             n_ry <= n_ry + resize(t_ryi, 23);
@@ -961,13 +992,26 @@ begin
         variable v_oR, v_oG, v_oB : unsigned(7 downto 0);
         variable v_kill : unsigned(4 downto 0);
         variable v_cu, v_cv : unsigned(9 downto 0);
+        variable v_bs, v_t8 : unsigned(7 downto 0);
+        variable v_bv  : std_logic;
+        variable v_xi  : signed(4 downto 0);
+        variable v_st  : signed(29 downto 0);
     begin
         if rising_edge(clk) then
-            -- 0: beam (virtual x in Q.2, u DDA)
+            -- 0: beam (virtual x in Q.2, u DDA).  b_xf is the beam the vase sees: = b_xv, or with Twin
+            -- folded at the screen centre (it runs down from f_x0 to the centre, then up again; the u
+            -- DDA follows it), so the left half mirrors the right
             if g_start = '1' then
-                b_xv <= (others => '0'); b_u <= l_u0;
+                b_xv <= (others => '0'); b_xf <= f_x0; b_dn <= f_twin; b_u <= l_u0;
             elsif g_avid = '1' then
-                b_xv <= b_xv + resize(t_vsx & '0', 15); b_u <= b_u + signed(resize(l_step, 30));
+                b_xv <= b_xv + resize(t_vsx & '0', 15);
+                -- down: -inc exactly for the beam, the one's complement -step - 1 for u (a sub-pixel drift)
+                v_xi := signed('0' & t_vsx & '0');
+                v_st := signed(resize(l_step, 30));
+                if b_dn = '1' then v_xi := -v_xi; v_st := not v_st; end if;
+                b_xf <= unsigned(signed(b_xf) + resize(v_xi, 15));
+                b_u <= b_u + v_st;
+                if b_xv >= f_wv then b_dn <= '0'; end if;
             end if;
 
             -- 1: u (Q.10, saturated); edge distances and key distance (virtual Q.2)
@@ -975,9 +1019,9 @@ begin
             if v_u > 1023 then p1_uq <= to_signed(1023, 11);
             elsif v_u < -1023 then p1_uq <= to_signed(-1023, 11);
             else p1_uq <= v_u(10 downto 0); end if;
-            p1_eL <= signed(resize(b_xv, 16)) - resize(l_L, 16);
-            p1_eR <= resize(l_R, 16) - signed(resize(b_xv, 16));
-            p1_dk <= signed(resize(b_xv, 16)) - resize(f_xav, 16);
+            p1_eL <= signed(resize(b_xf, 16)) - resize(l_L, 16);
+            p1_eR <= resize(l_R, 16) - signed(resize(b_xf, 16));
+            p1_dk <= signed(resize(b_xf, 16)) - resize(f_xav, 16);
 
             -- 2: |u| -> asin address; key distance; edge factors; halo
             if p1_uq < 0 then v_a := resize(-p1_uq, 16); p2_neg <= '1'; else v_a := resize(p1_uq, 16); p2_neg <= '0'; end if;
@@ -1018,8 +1062,20 @@ begin
             else
                 p5_th2 <= signed(f_phi12) + signed(resize(p4_th, 12));
             end if;
-            if l_V = '1' then v_k := p4_kb; else v_k := p4_kg; end if;
-            if l_top = '1' then v_k := f_max5(v_k, p4_ko); end if;
+            -- bar or gap per pixel: the line's bar phase (+ 2 x spin with Helix) + 2 x asin(u) with Helix,
+            -- against the zone's duty (rings: the line flag; helix: 32 bars per turn round the vase)
+            v_t8 := p4_th(6 downto 0) & '0';
+            if p4_neg = '1' then v_t8 := not v_t8; end if;          -- one's complement: 1/256 bar
+            if f_hlx = '0' then v_t8 := (others => '0'); end if;
+            v_bs := l_bf + v_t8;
+            if (l_bz = "01" and v_bs < l_bd) or l_bz = "10" then v_bv := '1'; else v_bv := '0'; end if;
+            v_bv := v_bv xor f_swp;
+            -- on a bar-top line (rings only, so the bar is set) the key opens to the outer ramp
+            if v_bv = '1' then
+                if l_top = '1' then v_k := p4_ko; else v_k := p4_kb; end if;
+            else
+                v_k := p4_kg;
+            end if;
             rg_p <= rg_p + 1;
             rg_wa <= rg_p;
             rg_wd <= '0' & p4_on & std_logic_vector(p4_env) & std_logic_vector(v_k) & std_logic_vector(p4_hal);
@@ -1060,12 +1116,8 @@ begin
             -- max(K6 x object, sheens, half) in Osc (the camera is 0 there)
             if p11_cam > p11_w then p12_src <= resize(p11_cam, 9); else p12_src <= resize(p11_w, 9); end if;
 
-            -- 13: S8 Gloss: Photo x1 / Glaze x1.75
-            if f_gl = '1' then
-                p13_sg <= p12_src + shift_right(p12_src, 1) + shift_right(p12_src, 2);
-            else
-                p13_sg <= p12_src;
-            end if;
+            -- 13: (v0.6.0 K6 Gloss, dropped in the K6 camera pass: x1)
+            p13_sg <= p12_src;
 
             -- 14: envelope from the side ring (rg_q = this pixel's stage-5 bundle)
             v_p14 := p13_sg * unsigned(rg_q(13 downto 9));
