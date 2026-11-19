@@ -35,14 +35,14 @@ parameter_id = "rotary_potentiometer_1"
 name_label = "Texture A"
 value_labels = ["Circles", "Squares", "Spokes", "Wavy H", "Wavy V",
                 "Diagonal", "Anti-Diag", "Grid", "Hex", "Checker"]
-initial_value_label = "Circles"
+initial_value_label = "Anti-Diag"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 484
 display_min_value = 0
 display_max_value = 100
 name_label = "Scale A"
@@ -53,7 +53,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 538
+initial_value = 769
 display_min_value = -100
 display_max_value = 100
 name_label = "Phase A"
@@ -66,14 +66,14 @@ parameter_id = "rotary_potentiometer_4"
 name_label = "Texture B"
 value_labels = ["Circles", "Squares", "Spokes", "Wavy H", "Wavy V",
                 "Diagonal", "Anti-Diag", "Grid", "Hex", "Checker"]
-initial_value_label = "Circles"
+initial_value_label = "Spokes"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 440
+initial_value = 322
 display_min_value = 0
 display_max_value = 100
 name_label = "Scale B"
@@ -97,7 +97,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 322
+initial_value = 697
 display_min_value = -100
 display_max_value = 100
 name_label = "Sweep"
@@ -140,3 +140,18 @@ parameter_id = "toggle_switch_11"
 name_label = "Ground"
 value_labels = ["Black", "White"]
 initial_value_label = "Black"
+
+[[preset]]
+name = "Default"
+rotary_potentiometer_1 = 682
+rotary_potentiometer_2 = 484
+rotary_potentiometer_3 = 769
+rotary_potentiometer_4 = 217
+rotary_potentiometer_5 = 322
+rotary_potentiometer_6 = 543
+linear_potentiometer_12 = 697
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0

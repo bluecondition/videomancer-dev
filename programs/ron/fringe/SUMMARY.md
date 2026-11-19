@@ -59,9 +59,9 @@ a switch; Cut covers the useful negations and Ground covers global inversion.
 That, plus the fact that black ink on a black ground draws nothing, is why the
 original invert/order/background trio felt dead.
 
-Presets: none for now (cleared 2026-09-27; new set to be authored on hardware).  **Power-up** (set 2026-09-27 on hardware) is black ground, Glide on, Fringe (XOR)
-blend, Bold weight, two circle fields (Scale A 50 %, Scale B 43 %, Phase A +5 %,
-Phase B +6 %) with Sweep at −37 %.
+Presets: 1, "Default" = the power-up look (both HW-captured 2026-11-18, v1.1.0):
+Texture A Anti-Diag, Scale A 484, Phase A 769, Texture B Spokes, Scale B 322,
+Phase B 543, Sweep 697; Glide on, Fringe (XOR) blend, Bold, black ground.
 
 ## One phase, one comparison
 
