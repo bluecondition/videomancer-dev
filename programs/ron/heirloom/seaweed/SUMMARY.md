@@ -302,3 +302,10 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
   (+6 for the smoothed store). The v0.1.2 vmprog is kept at `.heirloom_work/rb_seaweed/seaweed_v0.1.2.vmprog`.
 - **Hardware watch.** If thin lines persist with the camera unplugged or on Osc, they are not this mechanism.
   Next suspect: the HD HDMI hsync placement lottery (re-seed, memory `hdmi_tx_placement_skew`).
+
+## v0.1.4: HW-captured defaults (2026-11-19)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Bands 776, K2 Wave 392, K3 Speed 777, K4 Blobs 591, K5 Cores 779, K6 Bend 988, S7 Mirror On, S8 Pools Glow,
+P12 Sway 680 (S9-S11 unchanged, off). The vmprog was repacked from the v0.1.3 bitstreams (only the settings block
+differs, 241 bytes), so timing, seeds and LC are as in v0.1.3. Presets are still the hand-written placeholders.

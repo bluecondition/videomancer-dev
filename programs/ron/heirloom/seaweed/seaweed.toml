@@ -7,7 +7,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.seaweed"
 program_name = "Seaweed"
-program_version = "0.1.3"
+program_version = "0.1.4"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -23,7 +23,7 @@ name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 776
 display_float_digits = 0
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Wave"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 392
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 768
+initial_value = 777
 display_float_digits = 0
 suffix_label = ""
 
@@ -53,7 +53,7 @@ name_label = "Blobs"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 591
 display_float_digits = 0
 suffix_label = "%"
 
@@ -63,7 +63,7 @@ name_label = "Cores"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 779
 display_float_digits = 0
 suffix_label = "%"
 
@@ -73,7 +73,7 @@ name_label = "Bend"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 988
 display_float_digits = 0
 suffix_label = "%"
 
@@ -81,13 +81,13 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Mirror"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Pools"
 value_labels = ["Ink", "Glow"]
-initial_value_label = "Ink"
+initial_value_label = "Glow"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -113,7 +113,7 @@ name_label = "Sway"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 458
+initial_value = 680
 display_float_digits = 0
 suffix_label = "%"
 
