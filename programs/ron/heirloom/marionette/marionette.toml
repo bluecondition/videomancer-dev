@@ -6,7 +6,7 @@
 processing_delay_clks = 16
 program_id = "com.czartroniks.marionette"
 program_name = "Marionette"
-program_version = "0.1.2"
+program_version = "0.1.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -22,7 +22,7 @@ name_label = "Figures"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 578
 display_float_digits = 0
 suffix_label = "%"
 
@@ -32,7 +32,7 @@ name_label = "Waist"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 326
 display_float_digits = 0
 suffix_label = "%"
 
@@ -42,7 +42,7 @@ name_label = "Heads"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 598
 display_float_digits = 0
 suffix_label = "%"
 
@@ -52,7 +52,7 @@ name_label = "Roll"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 772
+initial_value = 780
 display_float_digits = 0
 suffix_label = ""
 
@@ -62,7 +62,7 @@ name_label = "Glow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 518
 display_float_digits = 0
 suffix_label = "%"
 
@@ -72,7 +72,7 @@ name_label = "Etch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 538
 display_float_digits = 0
 suffix_label = "%"
 
@@ -86,7 +86,7 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_8"
 name_label = "Tear"
 value_labels = ["Calm", "Torn"]
-initial_value_label = "Calm"
+initial_value_label = "Torn"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -112,7 +112,7 @@ name_label = "Curtain"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 688
+initial_value = 749
 display_float_digits = 0
 suffix_label = "%"
 

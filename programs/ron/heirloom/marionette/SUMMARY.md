@@ -166,3 +166,10 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
   wrap.
 - **Build:** router1, all six on seed 1. HD Analog 81.54, HD HDMI 84.03, HD Dual 83.69 MHz (worst HD 81.54);
   7,151-7,183 LC, 21 EBR.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Figures 578, K2 Waist 326, K3 Heads 598, K4 Roll 780, K5 Glow 518, K6 Etch 538, S8 Tear On, P12 Curtain 749
+(S7, S9-S11 unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs,
+216 bytes), so timing, seeds and LC are as in v0.1.2. Presets are unchanged.
