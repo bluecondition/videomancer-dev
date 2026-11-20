@@ -229,3 +229,10 @@ Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top 
 - Classification: **MIXED.** K6 Etch bends the haze and ghost lookups (the drawing) and glows the camera luma above 140 into the ghost layer in green (the camera image shown). The +25 % goes to the bend only.
 - Change: The bend gain constants in the per-field multiply are x1.25 (Video 154 -> 192, Osc 384 -> 480; c_eb max 76 -> 95 / 191 -> 239, still 8 bits). The glow is the bend beyond the 140-level threshold, which scales with the gain (so it stays at luma 140); its factor 0.92 -> 0.734 (= 0.92 / 1.25) keeps the glow as it was. Full Etch at white: bend 283 -> 354 px.
 - Build: v0.1.2 built 2026-11-15 through the queue, router1, all six configs seed 1. Worst HD 81.68 MHz (HD Analog 82.34, HD HDMI 84.88, HD Dual 81.68); 7196-7228 LC. Output `out/rev_b/ron/heirloom/specter.vmprog`. NOT flashed.
+
+## v0.1.3: HW-captured defaults (2026-11-19)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Ghost 426, K2 Comb 675, K3 Haze 525, K4 Drift 819, K5 Drip 1023, P12 Tide 630 (K6 Etch and S7-S11 unchanged).
+K5 is continuous (glided, no zones), so 1023 loads as dialled. The vmprog was repacked from the v0.1.2 bitstreams
+(only the settings block differs, 194 bytes), so timing, seeds and LC are as in v0.1.2. Presets are unchanged.
