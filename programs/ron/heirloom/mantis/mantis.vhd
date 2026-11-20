@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- 2026-11-19 v0.2.0 (Ron's preview notes): K1 steps through 8 pillar designs (+ a +-1 octave spacing), K3 Bands
+--   range x1.5 both ways, K5 Grain top x2, K6 Etch x1.5
 --
 -- Mantis v0.1.1 -- Heirloom from the video clips (phase 3b), made from the still WIN_20230906_22_43_27 @ 2.5 s.
 --
@@ -22,12 +24,13 @@
 --   X = |x - 1075| (Twin: ||x - 960| - 480|) + etch * luma (the camera pushes the shapes sideways), Y = |y - 518|;
 --   the wings are drawn in X / kw (P12)
 --
---   K1  Pillars  pillar spacing: x0.25 (dense) .. the clip (512, 490 px) .. x4 (one pair)
+--   K1  Pillars  8 pillar designs (posts, columns, twins, pairs, the clip's pairs at 512, triples, hollow pairs,
+--                fluted columns), stepped with hysteresis; spacing x0.5 (dense) .. 490 px (512) .. x2
 --   K2  Arms     the arms' height: dropped onto the centre row (0) .. the clip (512) .. raised to the edges (1023)
---   K3  Bands    the vertical oscillator: one colour segment per frame (0) .. the clip (2.9) .. 8.7 (1023)
+--   K3  Bands    the vertical oscillator: 0.57 colour segment per frame (0) .. the clip (2.9) .. 14.7 (1023)
 --   K4  Flow     bipolar colour flow, +-8 deadband; 687 = the clip (one cycle per 8.93 s, bands sliding down)
---   K5  Grain    wood-grain contour depth: none (0) .. the clip (512) .. x3.9 (1023)
---   K6  Etch     how far the camera (or the Osc lattice, x16) pushes the shapes sideways: 0 .. 111 px
+--   K5  Grain    wood-grain contour depth: none (0) .. the clip (512) .. x7.9 (1023)
+--   K6  Etch     how far the camera (or the Osc lattice, x16) pushes the shapes sideways: 0 .. 167 px
 --   S7  Twin     one mantis / two side by side
 --   S8  Hue      R G B / G B R: the keyers rotated (green -> blue, magenta -> yellow ...)
 --   S9  Key      Soft (the clip) / Hard: the keyers' gain x4, posterised neon edges
@@ -181,7 +184,7 @@ architecture mantis of program_top is
     signal r_row_q : std_logic_vector(31 downto 0) := (others => '0');
     signal r_col_a : unsigned(6 downto 0) := (others => '0');
     signal r_col_q : std_logic_vector(31 downto 0) := (others => '0');
-    signal r_pil_a : unsigned(8 downto 0) := (others => '0');
+    signal r_pil_a : unsigned(10 downto 0) := (others => '0');
     signal r_pil_q : std_logic_vector(15 downto 0) := (others => '0');
     signal r_sin_a : unsigned(7 downto 0) := (others => '0');
     signal r_sin_q : std_logic_vector(7 downto 0) := (others => '0');
@@ -239,8 +242,9 @@ architecture mantis of program_top is
     signal c_u0   : unsigned(23 downto 0) := (others => '0');
     signal c_tau  : unsigned(23 downto 0) := to_unsigned(4696869, 24);        -- the colour flow phase (power-up: the still, 2.5 s into the cycle)
     signal c_tst  : unsigned(19 downto 0) := (others => '0');
-    signal c_eg   : unsigned(6 downto 0) := (others => '0');                  -- etch px per luma step, Q8
-    signal c_ga   : unsigned(4 downto 0) := to_unsigned(8, 5);                -- grain depth, Q3
+    signal c_eg   : unsigned(7 downto 0) := (others => '0');                  -- etch px per luma step, Q8
+    signal c_ga   : unsigned(5 downto 0) := to_unsigned(8, 6);                -- grain depth, Q3
+    signal c_pd   : unsigned(2 downto 0) := to_unsigned(4, 3);                -- K1 pillar design (4 = the clip)
     signal c_kt0, c_kb0 : signed(10 downto 0) := (others => '0');             -- arm edges at the side (207 / 119 + offset)
     signal c_xb0  : unsigned(11 downto 0) := (others => '0');                 -- beam start (h)
     signal c_w1p : unsigned(15 downto 0) := (others => '0');
@@ -329,7 +333,7 @@ architecture mantis of program_top is
     -- pixel path (pK_ = stage K)
     signal p2_xa, p2_xb, p2_xe : unsigned(10 downto 0) := (others => '0');   -- Twin fold, |x - 1075|, edge distance
     signal p2_t1 : unsigned(14 downto 0) := (others => '0');
-    signal p2_et : unsigned(14 downto 0) := (others => '0');
+    signal p2_et : unsigned(15 downto 0) := (others => '0');
     signal p3_x, p3_xe : unsigned(10 downto 0) := (others => '0');
     signal p3_wob : unsigned(4 downto 0) := (others => '0');
     signal p4_x, p4_xe : unsigned(10 downto 0) := (others => '0');
@@ -431,6 +435,8 @@ begin
         variable v_k  : signed(15 downto 0);
         variable v_u  : unsigned(15 downto 0);
         variable v_t  : unsigned(23 downto 0);
+        variable v_m3 : signed(17 downto 0);
+        variable v_kb : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -563,7 +569,7 @@ begin
                     when 4 => z_fa <= resize(c_vk, 18); z_fb <= resize(s_ys, 18);         -- per line
                     when 5 => z_fa <= resize(c_vk, 18); z_fb <= to_unsigned(150, 18);     -- u at line 0
                     when 6 => z_fa <= resize(s_vm, 18); z_fb <= resize(s_vm, 18);         -- flow^2
-                    when others => z_fa <= resize(s_g6(12 downto 3), 18); z_fb <= to_unsigned(121, 18);  -- etch (97 x 1.25: K6 top +25 %)
+                    when others => z_fa <= resize(s_g6(12 downto 3), 18); z_fb <= to_unsigned(182, 18);  -- etch (97 x 1.875: K6 +25 % then x1.5)
                 end case;
             end if;
             if z_ld = '1' then
@@ -598,21 +604,29 @@ begin
                             when -1     => c_ikw <= resize(shift_right(r_ex_q, 8), 10);
                             when others => c_ikw <= resize(shift_right(r_ex_q, 9), 10);
                         end case;
-                        v_e := 512 - signed(resize(s_g1(12 downto 3), 12));          -- Pillars: -(k1 - 512), max 511
-                        if v_e > 511 then v_e := to_signed(511, 12); end if;
+                        v_e := 512 - signed(resize(s_g1(12 downto 3), 12));          -- Pillars: -(k1 - 512) / 2: +-1 octave
+                        v_e := shift_right(v_e, 1);
                         r_ex_a <= unsigned(v_e(7 downto 0)); z_h1 <= v_e(11 downto 8);
+                    when 23 =>                       -- K1 design: zones of 128 centred on 128 d, +-4 hysteresis
+                        v_kb := shift_left(resize(c_pd, 11), 7);
+                        if c_pd /= 7 and resize(s_g1(12 downto 3), 11) >= v_kb + 68 then
+                            c_pd <= c_pd + 1;
+                        elsif c_pd /= 0 and resize(s_g1(12 downto 3), 11) + 68 < v_kb then
+                            c_pd <= c_pd - 1;
+                        end if;
                     when 24 =>
                         z_r1 <= r_ex_q;
-                        v_u := resize(s_g3(12 downto 3), 16);                        -- Bands: (25 k3 - 12800) / 32
+                        v_u := resize(s_g3(12 downto 3), 16);                        -- Bands: 3 (25 k3 - 12800) / 64 (+-600)
                         v_u := shift_left(v_u, 4) + shift_left(v_u, 3) + v_u;
-                        v_k := shift_right(signed(v_u) - 12800, 5);
-                        v_e := v_k(11 downto 0);
+                        v_m3 := resize(signed(v_u), 18) - 12800;
+                        v_m3 := shift_right(shift_left(v_m3, 1) + v_m3, 6);
+                        v_e := v_m3(11 downto 0);
                         r_ex_a <= unsigned(v_e(7 downto 0)); z_h3 <= v_e(11 downto 8);
                     when 26 =>
                         z_r3 <= r_ex_q;
-                        -- grain depth (Q3): k5 / 64 below the centre, 1 + 3 (k5 - 512) / 512 above
-                        if s_g5(12) = '0' then c_ga <= resize(s_g5(12 downto 9), 5);
-                        else c_ga <= to_unsigned(8, 5) + resize(shift_right(resize(s_g5(11 downto 3), 11) + shift_left(resize(s_g5(11 downto 3), 11), 1), 6), 5); end if;
+                        -- grain depth (Q3): k5 / 64 below the centre, 1 + 7 (k5 - 512) / 512 above (top x2: 63)
+                        if s_g5(12) = '0' then c_ga <= resize(s_g5(12 downto 9), 6);
+                        else c_ga <= to_unsigned(8, 6) + resize(shift_right(shift_left(resize(s_g5(11 downto 3), 12), 3) - resize(s_g5(11 downto 3), 12), 6), 6); end if;
                         -- arm edges: 207 / 119 + (k2 - 512) 25 / 64 px
                         v_u := resize(s_g2(12 downto 3), 16);
                         v_u := shift_left(v_u, 4) + shift_left(v_u, 3) + v_u;
@@ -632,19 +646,21 @@ begin
                     when 100 =>
                         v_t := f_acc(23 downto 0);
                         if z_dxn = '1' then c_q0 <= (not v_t) + 1; else c_q0 <= v_t; end if;
-                    when 124 =>                      -- vk = 45159 r3 >> (15 - sh)
+                    when 124 =>                      -- vk = 45159 r3 >> (15 - sh), sh -3 .. 2
                         case to_integer(z_h3) is
+                            when 2      => c_vk <= f_acc(30 downto 13);
                             when 1      => c_vk <= f_acc(31 downto 14);
                             when 0      => c_vk <= f_acc(32 downto 15);
                             when -1     => c_vk <= f_acc(33 downto 16);
-                            when others => c_vk <= f_acc(34 downto 17);
+                            when -2     => c_vk <= f_acc(34 downto 17);
+                            when others => c_vk <= f_acc(35 downto 18);
                         end case;
                     when 148 => c_vinc <= f_acc(31 downto 8);
                     when 172 =>
                         v_t := f_acc(23 downto 0);
                         c_u0 <= (not v_t) + 1;
                     when 196 => c_tst <= resize(f_acc(17 downto 0), 20) + resize(f_acc(17 downto 3), 20);
-                    when 220 => c_eg <= f_acc(16 downto 10);
+                    when 220 => c_eg <= f_acc(17 downto 10);
                     when others => null;
                 end case;
             end if;
@@ -964,7 +980,7 @@ begin
         variable v_xv : unsigned(10 downto 0);
         variable v_d, v_dn : signed(11 downto 0);
         variable v_x  : unsigned(10 downto 0);
-        variable v_e12 : unsigned(11 downto 0);
+        variable v_e13 : unsigned(12 downto 0);
         variable v_u  : unsigned(20 downto 0);
         variable v_a  : signed(12 downto 0);
         variable v_s  : signed(12 downto 0);
@@ -992,14 +1008,14 @@ begin
             if v_xv < 960 then p2_xe <= v_xv;
             elsif v_xv > 1919 then p2_xe <= (others => '0');
             else p2_xe <= 1919 - v_xv; end if;
-            r_pil_a <= b_q(23 downto 15);
+            r_pil_a <= c_pd & b_q(23 downto 16);
             p2_t1 <= f_tri15(b_w1);
             p2_et <= b_lm * c_eg;
             -- 3: X pushed by the etch (px Q8; Osc x16), saturating at 2047; wobble = 15 tri(x / 150)
             if s_twin = '1' then v_x := p2_xa; else v_x := p2_xb; end if;
-            if s_src = '1' then v_e12 := resize(p2_et(14 downto 4), 12); else v_e12 := resize(p2_et(14 downto 8), 12); end if;
-            v_e12 := resize(v_x, 12) + v_e12;
-            if v_e12(11) = '1' then p3_x <= (others => '1'); else p3_x <= v_e12(10 downto 0); end if;
+            if s_src = '1' then v_e13 := resize(p2_et(15 downto 4), 13); else v_e13 := resize(p2_et(15 downto 8), 13); end if;
+            v_e13 := resize(v_x, 13) + v_e13;
+            if v_e13(12 downto 11) /= "00" then p3_x <= (others => '1'); else p3_x <= v_e13(10 downto 0); end if;
             p3_xe <= p2_xe;
             p3_wob <= resize(shift_right(shift_left(resize(p2_t1, 19), 4) - resize(p2_t1, 19), 15), 5);
             -- 4: X products; X / kw partials; pillar ROM fabric copy; body grain partials
@@ -1098,7 +1114,7 @@ begin
             p11_lr <= resize(p10_ar, 12) + resize(p10_br, 12) + resize(signed(p10_p4(26 downto 18)), 12) + resize(p10_cr, 12);
             p11_lg <= resize(p10_ag, 12) + resize(p10_bg, 12) + resize(signed(p10_p4(17 downto 9)), 12) + resize(p10_cg, 12);
             p11_lb <= resize(p10_ab, 12) + resize(p10_bb, 12) + resize(signed(p10_p4(8 downto 0)), 12) + resize(p10_cb, 12);
-            p11_rp <= p10_rg * signed('0' & c_ga);
+            p11_rp <= resize(p10_rg * signed('0' & c_ga), 16);   -- |381 x 63| < 2^15
             -- 12: L = shape + grain (rr = sin gate depth / 32: R and G rr / 16, B rr / 32)
             v_rr := shift_right(p11_rp, 5);
             p12_lr <= p11_lr + resize(shift_right(v_rr, 4), 12);

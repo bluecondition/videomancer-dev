@@ -249,3 +249,47 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
 - **Change.** The etch constant is 121 instead of 97 (×1.25): `c_eg` = K6 × 121 >> 10, max 96 -> 120 (7 bits). Push 0 .. 89 -> 0 .. 111 px per full luma. p2_et (8 × 7) peaks at 30 600 in 15 bits; X still saturates at 2047. Logic and latency unchanged.
 - **Render.** `.heirloom_work/rb_mantis/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same picture; the shapes are pushed a little further (left side).
 - **Build** v0.1.3, router1, all six configs seed 1. HD Analog 76.12, HD HDMI 85.57, HD Dual 76.73 MHz (worst HD 76.12). 7302–7313 / 7680 LC, 17 / 32 EBR. Not flashed.
+
+## v0.2.0: Ron's preview notes (2026-11-19)
+
+Ron (Heirloom Preview Queue, rework on v0.1.1): "K1- I think the pillars should change as the knob goes up rather
+than just being a scale / K3 bands - a little more range in both directions / K5 Grain - should be more grainy at
+the top, 200% / K6 Etch - should have a stronger effect, 150%".
+
+- **K1 Pillars: eight pillar designs.** K1 now steps through eight designs as it rises. Each design is a different
+  set of pillar centres per period and a distance transform; a hollow transform fills in toward the top / bottom
+  edges, where the row half-width grows from 33 to 96 / 1024 period.
+  1. posts: one thin pole per period (half the width);
+  2. columns: one pillar per period;
+  3. twins: pairs 0.16 period apart, nearly touching (they merge near the edges);
+  4. pairs 0.24 apart;
+  5. **the clip's pairs** (160 px apart, the default zone; within 1 unit of v0.1.3's table);
+  6. triples: 0, 0.17, 0.34;
+  7. hollow pairs: each pillar is two rails ±55 units about its centre, filling into a solid wedge near the edges;
+  8. fluted columns: one column of three ribs (±100 units) per period, merging into one wide column near the edges.
+
+  The zones are 128 counts wide, centred on 0, 128, .., 896, so the default 512 sits in the middle of the clip's
+  zone. A zone changes once the glided knob is 4 counts past the boundary (hysteresis against ADC jitter; one step
+  per field; boundary-based, so both ends are always reachable). The continuous spacing scale stays, halved to
+  ±1 octave (x2 dense at 0 .. 490 px at 512 .. x0.5 at 1023), so the knob responds between steps and the story
+  runs from a dense field of thin posts to a few wide fluted columns. The lobes and grain arcs follow each design's
+  gaps (lobe sag over the centre-to-centre gaps, capped at 127 px for the single-pillar designs).
+  The pillar ROM is now 2048 x 16 (8 designs x 256 phases, 8 EBR instead of 2). The phase resolution halved from
+  512 to 256 entries per period (1.9 px at the clip's spacing, 3.8 px at the widest), under the 8-unit soft key and
+  the 9-tap output box.
+- **K3 Bands: range x1.5 both ways.** Exponent 3 (25 k3 - 12800) / 64 = ±600 Q8 octaves (was ±400): 1880 lines per
+  segment, 0.57 segment on screen (0) .. 371.5 lines, the clip (512) .. 73 lines, 14.7 thin bands (1023) (was 1100
+  .. 126 lines). c_vk gained the shift cases 2 and -3 (max 228 k in 18 bits); c_u0 wraps modulo a cycle, as a
+  phase should.
+- **K5 Grain: top x2.** Depth (Q3) 8 + 7 (k5 - 512) / 64 above the centre: 63 at 1023 (was 31), x7.9 the clip's
+  depth. The bottom half and the default are unchanged. The grain product (±381 x 63) stays inside p11_rp's 16 bits.
+- **K6 Etch: x1.5 at every position.** Etch constant 121 -> 182 (c_eg max 120 -> 181, 8 bits): 0 .. 167 px per full
+  luma (was 111). p2_et widened to 16 bits and the X + etch sum to 13 bits (the Osc's x16 push now reaches 2873),
+  still saturating at 2047.
+- Presets: "Dense Grove" K1 150 -> 40 (the posts design). The rest are unchanged.
+- **Build** v0.2.0 (2026-11-19), router1 (`NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900
+  .heirloom_work/vid/build_queue.sh mantis`). HD Analog 77.50 (seed 1), **HD HDMI 75.48 (seed 4; seeds 1-3 missed,
+  thin)**, HD Dual 78.77 (seed 1); SD Analog 77.41, SD HDMI 68.14, SD Dual 63.34 MHz (seed 1, Fmin 27).
+  7411-7429 / 7680 LC (96.7 %, +115 over v0.1.3: the 2048-entry pillar ROM and the design hysteresis), 23 / 32 EBR
+  (+6). iceunpack passes on all six. No sims (build-first). `out/rev_b/ron/heirloom/mantis.vmprog`; v0.1.3's vmprog
+  and sources are in `.heirloom_work/rb_mantis/*_v013.*`. **Not flashed.**

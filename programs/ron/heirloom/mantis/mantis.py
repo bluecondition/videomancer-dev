@@ -19,7 +19,8 @@ Package contents:
   C_MT_SIN    256 x 8   round(127 sin(2 pi (i + 0.5) / 256)) (signed): the wood grain
   C_MT_ROW    128 x 32  {rowR, rowG, rowB (Q6 signed), pillar half-width (1/1024 period)} for Y = 8 i .. 8 i + 7
   C_MT_COL    128 x 32  {colR, colG, colB (Q6 signed), 0} for X = 16 i .. 16 i + 15
-  C_MT_PIL    512 x 16  {s (9b: distance to the nearest pillar, 1/1024 period), sag (7b px)} for q = (i + 0.5) / 512
+  C_MT_PIL   2048 x 16  {s (9b: distance to the nearest pillar, 1/1024 period), sag (7b px)}: 8 pillar designs (K1)
+                        x 256 phases, entry 256 d + i at q = (i + 0.5) / 256; design 4 = the clip's pairs
   C_MT_TONE_R/G/B 256 x 32 {Y10, Cr10, Cb10} contributions for z = i - 128 (Q6): luma pre-scaled 16/13
   C_MT_P0..P4  16 x 27  pair weights {R9, G9, B9} (Q6 signed) = W_a alpha_a / 3 + W_b alpha_b / 3 for the element
                         pairs (oleaf, ileaf), (above, armedge), (cap, eye), (lobe, pil), (body, node); index 4 alpha_a + alpha_b
@@ -65,6 +66,37 @@ COL = [[-17, -18, -20, -21, -19, -19, -19, -17, -15, -13, -7, -5, -9, -12, -12, 
 PP, PD, P0, LOBA = 490.0, 160.0, 120.0, 0.00405
 
 
+# K1 pillar designs (v0.2.0, Ron: "the pillars should change as the knob goes up"): pillar centres within one
+# period, and a transform of the signed distance t (1/1024 period) to the nearest centre.  Inside a pillar where
+# s < the row's half-width (33 units at the centre row, growing to 96 toward the top / bottom edges), so a design
+# whose s has a hollow (|t| - R) fills in where the wedge widens.
+DESIGNS = [
+    ([0.0], lambda t: 2 * abs(t)),                                   # 0 posts: one thin pole per period
+    ([0.0], lambda t: abs(t)),                                       # 1 columns: one pillar per period
+    ([0.0, 0.16], lambda t: abs(t)),                                 # 2 twins: pairs nearly touching
+    ([0.0, 0.24], lambda t: abs(t)),                                 # 3 pairs, closer than the clip
+    ([0.0, PD / PP], lambda t: abs(t)),                              # 4 the clip: pairs 160 px apart
+    ([0.0, 0.17, 0.34], lambda t: abs(t)),                           # 5 triples
+    ([0.0, PD / PP], lambda t: abs(abs(t) - 55)),                    # 6 hollow pairs: twin rails, filling in at the edges
+    ([0.0], lambda t: min(abs(t + 100), abs(t), abs(t - 100))),      # 7 fluted columns: three ribs that merge into one
+]
+
+
+def pil_entry(cs, f, q):
+    """{s, sag} at phase q (0..1) for pillar centres cs and distance transform f"""
+    n = len(cs)
+    for i in range(n):
+        a, b = cs[i], (cs[i + 1] if i + 1 < n else cs[0] + 1.0)
+        qq = q if q >= a else q + 1.0
+        if a <= qq < b:
+            u, g = qq - a, b - a
+            break
+    t = u if u <= g - u else u - g                     # signed distance to the nearest centre (period units)
+    s = min(round(f(t * 1024)), 511)
+    sag = min(round(LOBA * u * (g - u) * PP * PP), 127)
+    return (s << 7) | sag
+
+
 def pwn(y):
     """pillar half-width in 1/1024 of the period for rows Y = y .. y + 7: 16 + (Y - 300)+ 26 / 256 px, capped at 46"""
     pw = min(16 + ((max(y + 4 - 300, 0) * 26) >> 8), 46)
@@ -103,17 +135,7 @@ def build():
     for i in range(128):
         j = min(i, 71)
         col.append(((COL[0][j] & 0xFF) << 24) | ((COL[1][j] & 0xFF) << 16) | ((COL[2][j] & 0xFF) << 8))
-    pil = []
-    g1 = PD / PP
-    for k in range(512):
-        q = (k + 0.5) / 512
-        if q < g1:
-            u, g = q, g1
-        else:
-            u, g = q - g1, 1 - g1
-        s = min(round(min(u, g - u) * 1024), 511)
-        sag = min(round(LOBA * u * (g - u) * PP * PP), 127)
-        pil.append((s << 7) | sag)
+    pil = [pil_entry(cs, f, (k + 0.5) / 256) for cs, f in DESIGNS for k in range(256)]
     tr = [tone_word(i, 0) for i in range(256)]
     tg = [tone_word(i, 1) for i in range(256)]
     tb = [tone_word(i, 2) for i in range(256)]
@@ -171,7 +193,7 @@ def write_pkg(path):
          '    type t_mt_w8x512 is array (0 to 511) of std_logic_vector(7 downto 0);\n',
          '    type t_mt_w8x256 is array (0 to 255) of std_logic_vector(7 downto 0);\n',
          '    type t_mt_w32x128 is array (0 to 127) of std_logic_vector(31 downto 0);\n',
-         '    type t_mt_w16x512 is array (0 to 511) of std_logic_vector(15 downto 0);\n',
+         '    type t_mt_w16x2048 is array (0 to 2047) of std_logic_vector(15 downto 0);\n',
          '    type t_mt_w32x256 is array (0 to 255) of std_logic_vector(31 downto 0);\n',
          '    type t_mt_w27x16 is array (0 to 15) of std_logic_vector(26 downto 0);\n']
     s.append(vhd_array('C_MT_EXP2', 't_mt_u16x256', t['EXP2'], 16))
@@ -179,7 +201,7 @@ def write_pkg(path):
     s.append(vhd_array('C_MT_SIN', 't_mt_w8x256', t['SIN'], 8))
     s.append(vhd_array('C_MT_ROW', 't_mt_w32x128', t['ROW'], 32))
     s.append(vhd_array('C_MT_COL', 't_mt_w32x128', t['COL'], 32))
-    s.append(vhd_array('C_MT_PIL', 't_mt_w16x512', t['PIL'], 16))
+    s.append(vhd_array('C_MT_PIL', 't_mt_w16x2048', t['PIL'], 16))
     s.append(vhd_array('C_MT_TONE_R', 't_mt_w32x256', t['TR'], 32))
     s.append(vhd_array('C_MT_TONE_G', 't_mt_w32x256', t['TG'], 32))
     s.append(vhd_array('C_MT_TONE_B', 't_mt_w32x256', t['TB'], 32))

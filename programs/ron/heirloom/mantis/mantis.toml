@@ -7,7 +7,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.mantis"
 program_name = "Mantis"
-program_version = "0.1.3"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -146,7 +146,7 @@ rotary_potentiometer_4 = 600
 
 [[preset]]
 name = "Dense Grove"
-rotary_potentiometer_1 = 150
+rotary_potentiometer_1 = 40
 rotary_potentiometer_5 = 900
 
 [[preset]]
