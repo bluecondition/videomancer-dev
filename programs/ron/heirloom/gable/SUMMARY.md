@@ -220,3 +220,10 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
   - The index wraps mod 2^20 as designed: the colouriser bands are periodic. Latency unchanged.
 - **Render.** `.heirloom_work/rb_gable/k6b/k6b_cmp.png` (bear, 720p60 / 2, K6 100 %, glide bypassed in the scratch copies). The same torn strokes, the bands pushed further round the picture. At 100 % both old and new are dominated by the camera.
 - **Build** v0.1.1, router1, all six seed 1. HD Analog 90.61, HD HDMI 86.03, HD Dual 85.49 MHz (worst HD 85.49). 6858–6886 / 7680 LC, 19 / 32 EBR. Not flashed.
+
+## v0.1.2: HW-captured defaults (2026-11-19)
+
+Ron dialled the look in on hardware (v0.1.1), captured with `./capture_preset.sh --defaults`:
+K1 Fan 527, K2 Bands 657, K3 Strokes 337, K4 Speed 232, K5 Tear 538, P12 Pitch 729 (K6 Etch and S7-S11 unchanged).
+The vmprog was repacked from the v0.1.1 bitstreams (only the settings block differs, 187 bytes), so timing, seeds and
+LC are as in v0.1.1. Presets are unchanged.

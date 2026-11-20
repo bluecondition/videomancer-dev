@@ -6,7 +6,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.gable"
 program_name = "Gable"
-program_version = "0.1.1"
+program_version = "0.1.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -22,7 +22,7 @@ name_label = "Fan"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 527
 display_float_digits = 0
 suffix_label = ""
 
@@ -32,7 +32,7 @@ name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 657
 display_float_digits = 0
 suffix_label = "%"
 
@@ -42,7 +42,7 @@ name_label = "Strokes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 337
 display_float_digits = 0
 suffix_label = "%"
 
@@ -52,7 +52,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 700
+initial_value = 232
 display_float_digits = 0
 suffix_label = ""
 
@@ -62,7 +62,7 @@ name_label = "Tear"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 538
 display_float_digits = 0
 suffix_label = "%"
 
@@ -112,7 +112,7 @@ name_label = "Pitch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 384
+initial_value = 729
 display_float_digits = 0
 suffix_label = "%"
 
