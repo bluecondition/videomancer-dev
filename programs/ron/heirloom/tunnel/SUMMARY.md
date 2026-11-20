@@ -173,3 +173,27 @@ in the middle and to also go off screen at the other end of the control"
   SD 84.35 / 80.55 / 80.50 MHz. 6758–6779 / 7680 LC, 13 / 32 EBR; iceunpack OK ×6. router1 routed every config in
   ~50 s, no stall (the builder deletes the synth json, so dupin wasn't rerun; the edit adds no self-add).
   v0.1.2's vmprog and VHDL are in `.heirloom_work/rb_tunnel/`. Not simulated (build-first), not flashed.
+
+## v0.3.0: Weave turns the ray fans (2026-11-20)
+
+Ron: "can you make the Weave control also change the angle of the stacks of diagonal white lines. the range should be
+to where the lines meet to where the recede away" (asked which lines: the thin ray fans at the eye corners).
+
+- **K3 Weave** keeps its stripe / bar density and now also scales the ray slope step rs (K5's, 0.145 at the still)
+  by a factor f: k / 512 below the still, 1 + 5 (k − 512) / 512 above it (Q6, 0 .. 383 = x0 .. x6).
+  - **0: the rays meet.** All three rays (and the fan, which is the wedge inside the outer ray) collapse onto the
+    horizontal centre line from each corner; the stripes run down to the axis.
+  - **512: the still**, bit-for-bit the same slopes (f = 64 / 64).
+  - **full: the rays recede away.** x6: at the default Eye the three rays leave at ~41°, 60° and 69° (slopes 0.87,
+    1.73, 2.6); the fan covers most of the side regions, so the rings show inside the eye and in the steep wedges.
+  - K5 still sets the base slope, so Eye and Weave multiply (Eye 0 + Weave full = rays at 1.8 / 3.6 / 5.4).
+- **Datapath:** per field, slot 15 of the serial multiplier makes c_rse = rs·f >> 6 (≤ 460, Q8) and c_rs3 = 3 c_rse;
+  stage 8 now has two products (c_rse·e, c_rs3·e) and stage 9 saturates r1, 2 r1 and 3 r1 (Q2) at 4095, i.e. 1024
+  lines, past every screen edge, so a ray pushed off screen stays off instead of wrapping back in as a stray line
+  (v0.2's 12-bit 3 r1 would have wrapped above x1.1). The 2 r1 term now carries one more fraction bit than v0.2's
+  2·floor(r1) (a quarter-pixel difference). Latency unchanged.
+- v0.2.0's vmprog and VHDL are in `.heirloom_work/rb_tunnel/` (`tunnel_v020.*`).
+- **Build** v0.3.0, router1, all six seed 1: HD Analog 77.08, HD HDMI 86.21, HD Dual 74.93 MHz (worst HD 74.93,
+  a thin pass); SD 82.79 / 77.12 / 75.76 MHz. 7217–7232 / 7680 LC (94 %, +450 for the two wider stage-8 products,
+  slot 15 and the saturation), 13 / 32 EBR; iceunpack OK ×6. Not simulated, not flashed. If the LC or HD Dual margin
+  ever needs room, 3 r1 can come from r1 + 2 r1 (one add) instead of the second product.

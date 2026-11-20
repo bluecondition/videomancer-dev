@@ -2,6 +2,8 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- 2026-11-20 v0.3.0 (Ron): K3 Weave also turns the ray fans: x0 (the rays meet on the centre line) .. x1 (512, the
+--   still) .. x6 (the rays recede away, steep)
 -- 2026-11-19 v0.2.0 (Ron's preview notes): K5 Eye runs from the corners meeting in the middle (0) to both corners
 --   and their fans off screen (1023)
 --
@@ -22,7 +24,7 @@
 --
 --   K1  Slope     the diamonds' aspect: tall (0) .. the still (512) .. flat (1023), x1/4 .. x4
 --   K2  Skew      the rings bunch toward the top or the bottom (bipolar); the clip's sway LFO rides on it
---   K3  Weave     stripe and bar density, x1/3 .. x3
+--   K3  Weave     stripe and bar density, x1/3 .. x3; and the ray fans' angle, x0 (rays meet) .. x1 .. x6 (recede)
 --   K4  Speed     bipolar: rings stream out of (+) or into (-) the eye
 --   K5  Eye       the eye corners' spread (0, met in the middle .. 255 .. 1213 px, off screen) and the fan
 --   K6  Etch      how far the camera (or the Osc, 4x) bends the rings
@@ -175,7 +177,10 @@ architecture tunnel of program_top is
     signal c_hk8  : unsigned(19 downto 0) := to_unsigned(264090, 20);  -- H stripes, Q8 phase per virtual line
     signal c_hst  : unsigned(23 downto 0) := to_unsigned(264090, 24);  -- per output line
     signal c_xe   : unsigned(10 downto 0) := to_unsigned(255, 11);     -- eye corner |dx| (px), 0 .. 1213
-    signal c_rs   : unsigned(6 downto 0) := to_unsigned(37, 7);        -- ray slope step, Q8
+    signal c_rs   : unsigned(6 downto 0) := to_unsigned(37, 7);        -- ray slope step from K5, Q8
+    signal c_wf   : unsigned(8 downto 0) := to_unsigned(64, 9);        -- K3's ray factor, Q6 (0 .. 383)
+    signal c_rse  : unsigned(9 downto 0) := to_unsigned(37, 10);       -- ray slope step x the factor, Q8 (<= 460)
+    signal c_rs3  : unsigned(11 downto 0) := to_unsigned(111, 12);     -- 3 c_rse (the outer ray / fan)
     signal c_eg   : unsigned(16 downto 0) := to_unsigned(500, 17);     -- etch gain (x1.25: video 0 .. 20440, Osc 4x)
     signal c_xb0  : unsigned(11 downto 0) := to_unsigned(16, 12);      -- beam start x (h)
     signal c_xs8  : unsigned(16 downto 0) := to_unsigned(2048, 17);    -- beam start x, Q8 px
@@ -247,11 +252,12 @@ architecture tunnel of program_top is
     signal q7_e   : signed(11 downto 0) := (others => '0');
     signal q7_far, q8_far, q9_far, q10_far : unsigned(7 downto 0) := (others => '0');
     signal q7_tx  : unsigned(15 downto 0) := (others => '0');
-    signal q8_r1  : unsigned(16 downto 0) := (others => '0');
+    signal q8_r1  : unsigned(19 downto 0) := (others => '0');
+    signal q8_r3  : unsigned(21 downto 0) := (others => '0');
     signal q8_hn  : unsigned(11 downto 0) := (others => '0');
     signal q8_ph, q9_ph : unsigned(15 downto 0) := (others => '0');
     signal q8_epos, q8_eneg, q9_epos, q9_eneg, q10_epos, q10_eneg, q11_epos, q11_eneg, q12_eneg : std_logic := '0';
-    signal q9_r1, q9_kop : unsigned(11 downto 0) := (others => '0');
+    signal q9_r1, q9_r2, q9_kop : unsigned(11 downto 0) := (others => '0');
     signal q10_d1, q10_d2, q10_d3, q10_u : signed(12 downto 0) := (others => '0');
     signal d_va   : unsigned(15 downto 0) := (others => '0');
     signal d_vph  : unsigned(23 downto 0) := (others => '0');
@@ -458,6 +464,7 @@ begin
                     when 318 => z_sel <= to_unsigned(12, 4); z_pre <= '1';
                     when 342 => z_sel <= to_unsigned(13, 4); z_pre <= '1';
                     when 366 => z_sel <= to_unsigned(14, 4); z_pre <= '1';
+                    when 390 => z_sel <= to_unsigned(15, 4); z_pre <= '1';
                     when others => null;
                 end case;
             end if;
@@ -483,7 +490,8 @@ begin
                                if z_neg = '1' then z_fb <= to_unsigned(255, 16); else z_fb <= to_unsigned(960, 16); end if;
                     when 13 => z_fa <= resize(z_a, 36);                                                 -- ray slope
                                if z_neg = '1' then z_fb <= to_unsigned(40, 16); else z_fb <= to_unsigned(19, 16); end if;
-                    when others => z_fa <= resize(s_g6(12 downto 3), 36); z_fb <= resize(s_g6(12 downto 3), 16); -- etch^2
+                    when 14 => z_fa <= resize(s_g6(12 downto 3), 36); z_fb <= resize(s_g6(12 downto 3), 16); -- etch^2
+                    when others => z_fa <= resize(c_rs, 36);               z_fb <= resize(c_wf, 16);     -- ray slope x K3
                 end case;
             end if;
             if z_ld = '1' then
@@ -610,6 +618,13 @@ begin
                         if s_line = '1' then c_curve <= "10";
                         elsif s_gp(12 downto 3) >= 768 or s_gp(12 downto 3) < 160 then c_curve <= "01";
                         else c_curve <= "00"; end if;
+                    -- K3's ray factor (Q6): k / 8 below the still (0 = the rays meet on the centre line), 64 + 5 (k - 512) / 8
+                    -- above it (383 = x6 at full: the rays recede away)
+                    when 388 =>
+                        if s_g3(12) = '0' then c_wf <= resize(s_g3(12 downto 6), 9);
+                        else c_wf <= to_unsigned(64, 9) + resize(shift_right(shift_left(resize(s_g3(11 downto 3), 12), 2) + resize(s_g3(11 downto 3), 12), 3), 9); end if;
+                    when 410 => c_rse <= f_acc(15 downto 6);
+                    when 411 => c_rs3 <= shift_left(resize(c_rse, 12), 1) + resize(c_rse, 12);
                     when others => null;
                 end case;
             end if;
@@ -822,7 +837,6 @@ begin
         variable v_sa  : signed(12 downto 0);
         variable v_st  : signed(11 downto 0);
         variable v_e   : unsigned(11 downto 0);
-        variable v_r3  : unsigned(12 downto 0);
         variable v_vb  : signed(19 downto 0);
         variable v_h   : signed(13 downto 0);
         variable v_f   : unsigned(9 downto 0);
@@ -853,7 +867,8 @@ begin
             q7_e  <= signed(resize(q6_adx, 12)) - signed(resize(c_xe, 12));
             if q6_adx > 860 then q7_far <= resize(q6_adx - 860, 8); else q7_far <= (others => '0'); end if;
             -- 8: r1 = rs e (Q8 px); the eye's stripe key (-e) 9/16 (Q2); ring phase = x term + line term + etch
-            if q7_e > 0 then q8_r1 <= c_rs * unsigned(q7_e(9 downto 0)); else q8_r1 <= (others => '0'); end if;
+            if q7_e > 0 then q8_r1 <= c_rse * unsigned(q7_e(9 downto 0)); else q8_r1 <= (others => '0'); end if;
+            if q7_e > 0 then q8_r3 <= c_rs3 * unsigned(q7_e(9 downto 0)); else q8_r3 <= (others => '0'); end if;
             if q7_e < 0 then
                 v_e := unsigned(-q7_e);
                 q8_hn <= resize(shift_right(shift_left(resize(v_e, 14), 3) + resize(v_e, 14), 2), 12);
@@ -864,14 +879,17 @@ begin
             if q7_e < 0 then q8_eneg <= '1'; else q8_eneg <= '0'; end if;
             q8_ph  <= q7_tx + l_yt + k_et;
             q8_far <= q7_far;
-            -- 9: r1 (Q2), the key operand (3 r1 outside the eye, the eye key inside)
-            q9_r1 <= resize(q8_r1(16 downto 6), 12);
-            v_r3 := resize(q8_r1(16 downto 6), 13) + shift_left(resize(q8_r1(16 downto 6), 13), 1);
-            if q8_epos = '1' then q9_kop <= v_r3(11 downto 0); else q9_kop <= q8_hn; end if;
+            -- 9: r1, 2 r1 (Q2), the key operand (3 r1 outside the eye, the eye key inside), each saturated at 4095
+            --    (1024 lines, past every screen edge: a ray K3 pushes off screen stays off, never wraps back in)
+            if q8_r1(19 downto 18) /= "00" then q9_r1 <= (others => '1'); else q9_r1 <= q8_r1(17 downto 6); end if;
+            if q8_r1(19 downto 17) /= "000" then q9_r2 <= (others => '1'); else q9_r2 <= q8_r1(16 downto 5); end if;
+            if q8_epos = '0' then q9_kop <= q8_hn;
+            elsif q8_r3(21 downto 18) /= "0000" then q9_kop <= (others => '1');
+            else q9_kop <= q8_r3(17 downto 6); end if;
             q9_ph <= q8_ph; q9_far <= q8_far; q9_epos <= q8_epos; q9_eneg <= q8_eneg;
             -- 10: ray distances, the shared key difference; ring profile address (or the line's H stripe read)
             q10_d1 <= signed(resize(l_ady2, 13)) - signed(resize(q9_r1, 13));
-            q10_d2 <= signed(resize(l_ady2, 13)) - signed(resize(q9_r1 & '0', 13));
+            q10_d2 <= signed(resize(l_ady2, 13)) - signed(resize(q9_r2, 13));
             q10_d3 <= signed(resize(l_ady2, 13)) - signed(resize(q9_kop, 13));
             q10_u  <= signed(resize(q9_kop, 13)) - signed(resize(l_ady2, 13));
             q10_far <= q9_far; q10_epos <= q9_epos; q10_eneg <= q9_eneg;
