@@ -252,3 +252,24 @@ Ron (Heirloom Preview Queue, rework on v0.1.0): "I do not like the beat effect b
   95.08, HD HDMI 96.68, HD Dual 103.97 MHz (worst HD 95.08); SD Analog 95.11, SD HDMI 103.70, SD Dual 98.05 MHz.
   6382-6394 / 7680 LC (83 %, ~180 LC fewer than v0.1.2: the beat's logic is gone), 13 / 32 EBR. iceunpack OK x 6.
   `out/rev_b/ron/heirloom/pupil.vmprog`. Not simulated (build-first; Ron checks on hardware). **Not flashed.**
+
+## v0.2.1: HD HDMI re-seed for the hsync red lines + HW-captured defaults (2026-11-20)
+
+- **Ron (HW, v0.2.0):** "pupil has those red horizontal lines associated with hsync" (his name for the HD HDMI
+  placement artifact, memory `hdmi_tx_placement_skew`). The shipped HD HDMI bitstream (router1 s1, re-routed
+  byte-identical) put the ADV7513 HSYNC at **−2.35 ns** (data ≤ −3.27) against the forwarded TX clock: a negative
+  HSYNC, like abacus v0.6.3 (−1.45, red and blue lines).
+- **Screen:** hd_hdmi router1 + router2 seeds 1–60 (94 timing-clean), hd_analog router1 s1–16, hd_dual router1 s1–12
+  (`.heirloom_work/rb_pupil/skew/`: synth.sh, route.sh, pick.py, screen1/2.txt). In the +1.0..+2.3 window with every
+  data bit ≤ −0.6: router1 s29 (+1.47 / −0.73), router2 s50 (+1.29 / −0.62), router1 s23 (+1.23 / −0.60), router1
+  s45 (+1.07 / −0.97).
+- **Shipped:** HD HDMI = **router1 seed 29** (+1.47 / ≤ −0.73, 94.94 MHz), installed by hand into
+  build/.../rev_b/bitstreams/ and repacked (`vmprog_pack.py --no-sign`). The other five bitstreams are v0.2.0's seed-1
+  builds: HD Analog s1 (HDMI −0.86 / ≤ −1.21) and HD Dual s1 (−2.50 / ≤ −1.65) meet the rules used for those configs.
+  **Spare** for an A/B if lines remain: `.heirloom_work/rb_pupil/skew/pupil_v021_spare_hdhdmi_router2_s29.vmprog`, the
+  same except HD HDMI = router2 s29 (+3.35 / ≤ −0.57, 81.20 MHz: near beacon's HW-clean +3.09 / −0.69). The old
+  hd_hdmi.bin is kept as `skew/hd_hdmi_shipped_r1s1.bin`, the v0.2.0 vmprog as `rb_pupil/pupil_v020.vmprog`.
+  A full `build_programs.sh` rebuild would re-route HD HDMI on seed 1 and bring the lines back: rebuild with
+  `SEED=29` for hd_hdmi, or re-install the bitstream.
+- **Defaults** (Ron dialled in on v0.2.0, `./capture_preset.sh --defaults`): K1 Eyes 759, K2 Squint 267, K3 Rings 1023,
+  K4 Bricks 0 (clean rings), K5 Tilt 340, P12 Dilate 451 (K6 Bend and S7-S11 unchanged). Presets unchanged.
