@@ -249,3 +249,11 @@ is untouched).
   SD Analog 84.61, SD HDMI 88.54, SD Dual 95.49 MHz. 6939–6959 / 7680 LC (90.6 %, was up to 7196), 20 / 32 EBR
   (was 21: the LFO cosine port is gone). Every bitstream passed iceunpack; router1 finished every config without a
   stall. Not simulated. v0.1.2's VHDL and vmprog are in `.heirloom_work/rb_nesting/`. Not flashed.
+
+## v0.2.1: HW-captured defaults (2026-11-19)
+
+Ron flashed v0.2.0, dialled the look in and captured it with `./capture_preset.sh --defaults`:
+K1 Eyes 0, K2 Corners 669, K3 Pink 254, K4 Breath 661, K5 Tear 707, K6 Etch 1001, S7 Quad On, S10 Colours On,
+P12 Nesting 634 (S8, S9, S11 unchanged). K1 is continuous (glided, no zones), so 0 loads as dialled. The vmprog was
+repacked from the v0.2.0 bitstreams (only the settings block differs, 239 bytes), so timing and seeds are as in
+v0.2.0. Presets are unchanged.
