@@ -2,8 +2,10 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- 2026-11-19 v0.2.0 (Ron's preview notes): K5 Eye runs from the corners meeting in the middle (0) to both corners
+--   and their fans off screen (1023)
 --
--- Tunnel v0.1.0 -- Heirloom (video phase), from the clip WIN_20230723_00_52_24 at 0.5 s.
+-- Tunnel v0.2.0 -- Heirloom (video phase), from the clip WIN_20230723_00_52_24 at 0.5 s.
 --
 -- The still: a black and white relief.  Concentric diamond glow rings around an "eye" (centre x 1000, y 512 of
 -- 1920 x 1080) stream out of the middle; a static weave of horizontal stripes (17 per frame) and dark vertical
@@ -22,7 +24,7 @@
 --   K2  Skew      the rings bunch toward the top or the bottom (bipolar); the clip's sway LFO rides on it
 --   K3  Weave     stripe and bar density, x1/3 .. x3
 --   K4  Speed     bipolar: rings stream out of (+) or into (-) the eye
---   K5  Eye       the eye corners' spread (40 .. 255 .. 700 px) and the fan (wide .. the still .. narrow)
+--   K5  Eye       the eye corners' spread (0, met in the middle .. 255 .. 1213 px, off screen) and the fan
 --   K6  Etch      how far the camera (or the Osc, 4x) bends the rings
 --   S7  Twin      one eye / two eyes side by side
 --   S8  Rings     Glow (the still) / Line (thin outlines)
@@ -172,7 +174,7 @@ architecture tunnel of program_top is
     signal c_vx   : unsigned(23 downto 0) := (others => '0');          -- 26 px of V phase
     signal c_hk8  : unsigned(19 downto 0) := to_unsigned(264090, 20);  -- H stripes, Q8 phase per virtual line
     signal c_hst  : unsigned(23 downto 0) := to_unsigned(264090, 24);  -- per output line
-    signal c_xe   : unsigned(9 downto 0) := to_unsigned(255, 10);      -- eye corner |dx| (px)
+    signal c_xe   : unsigned(10 downto 0) := to_unsigned(255, 11);     -- eye corner |dx| (px), 0 .. 1213
     signal c_rs   : unsigned(6 downto 0) := to_unsigned(37, 7);        -- ray slope step, Q8
     signal c_eg   : unsigned(16 downto 0) := to_unsigned(500, 17);     -- etch gain (x1.25: video 0 .. 20440, Osc 4x)
     signal c_xb0  : unsigned(11 downto 0) := to_unsigned(16, 12);      -- beam start x (h)
@@ -242,7 +244,7 @@ architecture tunnel of program_top is
     signal q4_t   : signed(11 downto 0) := (others => '0');
     signal q4_px  : unsigned(10 downto 0) := (others => '0');
     signal q5_adx, q6_adx : unsigned(9 downto 0) := (others => '0');
-    signal q7_e   : signed(10 downto 0) := (others => '0');
+    signal q7_e   : signed(11 downto 0) := (others => '0');
     signal q7_far, q8_far, q9_far, q10_far : unsigned(7 downto 0) := (others => '0');
     signal q7_tx  : unsigned(15 downto 0) := (others => '0');
     signal q8_r1  : unsigned(16 downto 0) := (others => '0');
@@ -478,7 +480,7 @@ begin
                     when 10 => z_fa <= to_unsigned(264090, 36);           z_fb <= z_mt;                 -- H stripes
                     when 11 => z_fa <= resize(c_hk8, 36);                 z_fb <= resize(s_ys, 16);     -- per line
                     when 12 => z_fa <= resize(z_a, 36);                                                 -- eye corner
-                               if z_neg = '1' then z_fb <= to_unsigned(215, 16); else z_fb <= to_unsigned(445, 16); end if;
+                               if z_neg = '1' then z_fb <= to_unsigned(255, 16); else z_fb <= to_unsigned(960, 16); end if;
                     when 13 => z_fa <= resize(z_a, 36);                                                 -- ray slope
                                if z_neg = '1' then z_fb <= to_unsigned(40, 16); else z_fb <= to_unsigned(19, 16); end if;
                     when others => z_fa <= resize(s_g6(12 downto 3), 36); z_fb <= resize(s_g6(12 downto 3), 16); -- etch^2
@@ -594,8 +596,10 @@ begin
                         if s_g5(12 downto 3) < 512 then z_a <= s_g5(12 downto 3); z_neg <= '1';
                         else z_a <= s_g5(12 downto 3) - 512; z_neg <= '0'; end if;
                     when 338 =>
-                        if z_neg = '1' then c_xe <= to_unsigned(40, 10) + f_acc(18 downto 9);
-                        else c_xe <= to_unsigned(255, 10) + f_acc(18 downto 9); end if;
+                        -- Xe = 255 k / 512 below the still (0 = the corners meet in the middle), 255 + 960 (k - 512) / 512
+                        -- above it (1213 at full: both corners past both screen edges, at every resolution)
+                        if z_neg = '1' then c_xe <= resize(f_acc(18 downto 9), 11);
+                        else c_xe <= to_unsigned(255, 11) + resize(f_acc(18 downto 9), 11); end if;
                     when 362 =>
                         if z_neg = '1' then c_rs <= to_unsigned(77, 7) - f_acc(15 downto 9);
                         else c_rs <= to_unsigned(37, 7) - f_acc(15 downto 9); end if;
@@ -817,7 +821,7 @@ begin
         variable v_x   : unsigned(10 downto 0);
         variable v_sa  : signed(12 downto 0);
         variable v_st  : signed(11 downto 0);
-        variable v_e   : unsigned(10 downto 0);
+        variable v_e   : unsigned(11 downto 0);
         variable v_r3  : unsigned(12 downto 0);
         variable v_vb  : signed(19 downto 0);
         variable v_h   : signed(13 downto 0);
@@ -846,7 +850,7 @@ begin
             q6_adx <= q5_adx;
             -- 7: fabric copy; e = r - Xe; the edge-column key term
             q7_tx <= t_rq;
-            q7_e  <= signed(resize(q6_adx, 11)) - signed(resize(c_xe, 11));
+            q7_e  <= signed(resize(q6_adx, 12)) - signed(resize(c_xe, 12));
             if q6_adx > 860 then q7_far <= resize(q6_adx - 860, 8); else q7_far <= (others => '0'); end if;
             -- 8: r1 = rs e (Q8 px); the eye's stripe key (-e) 9/16 (Q2); ring phase = x term + line term + etch
             if q7_e > 0 then q8_r1 <= c_rs * unsigned(q7_e(9 downto 0)); else q8_r1 <= (others => '0'); end if;

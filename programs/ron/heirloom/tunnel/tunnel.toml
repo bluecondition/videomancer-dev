@@ -1,4 +1,4 @@
-# Tunnel - Heirloom (video phase) v0.1.0, from the clip WIN_20230723_00_52_24 at 0.5 s.
+# Tunnel - Heirloom (video phase) v0.2.0, from the clip WIN_20230723_00_52_24 at 0.5 s.
 # Black and white diamond glow rings streaming out of an eye, over a weave of stripes and chevron bars, with fans of
 # rays at the eye corners.  See tunnel.vhd, tunnel.py and SUMMARY.md.
 
@@ -6,7 +6,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.tunnel"
 program_name = "Tunnel"
-program_version = "0.1.2"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -147,7 +147,7 @@ rotary_potentiometer_4 = 760
 [[preset]]
 name = "Wide Eye"
 rotary_potentiometer_1 = 330
-rotary_potentiometer_5 = 1000
+rotary_potentiometer_5 = 740
 
 [[preset]]
 name = "Osc Melt"

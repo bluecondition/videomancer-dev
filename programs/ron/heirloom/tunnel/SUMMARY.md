@@ -146,3 +146,30 @@ Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top 
 - Classification: **BEND.** K6 Etch adds camera (or Osc, 4x) luma x etch^2 to the ring phase.
 - Change: c_eg = 1.25 x etch^2 / 64 (v = acc >> 6 + acc >> 8), widened to 17 bits (Video 0 .. 20440, Osc 4x 0 .. 81760, which no longer fits 16), the 4 x 17 partial products 21 bits; the ring phase is modular so only its low 16 bits matter. Full Etch: ~15 -> ~19 ring periods at full luma.
 - Build: v0.1.2 built 2026-11-15 through the queue, router1, all six configs seed 1. Worst HD 79.88 MHz (HD Analog 81.66, HD HDMI 79.88, HD Dual 83.62); 6771-6783 LC. Output `out/rev_b/ron/heirloom/tunnel.vmprog`. NOT flashed.
+
+## v0.2.0: Ron's preview notes (2026-11-19)
+
+Ron (Heirloom Preview Queue, rework on v0.1.0): "Only complaint is that Eye control does not cause the pieces to meet
+in the middle and to also go off screen at the other end of the control"
+
+- **K5 Eye, corner spread** (Xe = each corner's distance from the eye centre at x 1000), was 40 .. 255 .. 700 px:
+  - now 0 .. 255 .. 1213 px: Xe = 255 k / 512 below the still, 255 + 960 (k − 512) / 512 above it;
+  - **0 = the two corners meet in the middle.** One point at the eye centre, the rays and the (widest) fans leaving it
+    as an X; there is no eye interior left. Glide stops within 2 counts of the knob: Xe 0 .. 1;
+  - **512 = the still**, unchanged (Xe 255, ray slope 0.145);
+  - **full = both corners and their fans off screen.** At 1080p / 720p the edges are 1000 px (left) and 919 px (right)
+    from the eye centre. The right corner leaves at K5 ≈ 866 (85 %), the left at ≈ 909 (89 %), because the eye sits
+    right of centre as in the photo. Above that only the eye interior shows: rings over the whole screen, and the
+    eye's top edge (slope 9/16) sloping towards the off-screen corners, still ~120 lines tall at the left edge at full.
+    SD (the centre 4:3, edges 760 / 679 px) loses both corners earlier (right at K5 ≈ 738, left ≈ 781). Twin (eyes at 520 / 1480):
+    the corners meet in each eye's middle at 0; past Xe ≈ 520 (K5 ≈ 650) both eyes' corners have crossed the screen
+    edges and the gap between the eyes.
+  - The ray-slope half of K5 is unchanged (rs 77 .. 37 .. 18, Q8).
+- Widths: c_xe 11 bits, e = r − Xe 12 bits (−1213 .. 1023), |e| 12 bits inside the eye (stripe key ≤ 2729 of 4095).
+  With Xe = 0 the outside key 3 rs e peaks at 3690 of 4095. Nothing wraps: r saturates at 1023, and Xe > r just
+  means "inside the eye".
+- Preset "Wide Eye" re-aimed K5 1000 -> 740, keeping its ~680 px corners (1000 would now put them off screen).
+- **Build** v0.2.0, router1, all six seed 1: HD Analog 87.45, HD HDMI 77.33, HD Dual 78.25 MHz (worst HD 77.33);
+  SD 84.35 / 80.55 / 80.50 MHz. 6758–6779 / 7680 LC, 13 / 32 EBR; iceunpack OK ×6. router1 routed every config in
+  ~50 s, no stall (the builder deletes the synth json, so dupin wasn't rerun; the edit adds no self-add).
+  v0.1.2's vmprog and VHDL are in `.heirloom_work/rb_tunnel/`. Not simulated (build-first), not flashed.
