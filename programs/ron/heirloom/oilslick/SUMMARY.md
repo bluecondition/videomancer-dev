@@ -168,3 +168,11 @@ frames of bear.png at K6 = 100 %, old vs new: `.heirloom_work/rb_oilslick/k6b/k6
 areas shift further round the palette; no new artifacts).
 **Build:** router1, seed 1 on all six; HD Analog 89.82, HD HDMI 86.79, HD Dual 86.79 MHz (worst HD 86.79); SD 89.51 /
 87.00 / 77.30 MHz; 7148-7184 / 7680 LC (93.5 %), 24/32 EBR. `out/rev_b/ron/heirloom/oilslick.vmprog`. NOT flashed.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Domes 686, K2 Horizon 0, K3 Rings 682, K4 Flow 916, K5 Voids 409, S9 Reflect On, P12 Tide 663 (K6 Etch, S7, S8,
+S10, S11 unchanged). K2 is continuous (glided, no zones), so 0 loads as dialled. The vmprog was repacked from the
+v0.1.2 bitstreams (only the settings block differs, 207 bytes), so timing, seeds and LC are as in v0.1.2. Presets
+are unchanged.
