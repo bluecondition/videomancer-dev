@@ -170,3 +170,10 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 Ron: K6 loads at 100 % (initial_value 1023, set by the orchestrator, with the version bump), and the camera effect at the top of the knob is 25 % stronger on bend / element programs. Bend-type: K6 Etch bends the bands and frays the bowtie key by the camera's luma. The camera's gain at K6 = 100 % is now 25 % higher. c_eg now holds half the gain and the pixel product is read one bit lower (`p6_camp(15 downto 5)`; the camera term p7..p9_cam is 11 bits, and the key reads `p7_cam(10 downto 2)`). Camera gain = 1.25 k6^2 >> 13: top 158, which is 316 in the old units (was 255). The Osc gain is unchanged ((4 (k6^2 >> 12) + 16) / 2; it saturates at the top as before). All the camera sums keep headroom (p10_sa <= ~3050 of +-8191). The gain is computed per field (no new pixel-path multiplier, latency unchanged). Checked: a GHDL render of old against new code at K6 = 100 % (the K6 glide bypassed in the scratch copies), `.heirloom_work/rb_batwing/k6b/k6b_cmp.png`: the same picture with a stronger camera bend, with no wrap and no new artifacts.
 
 - Build: router1; HD Dual on seed 2 (seed 1 stalled router1, timeout; dupin: 0 CARRY I0==I1), the other five on seed 1; worst HD 91.11 MHz (HD HDMI; HD Analog 93.92, HD Dual 94.92); SD 91.46-94.92; 6878-6896 LC, 21 / 32 EBR.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Tiles 1023, K2 Rows 378, K3 Roll 784, S7 Mirror On, P12 Wingspan 420 (K4-K6 and S8-S11 unchanged). K1 is
+continuous (glided, no zones), so 1023 loads as dialled. The vmprog was repacked from the v0.1.2 bitstreams (only the
+settings block differs, 187 bytes), so timing, seeds and LC are as in v0.1.2 (HD Dual seed 2). Presets are unchanged.
