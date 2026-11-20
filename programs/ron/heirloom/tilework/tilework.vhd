@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Tilework v0.1.0 -- Heirloom (video phase), from the clip WIN_20230318_12_24_18 at 4.0 s.
+-- Tilework v0.2.0 -- Heirloom (video phase), from the clip WIN_20230318_12_24_18 at 4.0 s.
 --
 -- The still: a grid of flat, saturated colour blocks.  Seven rows (108.75 lines each) climb a 3-bit staircase
 -- blue, orange, pink, lime, yellow, cyan into a long clipped green band; the centre column (from ~745 to ~1460)
@@ -17,11 +17,11 @@
 --   colour = hue wheel: W = L xor 1 (side columns), 7 - W (centre column); at each column edge the wheel
 --            sweeps the long way (5 or 7 steps), the half turn first, a dwell, then the rest
 --
---   K1  Rows      row height x1/4 .. x4 (the V oscillator)
---   K2  Columns   column width (the H oscillator): wider (one edge) .. x1/5.7 (narrow columns)
---   K3  Level     the staircase's offset: which colours appear, how long the clipped bands are
---   K4  Sweep     the zoom breathing (Ron's hand on the rate knob): depth and rate; 0 = still
---   K5  Skew      the keystone lean of the column edges: fanned left .. the still (512) .. fanned right
+--   K1  Rows      row height x1/4 .. x15 (the V oscillator)
+--   K2  Columns   column width (the H oscillator): wider (one edge) .. x1/32 (narrow columns, 5-octave H cap)
+--   K3  Level     the staircase's offset (+-7 levels): which colours appear, how long the clipped bands are
+--   K4  Sweep     Ron's hand on the zoom, played: -3 octaves (zoomed out) .. 0 (512) .. +3 octaves
+--   K5  Skew      the keystone lean of the column edges (+-1.0): fanned left .. the still (512) .. fanned right
 --   K6  Bend      how far the camera (or the Osc) bends the rows
 --   S7  Plaid     the columns become 4-step staircases too (a tartan)
 --   S8  Stairs    each row shifts the column edges by its level: stepped chevrons
@@ -36,6 +36,8 @@
 -- Generated avid; output conditioning (Y, U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes, luma 13/16) before
 -- the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- 2026-11-19 v0.2.0 (Ron's preview notes): K1 / K2 tops doubled, K4 Sweep a played zoom offset (was an LFO),
+--   K5 Skew and K3 Level ranges doubled
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -164,7 +166,7 @@ architecture tilework of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
-    signal s_g4 : unsigned(12 downto 0) := to_unsigned(400 * 8, 13);
+    signal s_g4 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(300 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(246 * 8, 13);
@@ -174,19 +176,13 @@ architecture tilework of program_top is
     signal s_plaid, s_stairs, s_prism, s_col, s_src : std_logic := '0';
 
     -- per-field values
-    signal d_k1, d_k2, d_k3, d_p : signed(10 downto 0) := (others => '0');
-    signal c_kap  : signed(16 downto 0) := to_signed(1573, 17);       -- keystone, Q16 (0.024 = the still)
-    signal c_lfo  : unsigned(15 downto 0) := (others => '0');          -- sweep LFO phase
-    signal c_tri  : signed(15 downto 0) := (others => '0');            -- its triangle, Q14
-    signal c_atri : unsigned(14 downto 0) := (others => '0');
-    signal c_depth : unsigned(9 downto 0) := (others => '0');          -- sweep depth, Q8 octaves
+    signal d_k1, d_k2, d_k3, d_k4, d_p : signed(10 downto 0) := (others => '0');
+    signal c_kap  : signed(17 downto 0) := to_signed(1573, 18);       -- keystone, Q16 (0.024 = the still)
     signal c_esw, c_ep, c_e55, c_ek2 : signed(12 downto 0) := (others => '0');
     signal c_ez, c_evr, c_ehr : signed(12 downto 0) := (others => '0');
     signal c_ev, c_eh, c_ehn : signed(11 downto 0) := (others => '0');
     signal z_mv, z_mh, z_mhn : unsigned(15 downto 0) := to_unsigned(32768, 16);
     signal z_shv, z_shh, z_shn : signed(3 downto 0) := (others => '0');
-    signal z_st   : unsigned(18 downto 0) := (others => '0');
-    signal c_lst  : unsigned(9 downto 0) := to_unsigned(33, 10);
     signal c_kv   : unsigned(19 downto 0) := to_unsigned(9642, 20);   -- levels per virtual line, Q20
     signal c_dr   : unsigned(21 downto 0) := to_unsigned(9642, 22);   -- levels per line, Q20
     signal c_r0   : signed(27 downto 0) := (others => '0');            -- V ramp at line 0
@@ -194,9 +190,10 @@ architecture tilework of program_top is
     signal c_rf   : std_logic := '0';
     signal c_inch : unsigned(26 downto 0) := to_unsigned(3019946, 27); -- half-periods per h, Q32
     signal c_fg    : unsigned(11 downto 0) := to_unsigned(1422, 12);   -- half-period / fringe width, Q6
-    signal c_t1   : unsigned(19 downto 0) := (others => '0');
+    signal c_akq  : unsigned(15 downto 0) := (others => '0');          -- |kappa|, Q15 (<= 33482)
+    signal c_t1   : unsigned(20 downto 0) := (others => '0');
     signal c_dinc : signed(19 downto 0) := (others => '0');            -- keystone step per line, Q32
-    signal c_dphs : signed(28 downto 0) := (others => '0');            -- start-phase step per line, Q32
+    signal c_dphs : signed(29 downto 0) := (others => '0');            -- start-phase step per line, Q32
     signal c_phi0 : signed(39 downto 0) := (others => '0');            -- start phase of line 0, Q32
     signal c_o    : signed(24 downto 0) := to_signed(C_ONE, 25);      -- staircase offset, Q20
     signal c_z6   : unsigned(9 downto 0) := (others => '0');
@@ -237,11 +234,12 @@ architecture tilework of program_top is
     signal e_st   : signed(24 downto 0) := (others => '0');
     signal e_ipx  : signed(31 downto 0) := (others => '0');
     signal n_vq8, e_vq : signed(13 downto 0) := (others => '0');
-    signal n_phis : signed(31 downto 0) := (others => '0');
-    signal n_inc  : signed(31 downto 0) := (others => '0');
+    signal n_phis : signed(33 downto 0) := (others => '0');
+    signal n_inc  : signed(33 downto 0) := (others => '0');
+    signal e_iuc  : unsigned(27 downto 0) := (others => '0');
 
     -- beam
-    signal b_phi, b_inc : signed(31 downto 0) := (others => '0');
+    signal b_phi, b_inc : signed(33 downto 0) := (others => '0');   -- +-512 half-periods
     signal b_px  : unsigned(10 downto 0) := (others => '0');
     signal l_vq8 : signed(13 downto 0) := (others => '0');
 
@@ -325,9 +323,7 @@ begin
     -- clock; the zone is quasi-static but timed at the pixel clock)
     ---------------------------------------------------------------------------
     p_ctrl : process(clk)
-        variable v_t  : signed(16 downto 0);
-        variable v_a  : signed(15 downto 0);
-        variable v_u  : unsigned(23 downto 0);
+        variable v_t  : signed(17 downto 0);
         variable v_sf : integer range 0 to 31;
         variable v_g  : unsigned(11 downto 0);
     begin
@@ -430,7 +426,6 @@ begin
             z_pre <= '0';
             if s_zone = '1' then
                 case to_integer(s_zc) is
-                    when 38  => z_sel <= to_unsigned(0, 5);  z_pre <= '1';
                     when 62  => z_sel <= to_unsigned(1, 5);  z_pre <= '1';
                     when 86  => z_sel <= to_unsigned(2, 5);  z_pre <= '1';
                     when 110 => z_sel <= to_unsigned(3, 5);  z_pre <= '1';
@@ -453,22 +448,21 @@ begin
             z_ld <= z_pre;
             if z_pre = '1' then
                 case to_integer(z_sel) is
-                    when 0  => z_fa <= resize(s_g4(12 downto 3), 36);  z_fb <= resize(s_g4(12 downto 3), 16);  -- k4^2
-                    when 1  => z_fa <= resize(c_atri, 36);              z_fb <= resize(c_depth, 16);           -- sweep
+                    when 1  => z_fa <= resize(unsigned(abs(d_k4)), 36); z_fb <= to_unsigned(391, 16);          -- sweep
                     when 2  => z_fa <= resize(unsigned(abs(d_p)), 36);  z_fb <= to_unsigned(1382, 16);         -- zoom
                     when 3  => z_fa <= resize(unsigned(abs(c_ez)), 36); z_fb <= to_unsigned(141, 16);          -- x 0.55
                     when 4  =>                                                                                 -- columns
                         z_fa <= resize(unsigned(abs(d_k2)), 36);
-                        if d_k2(10) = '0' then z_fb <= to_unsigned(325, 16); else z_fb <= to_unsigned(104, 16); end if;
+                        if d_k2(10) = '0' then z_fb <= to_unsigned(650, 16); else z_fb <= to_unsigned(104, 16); end if;
                     when 5  => z_fa <= to_unsigned(9642, 36);           z_fb <= z_mv;                          -- kv
                     when 6  => z_fa <= resize(c_kv, 36);                z_fb <= resize(s_ys, 16);              -- dr
                     when 7  => z_fa <= to_unsigned(188747, 36);         z_fb <= z_mh;                          -- inc
                     when 8  => z_fa <= to_unsigned(1422, 36);           z_fb <= z_mhn;                         -- G
-                    when 9  => z_fa <= resize(c_inch(26 downto 8), 36); z_fb <= resize(unsigned(abs(c_kap)), 16);
+                    when 9  => z_fa <= resize(c_inch(26 downto 8), 36); z_fb <= c_akq;   -- |kappa|, Q15
                     when 10 => z_fa <= resize(c_t1, 36);                z_fb <= s_kys;
                     when 11 => z_fa <= resize(unsigned(abs(c_dinc)), 36); z_fb <= resize(s_xa, 16);
                     when 12 => z_fa <= resize(c_inch, 36);              z_fb <= resize(s_xa, 16);
-                    when 13 => z_fa <= resize(unsigned(abs(d_k3)), 36); z_fb <= to_unsigned(7282, 16);         -- level
+                    when 13 => z_fa <= resize(unsigned(abs(d_k3)), 36); z_fb <= to_unsigned(14564, 16);        -- level
                     when 14 => z_fa <= resize(s_g6(12 downto 3), 36);  z_fb <= resize(s_g6(12 downto 3), 16);  -- k6^2
                     when 15 => z_fa <= resize(c_z6, 36);                z_fb <= to_unsigned(345, 16);   -- x1.25 (was 276)
                     when others => z_fa <= resize(c_bg, 36);             z_fb <= to_unsigned(111, 16);          -- Osc centre
@@ -490,27 +484,21 @@ begin
                         d_k1 <= f_db(s_g1(12 downto 3));
                         d_k2 <= f_db(s_g2(12 downto 3));
                         d_k3 <= f_db(s_g3(12 downto 3));
+                        d_k4 <= f_db(s_g4(12 downto 3));
                         d_p  <= signed(resize(s_gp(12 downto 3), 11)) - 246;
-                        if c_lfo < x"4000" then
-                            c_tri <= signed(c_lfo);
-                        elsif c_lfo < x"C000" then
-                            c_tri <= signed(x"8000" - c_lfo);
-                        else
-                            c_tri <= signed(c_lfo);       -- c_lfo - 0x10000, two's complement
-                        end if;
                     when 33 =>
-                        v_a := abs(c_tri);
-                        c_atri <= unsigned(v_a(14 downto 0));
-                        v_t := resize(f_db(s_g5(12 downto 3)), 17);
-                        c_kap <= shift_left(v_t, 6) + v_t + 1573;   -- 0.024 + kd * 65 / 65536
+                        -- Rows: the top doubled (+3.9 octaves at 1023), the bottom as before (-2)
+                        if d_k1(10) = '0' then d_k1 <= shift_left(d_k1, 1); end if;
+                        v_t := resize(f_db(s_g5(12 downto 3)), 18);
+                        c_kap <= shift_left(v_t, 7) + shift_left(v_t, 1) + 1573;   -- 0.024 + kd * 130 / 65536
+                    when 34 =>
+                        v_t := abs(c_kap);
+                        c_akq <= unsigned(v_t(16 downto 1));
 
-                    -- sweep: depth = 3 k4^2 >> 12 (Q8 octaves), zoom OUT first
-                    when 58 =>
-                        v_u := resize(f_acc(21 downto 0), 24) + shift_left(resize(f_acc(21 downto 0), 24), 1);
-                        c_depth <= v_u(21 downto 12);
+                    -- sweep (played): kd * 391 / 256 Q8 octaves, +-3 octaves at the ends, right = finer
                     when 82 =>
-                        if c_tri(15) = '0' then c_esw <= -signed(resize(f_acc(23 downto 14), 13));
-                        else c_esw <= signed(resize(f_acc(23 downto 14), 13)); end if;
+                        if d_k4(10) = '0' then c_esw <= signed(resize(f_acc(17 downto 8), 13));
+                        else c_esw <= -signed(resize(f_acc(17 downto 8), 13)); end if;
                     -- zoom: e_p = (P12 - 246) * 1382 / 1024; e_v = e_p + sweep + K1; e_h = 0.55 (e_p + sweep) + K2
                     when 106 =>
                         if d_p(10) = '0' then c_ep <= signed(resize(f_acc(20 downto 10), 13));
@@ -527,7 +515,7 @@ begin
                         if c_ez(12) = '0' then c_e55 <= signed(resize(f_acc(20 downto 8), 13));
                         else c_e55 <= -signed(resize(f_acc(20 downto 8), 13)); end if;
                     when 154 =>
-                        if d_k2(10) = '0' then c_ek2 <= signed(resize(f_acc(17 downto 8), 13));
+                        if d_k2(10) = '0' then c_ek2 <= signed(resize(f_acc(18 downto 8), 13));
                         else c_ek2 <= -signed(resize(f_acc(17 downto 8), 13)); end if;
                     when 155 => c_ehr <= c_e55 + c_ek2;
                     when 156 =>
@@ -587,18 +575,18 @@ begin
                             when others => c_fg <= f_acc(34 downto 23);
                         end case;
                     -- keystone: dinc = inc * kappa * (lines per line) / 1080, dphs = Xa * dinc, phi0 = P0 + Xa * inc
-                    when 274 => c_t1 <= f_acc(33 downto 14);
+                    when 274 => c_t1 <= f_acc(33 downto 13);   -- kappa fed as Q15
                     when 298 =>
-                        if c_kap(16) = '0' then c_dinc <= signed(resize(f_acc(35 downto 17), 20));
+                        if c_kap(17) = '0' then c_dinc <= signed(resize(f_acc(35 downto 17), 20));
                         else c_dinc <= -signed(resize(f_acc(35 downto 17), 20)); end if;
                     when 322 =>
-                        if c_dinc(19) = '0' then c_dphs <= signed(resize(f_acc(27 downto 0), 29));
-                        else c_dphs <= -signed(resize(f_acc(27 downto 0), 29)); end if;
+                        if c_dinc(19) = '0' then c_dphs <= signed(resize(f_acc(28 downto 0), 30));
+                        else c_dphs <= -signed(resize(f_acc(28 downto 0), 30)); end if;
                     when 346 => c_phi0 <= C_P0 + signed(resize(f_acc, 40));
-                    -- staircase offset o = 1 + 3.5 kd / 504 levels
+                    -- staircase offset o = 1 + 7 kd / 504 levels
                     when 370 =>
-                        if d_k3(10) = '0' then c_o <= to_signed(C_ONE, 25) + signed(resize(f_acc(21 downto 0), 25));
-                        else c_o <= to_signed(C_ONE, 25) - signed(resize(f_acc(21 downto 0), 25)); end if;
+                        if d_k3(10) = '0' then c_o <= to_signed(C_ONE, 25) + signed(resize(f_acc(22 downto 0), 25));
+                        else c_o <= to_signed(C_ONE, 25) - signed(resize(f_acc(22 downto 0), 25)); end if;
                     -- bend gain: (k6^2 >> 10) * 345 >> 10 (x1.25 the old 276), x3 for the Osc (held at 1023)
                     when 394 => c_z6 <= f_acc(19 downto 10);
                     when 418 =>
@@ -607,11 +595,6 @@ begin
                         if v_g(11 downto 10) /= "00" then c_bg <= (others => '1'); else c_bg <= v_g(9 downto 0); end if;
                     when 442 =>
                         if s_src = '1' then c_ctrg <= f_acc(16 downto 0); else c_ctrg <= (others => '0'); end if;
-                    -- next field's LFO phase: step = 33 + k4 * 273 / 1024
-                    when 445 => z_st <= shift_left(resize(s_g4(12 downto 3), 19), 8) + shift_left(resize(s_g4(12 downto 3), 19), 4);
-                    when 446 => z_st <= z_st + resize(s_g4(12 downto 3), 19);
-                    when 447 => c_lst <= resize(z_st(18 downto 10), 10) + 33;
-                    when 448 => c_lfo <= c_lfo + c_lst;
                     when others => null;
                 end case;
             end if;
@@ -763,17 +746,20 @@ begin
                     else
                         e_st <= (others => '0');
                     end if;
-                    -- the step is always positive (keystone <= 0.524): zero-extend, so no LUT sees the sign bit twice
-                    -- (a duplicated input hangs router1)
-                    v_iu := resize(unsigned(e_incl(27 downto 0)), 32);
+                    -- the step clamped at 0 (keystone up to 1.02: below y = 1080 / kappa the columns stop), registered
+                    -- unsigned, so no LUT sees the sign bit twice (a duplicated input hangs router1)
+                    if e_incl(28) = '1' then e_iuc <= (others => '0');
+                    else e_iuc <= unsigned(e_incl(27 downto 0)); end if;
+                when 8 =>
+                    v_iu := resize(e_iuc, 32);
                     case to_integer(s_xs) is
                         when 4      => e_ipx <= signed(shift_left(v_iu, 2));
                         when 3      => e_ipx <= signed(shift_left(v_iu, 1) + v_iu);
                         when others => e_ipx <= signed(shift_left(v_iu, 1));
                     end case;
-                when 8 =>
-                    n_phis <= e_phs(39 downto 8) + resize(e_st, 32);
-                    n_inc  <= resize(e_ipx(31 downto 8), 32);
+                when 9 =>
+                    n_phis <= resize(e_phs(39 downto 8), 34) + resize(e_st, 34);
+                    n_inc  <= resize(e_ipx(31 downto 8), 34);
                 when others => null;
             end case;
         end if;
@@ -803,8 +789,8 @@ begin
     -- Pixel path (stage 1 = the beam phase of the pixel)
     ---------------------------------------------------------------------------
     p_pix : process(clk)
-        variable v_ip : signed(7 downto 0);
-        variable v_nr : signed(8 downto 0);
+        variable v_ip : signed(9 downto 0);
+        variable v_nr : signed(10 downto 0);
         variable v_tr : signed(11 downto 0);
         variable v_ws, v_wc : unsigned(2 downto 0);
         variable v_w  : unsigned(7 downto 0);
@@ -813,8 +799,8 @@ begin
         if rising_edge(clk) then
             -- 2: integer / fraction of the phase: started (past the first edge), square, nearest edge,
             --    signed distance to it (Q10 half-periods), plaid quarter (mirrored on odd half-periods)
-            v_ip := b_phi(31 downto 24);
-            if b_phi(23) = '1' then v_nr := resize(v_ip, 9) + 1; else v_nr := resize(v_ip, 9); end if;
+            v_ip := b_phi(33 downto 24);
+            if b_phi(23) = '1' then v_nr := resize(v_ip, 11) + 1; else v_nr := resize(v_ip, 11); end if;
             if v_ip > 0 then p2_sq <= b_phi(24); else p2_sq <= '0'; end if;
             if v_nr > 0 then p2_act0 <= '1'; else p2_act0 <= '0'; end if;
             p2_bc  <= not v_nr(0);

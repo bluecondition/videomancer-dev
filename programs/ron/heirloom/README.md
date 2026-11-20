@@ -223,7 +223,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 |---|---|---|---|---|
 | 51 | 20230129_23_23_56 t0.5 | gable | red/cyan pointed chevron fan on dark, cyan/magenta streak alt | v0.1.2 2026-11-19: HW-captured defaults (Ron); v0.1.1 K6 default 100 % (router1, 6/6 seed 1; 6,858-6,886 LC, 19 EBR) |
 | 52 | 20230214_23_42_08 t0.5 | breakers | cyan/blue wavy ribbon bands; green/red/blue contour crab alt | v0.1.4 2026-11-19: HW-captured defaults (Ron); v0.1.3 K6 default 100 % (router1, 6/6 seed 1; 6,991-7,020 LC, 21 EBR) |
-| 53 | 20230318_12_24_18 t4.0 | tilework | skewed colour-block grid; cyan/green mesh checker alt | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,917-6,937 LC, 7 EBR); not flashed |
+| 53 | 20230318_12_24_18 t4.0 | tilework | skewed colour-block grid; cyan/green mesh checker alt | v0.2.0 2026-11-19: Ron's preview notes (K1/K2 tops doubled, K4 Sweep played instead of an LFO, K3 Level and K5 Skew ranges doubled), router1 6/6 seed 1; 6,835-6,844 LC, 7 EBR; not flashed |
 | 54 | 20230318_14_13_38 t0.5 | staircase | cyan diagonal pixel staircase; magenta/cyan random block mosaic alt | v0.1.0 built 2026-11-09 (router2; all six seed 1; 6,453-6,481 LC, 6 EBR); not flashed |
 | 55 | 20230328_00_11_14 t0.5 | pods | green/yellow cell eyes lattice in olive; grey chevron stacks with rainbow fringes alt | v0.1.1 built 2026-11-09 (router1; all six seed 1; 6,437-6,455 LC, 19 EBR); not flashed |
 | 56 | 20230402_23_03_06 t0.5 | seaweed | green/magenta wavy vertical curtain bands | v0.1.4 2026-11-19: HW-captured defaults (Ron); v0.1.3 camera luma smoothed vertically before the bend, fixing the thin horizontal streaks (router1, 6/6 seed 1; 7,208-7,220 LC, 29 EBR) |

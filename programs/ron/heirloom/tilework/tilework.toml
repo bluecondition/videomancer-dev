@@ -7,7 +7,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.tilework"
 program_name = "Tilework"
-program_version = "0.1.2"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -51,11 +51,11 @@ suffix_label = ""
 parameter_id = "rotary_potentiometer_4"
 name_label = "Sweep"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 400
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -123,15 +123,15 @@ name = "Still"
 [[preset]]
 name = "Fine Mesh"
 linear_potentiometer_12 = 1023
-rotary_potentiometer_4 = 0
+rotary_potentiometer_4 = 512
 
 [[preset]]
 name = "Giant Tiles"
 linear_potentiometer_12 = 0
-rotary_potentiometer_4 = 0
+rotary_potentiometer_4 = 512
 
 [[preset]]
-name = "Breathing"
+name = "Swept In"
 rotary_potentiometer_4 = 820
 linear_potentiometer_12 = 400
 

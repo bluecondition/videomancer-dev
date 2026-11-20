@@ -169,3 +169,35 @@ Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 %
 - **Change:** Gain x1.25 at every position: sequencer constant 276 -> 345 (camera gain up to 343, was 275). The Osc's 3x is held at the 10-bit ceiling 1023 (was 825 at the top, so 1.24x).
 - **Build:** Built with router1: all six seed 1; worst HD 86.45 MHz (HD Analog 86.45, HD HDMI 91.84, HD Dual 95.65); max 6941 / 7680 LC.
 - **Check:** GHDL 480p render, bear, K6 = 100 %, old vs new (glides snapped in scratch copies): `.heirloom_work/rb_tilework/k6b/k6b_cmp.png`, the same picture with a stronger bend.
+
+## v0.2.0: Ron's preview notes (2026-11-19)
+
+Ron (Heirloom Preview Queue, rework on v0.1.0): "Double the top range of the Rows and columns parameters. Change
+sweep from a motion parameter to a performance one - with the same effect and range it has now. Double the range of
+Skew in both directions. Double the range of Level."
+
+- **K1 Rows**: the top half doubled: 512 .. 1023 now spans +3.9 octaves (was +2), ~15x as many rows as the still
+  at full; the bottom half unchanged (-2 octaves). The existing ceiling (a row never under 2 real lines) still
+  applies, so with P12 high the top end saturates.
+- **K2 Columns**: the top half doubled (multiplier 325 -> 650): +5 octaves at full (was +2.5), ~22 px columns. The
+  H zoom keeps its 5-octave cap (the c_inch width), which K2 alone reaches at the default zoom: with P12 above
+  the still, the last part of K2's travel saturates.
+- **K4 Sweep**: no longer an LFO. It is now a played offset on the same zoom the LFO drove (both oscillators, the
+  rows at 1x, the columns at 0.55x), over the LFO's full range: -3 octaves (zoomed out) at 0, none at 512 (with the
+  usual ±8 deadband), +3 octaves (finer) at 1023, linear. Display -100 .. 100, default 512. The LFO (phase, triangle,
+  k4² depth product, rate DDA) is removed. Presets Fine Mesh / Giant Tiles had K4 = 0 for "still": now 512.
+  "Breathing" is renamed "Swept In" (K4 820 = +1.8 octaves).
+- **K5 Skew**: ±1.0 keystone (was ±0.52): kappa = 0.024 + 130 kd / 65536. At the right end the H frequency reaches
+  zero at y = 1080 / kappa (line ~1057): the edges sweep away into a curve and the last ~20 lines are one column.
+  The per-line H step is now clamped at 0 (registered unsigned in a new line-engine state, so router1's I0 == I1
+  hazard stays away); the left end gives columns at half width at the bottom.
+  Widths: c_kap 18 bits, fed to the multiplier as Q15 (|kappa| >> 1, new c_akq), c_t1 21 bits, c_dphs 30 bits; the
+  beam phase is 34 bits (±512 half-periods) because fine columns with a doubled left skew pass 128 half-periods
+  across the line (v0.1.x could already wrap there at the K2/P12 extremes).
+- **K3 Level**: ±7 levels (was ±3.5): multiplier 7282 -> 14564, slice 23 bits. The staircase value now reaches 16
+  levels; the Q8 path (e_vq + the bend) peaks at 8185 of its 8191.
+- Line engine: one clock longer (9), still far inside a line.
+- **Build** v0.2.0, router1, all six seed 1 (dupin: 0 I0 == I1). HD Analog 94.19, HD HDMI 92.95, HD Dual 93.21 MHz
+  (worst HD 92.95); SD 92.91 / 98.18 / 93.73 MHz. 6835–6844 / 7680 LC (89 %, the LFO's removal pays for the wider
+  registers), 7 / 32 EBR; every bitstream passed iceunpack. Not simulated (build-first; Ron checks on hardware).
+  v0.1.2's vmprog and VHDL are kept in `.heirloom_work/rb_tilework/`. Not flashed.
