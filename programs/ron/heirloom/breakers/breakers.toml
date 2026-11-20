@@ -8,7 +8,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.breakers"
 program_name = "Breakers"
-program_version = "0.1.3"
+program_version = "0.1.4"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -24,7 +24,7 @@ name_label = "Ribbons"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 105
 display_float_digits = 0
 suffix_label = "%"
 
@@ -34,7 +34,7 @@ name_label = "Swell"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 657
 display_float_digits = 0
 suffix_label = "%"
 
@@ -44,7 +44,7 @@ name_label = "Ripple"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 145
 display_float_digits = 0
 suffix_label = "%"
 
@@ -54,7 +54,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 700
+initial_value = 392
 display_float_digits = 0
 suffix_label = ""
 
@@ -64,7 +64,7 @@ name_label = "Grain"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 511
 display_float_digits = 0
 suffix_label = "%"
 
@@ -74,7 +74,7 @@ name_label = "Etch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 851
 display_float_digits = 0
 suffix_label = "%"
 
@@ -114,7 +114,7 @@ name_label = "Break"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 410
+initial_value = 688
 display_float_digits = 0
 suffix_label = "%"
 

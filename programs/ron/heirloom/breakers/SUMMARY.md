@@ -194,3 +194,10 @@ old vs new: `.heirloom_work/rb_breakers/k6b/k6b_cmp.png` (same picture, the bend
 reaches the blue ribbon cores; no new artifacts).
 **Build:** router1, seed 1 on all six; HD Analog 93.37, HD HDMI 89.40, HD Dual 92.70 MHz (worst HD 89.40); SD 91.75 /
 91.13 / 84.45 MHz; 6991-7020 / 7680 LC (91.4 %), 21/32 EBR. `out/rev_b/ron/heirloom/breakers.vmprog`. NOT flashed.
+
+## v0.1.4: HW-captured defaults (2026-11-19)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Ribbons 105, K2 Swell 657, K3 Ripple 145, K4 Speed 392, K5 Grain 511, K6 Etch 851, P12 Break 688
+(S7-S11 unchanged). The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 215 bytes),
+so timing, seeds and LC are as in v0.1.3. Presets are unchanged.
