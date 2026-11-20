@@ -179,3 +179,11 @@ the etch sum wraps mod one cycle by design. GHDL 720p dec-4 frames of bear.png a
 `.heirloom_work/rb_gothic/k6b/k6b_cmp.png` (same picture, more colour contours through the face; no new artifacts).
 **Build:** router1, seed 1 on all six; HD Analog 82.77, HD HDMI 82.64, HD Dual 81.49 MHz (worst HD 81.49); SD 75.35 /
 80.61 / 79.45 MHz; 7185-7218 / 7680 LC (94 %), 23/32 EBR. `out/rev_b/ron/heirloom/gothic.vmprog`. NOT flashed.
+
+## v0.1.4: HW-captured defaults (2026-11-19)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Arches 835, K2 Curve 343, K3 Ribbons 788, K4 Speed 717, K5 Waves 1023, S7 Stripes On, S8 Swap On, S9 Tear On,
+P12 Vault 395 (K6 Etch, S10, S11 unchanged). K5 is continuous (glided, no zones), so 1023 loads as dialled. The
+vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 255 bytes), so timing, seeds and LC
+are as in v0.1.3. Presets are unchanged.

@@ -7,7 +7,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.gothic"
 program_name = "Gothic"
-program_version = "0.1.3"
+program_version = "0.1.4"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -23,7 +23,7 @@ name_label = "Arches"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 835
 display_float_digits = 0
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Curve"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 343
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Ribbons"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 788
 display_float_digits = 0
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 700
+initial_value = 717
 display_float_digits = 0
 suffix_label = ""
 
@@ -63,7 +63,7 @@ name_label = "Waves"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 1023
 display_float_digits = 0
 suffix_label = "%"
 
@@ -81,19 +81,19 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Stripes"
 value_labels = ["Green", "Cyan"]
-initial_value_label = "Green"
+initial_value_label = "Cyan"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Swap"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Tear"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -113,7 +113,7 @@ name_label = "Vault"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 395
 display_float_digits = 0
 suffix_label = "%"
 
