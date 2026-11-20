@@ -243,3 +243,11 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 Ron: K6 loads at 100 % (initial_value 1023, set by the orchestrator, with the version bump), and the camera effect at the top of the knob is 25 % stronger on bend / element programs. Bend-type: the camera's luma times Etch is added to the field (the faces, flutes and chevrons bend). Camera gain c_eg = x + (x >> 2) with x = (k6 (2048 - k6) x 133) >> 19 (top 266 -> 332). The peak etch term is ~330, inside the range the Osc already uses. The Osc gain (3 x) is unchanged. The gain is computed per field (no new pixel-path multiplier, latency unchanged). Checked: a GHDL render of old against new code at K6 = 100 % (the K6 glide bypassed in the scratch copies), `.heirloom_work/rb_mummer/k6b/k6b_cmp.png`: the same picture with a stronger camera bend, with no wrap and no new artifacts.
 
 - Build: router1, all six configs on seed 1; worst HD 86.90 MHz (HD Dual; HD Analog 93.42, HD HDMI 92.11); SD 79.30-87.88; 7137-7165 LC, 18 / 32 EBR.
+
+## v0.1.4: HW-captured defaults (2026-11-19)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Faces 845, K2 Stripes 1023, K3 Lightning 432, K4 Roll 325, K5 Bands 198, P12 Mask 367 (K6 Etch and S7-S11
+unchanged). K2 is continuous (glided, no zones), so 1023 loads as dialled. The vmprog was repacked from the v0.1.3
+bitstreams (only the settings block differs, 216 bytes), so timing, seeds and LC are as in v0.1.3. Presets are
+unchanged.
