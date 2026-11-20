@@ -226,3 +226,26 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
   - Latency unchanged.
 - **Render.** `.heirloom_work/rb_nesting/k6b/k6b_cmp.png` (bear, 720p60 / 2, K6 100 %, glide bypassed in the scratch copies). The same eyes and rings; the bright areas push the contours further round the palette.
 - **Build** v0.1.2, router1, all six seed 1. HD Analog 92.03, HD HDMI 88.98, HD Dual 89.73 MHz (worst HD 88.98). 7173–7196 / 7680 LC. Not flashed.
+
+## v0.2.0: Ron's preview notes (2026-11-19)
+
+Ron (Heirloom Preview Queue, rework on v0.1.0): "Make P4 a performance control and not an animation." P4 = K4
+Breath, the only automatic animation (the LFO that breathed the eyes into the lattice; the tear wobble's slow drift
+is untouched).
+
+- **K4 Breath is now played.** It sets the breath directly: e = clamp(e0 + k4 · 850 / 1024, −276, 918) (Q8
+  octaves). The range is the LFO's whole excursion: the breath is one-directional (b = 0 .. 1, eyes → lattice) and
+  K4 at full gave D = 849 (594 at the clip's 512), so 0 = the eyes / the still (gain x1, as the LFO's eye state),
+  512 = +1.66 octaves (x3.2), 1023 = +3.32 octaves (x10, the lattice; the gain cap at 918 = x12 still applies with
+  P12 up). Unipolar, 0 .. 100 %, default 0 (the still, which is where the LFO started at power-up). The key duty
+  still thins with the gain, so the magenta rings fade into the lattice as the knob goes up.
+- K4 joined the shared glide (now 7 channels, done by zone clock 30; it was read raw for the LFO), so pot noise
+  can't shimmer the far ring edges.
+- Removed: the LFO phase and its cosine ROM port, the breath shaping (two products), the depth and rate products,
+  the rate exponent and exp2 lookup, s_half. Slots 3-6 are unused; slot 7 is now k4 · 850.
+- Presets: Big Eyes K4 300 -> 0 (at P12 0 a fixed +0.97 octaves would have shrunk the eyes back to the still;
+  0 holds them big). Lattice (K4 0) and Shredded (K4 900: now a shredded lattice) keep their values; no renames.
+- **Build** v0.2.0, router1, all six seed 1. HD Analog 85.93, HD HDMI 87.35, HD Dual 88.98 MHz (worst HD 85.93);
+  SD Analog 84.61, SD HDMI 88.54, SD Dual 95.49 MHz. 6939–6959 / 7680 LC (90.6 %, was up to 7196), 20 / 32 EBR
+  (was 21: the LFO cosine port is gone). Every bitstream passed iceunpack; router1 finished every config without a
+  stall. Not simulated. v0.1.2's VHDL and vmprog are in `.heirloom_work/rb_nesting/`. Not flashed.

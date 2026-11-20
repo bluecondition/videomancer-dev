@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Nesting v0.1.0 -- Heirloom (video phase), from the clip WIN_20230627_23_37_56 at 7.0 s.
+-- Nesting v0.2.0 -- Heirloom (video phase), from the clip WIN_20230627_23_37_56 at 7.0 s.
 --
 -- The picture: two eyes of nested, bevelled squares (x 547 / 1489, mirrored about x 1018) in blue, cyan and black
 -- contour rings with red beyond, overlaid by magenta / purple key rings (centred 21 px further right, 97 px apart)
@@ -21,7 +21,7 @@
 --   K1  Eyes     the two eyes' spacing: merged into one (0) .. the still (512) .. out at the edges (1023)
 --   K2  Corners  the rings' corners: 4-point stars (0) .. the still's bevelled squares (420) .. diamonds (1023)
 --   K3  Pink     the magenta rings' spacing: 2.3x wider (0) .. the still (97 px) .. 2.3x finer (1023)
---   K4  Breath   the LFO: still (0) .. the clip (512: 5.46 s, gain x1 .. x5) .. fast and deep (1023)
+--   K4  Breath   the clip's breath, played: the eyes (0, the still) .. +3.3 octaves of gain, the lattice (1023)
 --   K5  Tear     the zigzag and wobble: clean (0) .. the still (512) .. shredded (1023)
 --   K6  Etch     how far the camera (or the Osc, 8x) bends both ring systems
 --   S7  Quad     two rows of eyes (the V ramps folded again at +-270 lines)
@@ -38,6 +38,8 @@
 -- in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 --
 -- 2026-11-15: K6 camera top +25 % (Ron): etch gain eg + eg/4, eg = 5 k6^2 >> 14 (per field, step 463; max 398).
+-- 2026-11-19 v0.2.0 (Ron's preview notes): K4 Breath is a played gain offset (glided) over the LFO's full range,
+--   0 .. 849 Q8 octaves; the LFO (phase, cosine, breath shaping, depth and rate) is removed.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -122,8 +124,8 @@ architecture nesting of program_top is
     -- ROMs (one read port each, registered address and data)
     signal r_ex_a  : unsigned(7 downto 0) := (others => '0');
     signal r_ex_q  : unsigned(15 downto 0) := (others => '0');
-    signal r_cos_a, r_lc_a : unsigned(7 downto 0) := (others => '0');
-    signal r_cos_q, r_lc_q : unsigned(9 downto 0) := (others => '0');
+    signal r_lc_a : unsigned(7 downto 0) := (others => '0');
+    signal r_lc_q : unsigned(9 downto 0) := (others => '0');
     signal r_pal_a : unsigned(9 downto 0) := (others => '0');
     signal r_pal_q : std_logic_vector(31 downto 0) := (others => '0');
     signal r_bc_a  : unsigned(7 downto 0) := (others => '0');
@@ -143,7 +145,6 @@ architecture nesting of program_top is
     signal s_xsr  : unsigned(2 downto 0) := to_unsigned(2, 3);
     signal s_xs   : unsigned(2 downto 0) := to_unsigned(2, 3);
     signal s_x0   : unsigned(9 downto 0) := (others => '0');
-    signal s_half : std_logic := '0';
     signal s_idle : unsigned(9 downto 0) := (others => '0');
     signal s_zone, s_zone_d, s_zgo : std_logic := '0';
     signal s_zc   : unsigned(10 downto 0) := (others => '0');
@@ -151,40 +152,28 @@ architecture nesting of program_top is
     signal s_hcnt, s_wmax : unsigned(11 downto 0) := (others => '0');
     signal s_w    : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
-    -- knobs: glided (Q3), raw breath, switches
+    -- knobs: glided (Q3), switches
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(420 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_g4 : unsigned(12 downto 0) := (others => '0');
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(300 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(300 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
-    signal s_k4 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_quad, s_pink, s_pal, s_rev, s_src : std_logic := '0';
 
     -- per-field scratch and constants
-    signal z_er   : signed(9 downto 0) := (others => '0');          -- LFO rate exponent, Q8 octaves
-    signal z_d4   : unsigned(9 downto 0) := (others => '0');
-    signal z_ern  : std_logic := '0';
-    signal z_mr   : unsigned(15 downto 0) := to_unsigned(32768, 16);
-    signal z_sr   : signed(2 downto 0) := (others => '0');
-    signal z_c0   : unsigned(9 downto 0) := (others => '0');         -- (1 - cos phi) / 2, Q10
     signal z_e0   : signed(11 downto 0) := (others => '0');          -- gain exponent from P12, Q8
     signal z_e0n  : std_logic := '0';
-    signal z_d    : unsigned(9 downto 0) := to_unsigned(594, 10);    -- breath depth, Q8 octaves
-    signal z_b1   : unsigned(9 downto 0) := (others => '0');
-    signal z_b    : unsigned(10 downto 0) := (others => '0');        -- breath, Q10
     signal z_e    : signed(11 downto 0) := (others => '0');          -- gain exponent, Q8
     signal z_me, z_me2, z_mb : unsigned(15 downto 0) := to_unsigned(32768, 16);
     signal z_se, z_se2, z_sb : signed(2 downto 0) := (others => '0');
     signal z_eb   : signed(9 downto 0) := (others => '0');
     signal z_ebn  : std_logic := '0';
     signal z_k1hi : std_logic := '0';
-    signal c_phi  : unsigned(15 downto 0) := to_unsigned(59895, 16); -- LFO phase (power-up: the still, 0.47 s
-                                                                     -- before the eye-state turnaround)
-    signal c_dphi : unsigned(15 downto 0) := to_unsigned(200, 16);
     signal c_phw  : unsigned(15 downto 0) := (others => '0');        -- wobble phase (drifts)
     signal c_a2   : unsigned(10 downto 0) := to_unsigned(942, 11);   -- eye half-spacing, h
     signal c_ab2  : unsigned(10 downto 0) := to_unsigned(940, 11);
@@ -364,7 +353,6 @@ begin
     begin
         if rising_edge(clk) then
             r_ex_q  <= C_NS_EXP2(to_integer(r_ex_a));
-            r_cos_q <= C_NS_COS(to_integer(r_cos_a));
             r_lc_q  <= C_NS_COS(to_integer(r_lc_a));
             r_pal_q <= C_NS_PAL(to_integer(r_pal_a));
             r_bc_q  <= C_NS_BCOL(to_integer(r_bc_a));
@@ -408,7 +396,6 @@ begin
                 if s_hcnt > s_wmax then s_wmax <= s_hcnt; end if;
                 s_hcnt <= (others => '0');
             end if;
-            s_k4 <= unsigned(registers_in(3));
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
@@ -418,7 +405,6 @@ begin
                 s_rev  <= registers_in(6)(3);
                 s_src  <= registers_in(6)(4);
                 s_xs   <= s_xsr;
-                s_half <= f_half(s_tid);
                 case to_integer(s_xsr) is
                     when 4 =>      s_oxs <= to_unsigned(204, 9); s_x0 <= to_unsigned(480, 10);
                     when 3 =>      s_oxs <= to_unsigned(153, 9); s_x0 <= (others => '0');
@@ -438,8 +424,9 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 3      => s_gm <= s_g4; s_gr <= unsigned(registers_in(3));
+                            when 4      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
+                            when 5      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -458,12 +445,13 @@ begin
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 3      => s_g4 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 4      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 5      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 5 then z_grun <= '0'; end if;
+                        if z_gc = 6 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -476,10 +464,6 @@ begin
                     when 40  => z_sel <= to_unsigned(0, 5);  z_pre <= '1';
                     when 64  => z_sel <= to_unsigned(1, 5);  z_pre <= '1';
                     when 88  => z_sel <= to_unsigned(2, 5);  z_pre <= '1';
-                    when 112 => z_sel <= to_unsigned(3, 5);  z_pre <= '1';
-                    when 136 => z_sel <= to_unsigned(4, 5);  z_pre <= '1';
-                    when 160 => z_sel <= to_unsigned(5, 5);  z_pre <= '1';
-                    when 184 => z_sel <= to_unsigned(6, 5);  z_pre <= '1';
                     when 208 => z_sel <= to_unsigned(7, 5);  z_pre <= '1';
                     when 240 => z_sel <= to_unsigned(8, 5);  z_pre <= '1';
                     when 264 => z_sel <= to_unsigned(9, 5);  z_pre <= '1';
@@ -507,15 +491,7 @@ begin
                         end if;
                     when 1  => z_fa <= resize(s_g2(12 downto 3), 16);    z_fb <= to_unsigned(93, 16);    -- corners
                     when 2  => z_fa <= resize(unsigned(abs(z_e0)), 16);  z_fb <= to_unsigned(236, 16);   -- |p12 - 300| e0
-                    when 3  => z_fa <= resize(s_k4, 16);                 z_fb <= to_unsigned(297, 16);   -- depth
-                    when 4  =>                                                                            -- LFO step
-                        if s_half = '1' then z_fa <= to_unsigned(200, 16); else z_fa <= to_unsigned(400, 16); end if;
-                        z_fb <= resize(z_mr, 16);
-                    when 5  => z_fa <= resize(z_c0, 16);                 z_fb <= to_unsigned(82, 16);
-                    when 6  =>
-                        if z_c0 > 358 then z_fa <= resize(z_c0 - 358, 16); else z_fa <= (others => '0'); end if;
-                        z_fb <= to_unsigned(1449, 16);
-                    when 7  => z_fa <= resize(z_d, 16);                  z_fb <= resize(z_b, 16);         -- D b
+                    when 7  => z_fa <= resize(s_g4(12 downto 3), 16);    z_fb <= to_unsigned(850, 16);    -- breath
                     when 8  => z_fa <= to_unsigned(1113, 16);            z_fb <= resize(z_me, 16);        -- SH
                     when 9  => z_fa <= to_unsigned(2115, 16);            z_fb <= resize(z_me2, 16);       -- SHf
                     when 10 => z_fa <= to_unsigned(19146, 16);           z_fb <= resize(z_me2, 16);       -- SVf
@@ -533,19 +509,9 @@ begin
 
             if s_zone = '1' then
                 case to_integer(s_zc) is
-                    when 30 =>                        -- LFO: advance the phase (last field's step); rate exponent
-                        c_phi <= c_phi + c_dphi;
+                    when 30 =>                        -- the wobble drifts
                         c_phw <= c_phw + 137;
-                        z_ern <= not s_k4(9);
-                        if s_k4(9) = '1' then
-                            z_er <= signed('0' & s_k4(8 downto 0));               -- k4 - 512 (Q8 octaves)
-                        else
-                            z_d4 <= to_unsigned(512, 10) - s_k4;                  -- 512 - k4
-                        end if;
-                    when 31 =>                        -- k4 < 512: 0.75 (k4 - 512) = -(d - d / 4) (unsigned, no
-                        if z_ern = '1' then           -- shared sign bits in one adder)
-                            z_er <= -signed(z_d4 - shift_right(z_d4, 2));
-                        end if;
+                    when 31 =>                        -- (the glide finishes at zc 30)
                         z_k1hi <= s_g1(12) and (s_g1(11) or s_g1(10) or s_g1(9) or s_g1(8) or s_g1(7)
                                   or s_g1(6) or s_g1(5) or s_g1(4) or s_g1(3));
                         z_e0n <= '0';
@@ -553,12 +519,6 @@ begin
                         z_e0 <= signed(resize(s_gp(12 downto 3), 12)) - 300;
                         z_ebn <= not s_g3(12);
                         z_eb <= signed(resize(s_g3(12 downto 3), 10) - 512);
-                    when 32 =>
-                        r_ex_a <= unsigned(z_er(7 downto 0));
-                    when 33 => z_sr <= resize(shift_right(z_er, 8), 3);
-                    when 34 =>
-                        z_mr <= r_ex_q;
-                        z_c0 <= to_unsigned(511, 10) - unsigned(resize(signed(r_cos_q), 10));
                     when 62 =>                        -- a2 = k1 * 471 >> 8, or 942 + (k1 - 512) * 391 >> 8
                         if z_k1hi = '1' then c_a2 <= resize(m_acc(18 downto 8), 11) + 942;
                         else c_a2 <= resize(m_acc(18 downto 8), 11); end if;
@@ -577,20 +537,8 @@ begin
                     when 110 =>                       -- e0 = +-(|p12 - 300| * 236 >> 8)
                         if z_e0n = '1' then z_e0 <= -signed(resize(m_acc(19 downto 8), 12));
                         else z_e0 <= signed(resize(m_acc(19 downto 8), 12)); end if;
-                    when 134 =>                       -- D = k4 * 297 >> 8, or 594 + (k4 - 512) / 2
-                        if s_k4(9) = '1' then z_d <= to_unsigned(594, 10) + resize(s_k4(8 downto 1), 10);
-                        else z_d <= resize(m_acc(17 downto 8), 10); end if;
-                    when 158 =>                       -- LFO step = base * 2^(er / 256)
-                        case to_integer(z_sr) is
-                            when -2     => c_dphi <= resize(m_acc(31 downto 17), 16);
-                            when -1     => c_dphi <= resize(m_acc(31 downto 16), 16);
-                            when 0      => c_dphi <= resize(m_acc(31 downto 15), 16);
-                            when others => c_dphi <= resize(m_acc(31 downto 14), 16);
-                        end case;
-                    when 182 => z_b1 <= resize(m_acc(19 downto 10), 10);
-                    when 206 => z_b <= resize(z_b1, 11) + resize(m_acc(20 downto 10), 11);
-                    when 230 =>                       -- e = clamp(e0 + D b >> 10, -276, 918)
-                        v_e := resize(z_e0, 13) + signed(resize(m_acc(21 downto 10), 13));
+                    when 230 =>                       -- e = clamp(e0 + k4 * 850 >> 10, -276, 918): the played breath
+                        v_e := resize(z_e0, 13) + signed(resize(m_acc(19 downto 10), 13));
                         if v_e < -276 then v_e := to_signed(-276, 13); elsif v_e > 918 then v_e := to_signed(918, 13); end if;
                         z_e <= resize(v_e, 12);
                     when 232 =>
@@ -945,7 +893,6 @@ begin
             -- 2: the folders, max / min; B max / min; distance to the B mirror; ghost phase
             v_tu := f_fold(b_pa);
             if v_tu >= l_tv then p2_mxa <= v_tu; p2_mna <= l_tv; else p2_mxa <= l_tv; p2_mna <= v_tu; end if;
-            r_cos_a <= f_cidx(c_phi);                  -- the LFO's cosine (read in the zone)
             if b_pb(21 downto 6) >= l_vb then
                 p2_mxb <= b_pb(21 downto 6); p2_mnb <= l_vb; p2_reg <= '1';
             else

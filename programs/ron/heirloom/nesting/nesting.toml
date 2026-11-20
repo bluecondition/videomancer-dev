@@ -1,13 +1,13 @@
 # Nesting - Heirloom (video phase), built 2026-11-09 from the clip WIN_20230627_23_37_56 at 7.0 s.
 # Two eyes of nested bevelled squares in blue / cyan / black contour rings, magenta key rings running into a purple
-# vase, a diamond floor, torn zigzag edges; an LFO breathes the eyes into a dense lattice.  See nesting.vhd,
+# vase, a diamond floor, torn zigzag edges; K4 Breath plays the eyes into a dense lattice.  See nesting.vhd,
 # nesting.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.nesting"
 program_name = "Nesting"
-program_version = "0.1.2"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -53,7 +53,7 @@ name_label = "Breath"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
 
@@ -128,7 +128,7 @@ rotary_potentiometer_4 = 0
 [[preset]]
 name = "Big Eyes"
 linear_potentiometer_12 = 0
-rotary_potentiometer_4 = 300
+rotary_potentiometer_4 = 0
 
 [[preset]]
 name = "Four Eyes"
