@@ -166,3 +166,10 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 Ron: K6 loads at 100 % (initial_value 1023, set by the orchestrator, with the version bump), and the camera effect at the top of the knob is 25 % stronger on bend / element programs. Bend-type: K6 Etch bends the tongues' ring phase and pushes their colour level by the camera's luma. Camera gain c_eg = c_eg0 + (c_eg0 >> 2) (k6^2 >> 11 x1.25, top 511 -> 638). Peak colour level 5084, well inside the range the Osc already uses. The Osc gain (6 x c_eg0) is unchanged: its colour-level sum is already near the 16-bit limit. At K6 = 100 % bright areas now lift the black upper region into the first flame colours. The gain is computed per field (no new pixel-path multiplier, latency unchanged). Checked: a GHDL render of old against new code at K6 = 100 % (the K6 glide bypassed in the scratch copies), `.heirloom_work/rb_flamecrest/k6b/k6b_cmp.png`: the same picture with a stronger camera bend, with no wrap and no new artifacts.
 
 - Build: router1, all six configs on seed 1; worst HD 95.14 MHz (HD Dual; HD Analog 95.18, HD HDMI 99.07); SD 91.98-98.48; 7204-7223 LC, 23 / 32 EBR.
+
+## v0.1.4: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Tongues 390, K2 Diamonds 749, K3 Rings 119, K4 Speed 277, K5 Strokes 445, K6 Etch 995, S9 Frost On, P12 Blaze 807
+(S7, S8, S10, S11 unchanged). The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs,
+230 bytes), so timing, seeds and LC are as in v0.1.3. Presets are unchanged.
