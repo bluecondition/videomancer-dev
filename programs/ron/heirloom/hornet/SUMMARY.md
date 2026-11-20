@@ -179,3 +179,10 @@ Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 %
 - **Change:** Etch gain x1.25 at every position: camera `c_eg = f_acc >> 9 + f_acc >> 11` (1023 -> 13732, 3.1 cycles at full luma, was 2.5); the Osc keeps 12x the camera gain (now `16x - 1x` of the old base) under the same 65535 ceiling, so the Osc at 100 % is unchanged (it was already saturated). Sequencer only.
 - **Build:** Built with router1: all six seed 1; worst HD 82.15 MHz (HD Analog 82.15, HD HDMI 82.72, HD Dual 85.75); max 7196 / 7680 LC.
 - **Check:** GHDL 480p render, bear, K6 = 100 %, old vs new (glides snapped in scratch copies): `.heirloom_work/rb_hornet/k6b/k6b_cmp.png`, the same picture with a stronger bend.
+
+## v0.1.4: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Eyes 772, K2 Lemons 371, K3 Stripes 616, K4 Roll 173, K5 Blocks 663, P12 Lean 363 (K6 Etch and S7-S11
+unchanged). The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 188 bytes), so
+timing, seeds and LC are as in v0.1.3. Presets are unchanged.
