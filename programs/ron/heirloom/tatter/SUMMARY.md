@@ -207,3 +207,11 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 - **Change.** Slot 434: the camera's c_eg = k6^2 / 2048 + k6^2 / 8192, 0 .. 638 (was 0 .. 511). The mantissa normalisation and the +-2047 clamp already hold it. The Osc keeps its linear 2 k6. Per-field arithmetic only; the latency is unchanged.
 - **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_tatter/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
 - **Build (v0.1.3):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom tatter`). Post-route Fmax: HD Analog 77.51, HD HDMI 84.28, HD Dual 84.93 (worst HD 77.51), SD Analog 82.15, SD HDMI 74.12, SD Dual 83.84 MHz. Up to 6736 / 7680 LC.
+
+## v0.1.4: HW-captured defaults (2026-11-19)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Columns 1023, K2 Rows 79, K3 Eyes 0, K4 Scroll 98, K5 Checker 1023, S7 Crosses On, S8 Colours On, P12 Tear 481
+(K6 Etch and S9-S11 unchanged). The knobs at 0 / 1023 are continuous (glided, no zones), so they load as dialled.
+The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 242 bytes), so timing, seeds and
+LC are as in v0.1.3. Presets are unchanged.
