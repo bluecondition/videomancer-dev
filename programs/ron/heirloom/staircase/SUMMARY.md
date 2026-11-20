@@ -266,3 +266,11 @@ Ron (Heirloom Preview Queue, rework on v0.1.0): "Make the Climb knob a performan
   v0.1.2), 6 / 32 EBR; every bitstream passed iceunpack. router1 finished every config in under a minute (no
   self-add stall; the synth json was cleaned up before dupin could run). Not simulated. v0.1.2's vmprog and VHDL
   are in `.heirloom_work/rb_staircase/` (`_v012`). Not flashed.
+
+## v0.2.1: HW-captured defaults (2026-11-19)
+
+Ron flashed v0.2.0, dialled the look in and captured it with `./capture_preset.sh --defaults`:
+K1 Cells 0, K2 Bricks 112, K3 Lean 338, K4 Climb 102 (about 25 rows down), K5 Rise 138, S9 Cross On, P12 Stairs 26
+(K6 Etch, S7, S8, S10, S11 unchanged). No control has edge hysteresis (K5 indexes the Q table straight from the
+glided value), so the values load as dialled. The vmprog was repacked from the v0.2.0 bitstreams (only the settings
+block differs), so timing and seeds are as in v0.2.0. Presets are unchanged.
