@@ -233,7 +233,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 60 | 20230723_00_52_24 t0.5 | tunnel | black/white concentric diamond moire eye | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,755-6,764 LC, 13 EBR); not flashed |
 | 61 | 20230804_22_27_52 t6.0 | mummer | green/red/blue/magenta contour mask faces | v0.1.4 2026-11-19: HW-captured defaults (Ron); v0.1.3 K6 default 100 % (router1, 6/6 seed 1; 7,137-7,165 LC, 18 EBR) |
 | 62 | 20230817_00_06_49 t0.5 | gothic | green/blue/red arch stripes | v0.1.4 2026-11-19: HW-captured defaults (Ron); v0.1.3 K6 default 100 % (router1, 6/6 seed 1; 7,185-7,218 LC, 23 EBR) |
-| 63 | 20230818_01_17_40 t3.0 | owlet | blue/cyan contour eyes on a red ground; purple/red blobs alt | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,088-7,119 LC, 19 EBR); not flashed |
+| 63 | 20230818_01_17_40 t3.0 | owlet | blue/cyan contour eyes on a red ground; purple/red blobs alt | v0.1.3 2026-11-19: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1, 6/6 seed 1; up to 7,121 LC, 19 EBR) |
 | 64 | 20230904_01_56_58 t0.5 | specter | green ghost flame figure on black with blue floor | v0.1.0 built 2026-11-10 (router1; all six seed 1; 7,177-7,204 LC, 19 EBR); not flashed |
 | 65 | 20230906_22_43_27 t2.5 | mantis | green/purple/white kaleidoscope insect | v0.1.1 built 2026-11-10 (router2; HD Analog, HD HDMI, HD Dual, SD Analog seed 2, others seed 1; 7,302-7,313 LC, 17 EBR); not flashed |
 | 66 | 20230907_00_18_59 t5.5 | cupola | red/orange/green sunset bands with blue domes | v0.1.1 built 2026-11-09 (router1; all six seed 1; 6,647-6,667 LC, 22 EBR); not flashed |

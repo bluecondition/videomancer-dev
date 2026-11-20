@@ -210,3 +210,11 @@ The etch constant is 385 >> 9 (was 154 >> 8, exactly x1.25 at every position; Os
 Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_owlet/k6b/k6b_cmp.png`.
 
 Build: router1, all seed 1, worst HD Fmax 90.56 MHz, 7121 LC (max of 6). Fmax per config: HD Analog 90.56, SD Analog 95.86, HD HDMI 98.25, SD HDMI 95.95, HD Dual 91.02, SD Dual 91.02 MHz.
+
+## v0.1.3: HW-captured defaults (2026-11-19)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Eyes 782, K2 Rings 0, K3 Fins 150, K4 Roll 820, K5 Ember 483, S7 Twin On, S10 Fire On, P12 Gaze 937 (K6 Etch,
+S8, S9, S11 unchanged). K2 is continuous (glided, no zones), so 0 loads as dialled. The vmprog was repacked from the
+v0.1.2 bitstreams (only the settings block differs, 237 bytes), so timing, seeds and LC are as in v0.1.2. Presets
+are unchanged.

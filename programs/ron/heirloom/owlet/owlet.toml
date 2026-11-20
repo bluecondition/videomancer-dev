@@ -7,7 +7,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.owlet"
 program_name = "Owlet"
-program_version = "0.1.2"
+program_version = "0.1.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -23,7 +23,7 @@ name_label = "Eyes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 782
 display_float_digits = 0
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Rings"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Fins"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 150
 display_float_digits = 0
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Roll"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 700
+initial_value = 820
 display_float_digits = 0
 suffix_label = ""
 
@@ -63,7 +63,7 @@ name_label = "Ember"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 483
 display_float_digits = 0
 suffix_label = "%"
 
@@ -81,7 +81,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Twin"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -99,7 +99,7 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_10"
 name_label = "Fire"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -113,7 +113,7 @@ name_label = "Gaze"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 937
 display_float_digits = 0
 suffix_label = "%"
 
