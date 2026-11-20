@@ -227,3 +227,28 @@ Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where 
 - **Change.** Per field (step 315), the camera's applied gain is c_g6e = g + g/4 (×1.25 at every knob position; max 255 -> 318, inside the 10-bit register; nibble products ≤ 4770 of 14 bits, the bend sum ≤ 76 k of 18 bits, e clamped as before). That is up to ~2.5 px per luma step instead of 2. The Osc keeps 2 g, so Osc mode is unchanged (now 1.6× the camera rather than 2×).
 - Look: `.heirloom_work/rb_pupil/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). The same eye, with more of the camera's outlines bent into it and the blue core showing where bright areas dilate past it.
 - Build: router1. HD Dual closed on seed 2 (seed 1 stalled the router); the other configs on seed 1. HD worst 85.51 MHz (HD Analog 85.51, HD HDMI 94.26, HD Dual 98.18); 6,566 LC.
+
+## v0.2.0: Ron's preview notes (2026-11-19)
+
+Ron (Heirloom Preview Queue, rework on v0.1.0): "I do not like the beat effect but everything else looks good"
+
+- **Removed: the beat.** Ron's 32-step hit pattern (C_PAT), the beat accumulator and step, and the per-line attack /
+  decay envelope added to R (with its decay product, cap and attack constants, and the K4 exp2 lookup). R is now
+  Dilate (P12) + the Tilt below, so the eyes no longer snap open. The moire crawl (0.67 virtual lines per field) and
+  Slip's re-rolls are the only motion left; nothing else Ron liked changed (default frame = v0.1.x between beats).
+- **K4 Beat -> Bricks** (it had nothing left to do): the moire depth, the clip's brick bands. 0 % = clean concentric
+  rings (no bricks, no teeth on the edges), 512 = the clip (16-31 px, unchanged default), 100 % = x4 (64-124 px): heavy
+  brick bands breaking every ring and the core edge. Gain k/4 below 512, 128 + 3(k-512)/4 above (Q7), applied per
+  moire band in the line engine (one 6 x 9 product in its own state). K4 joins the shared glide (7 channels).
+- **K5 Pulse -> Tilt** (likewise): the still's own top-to-bottom opening, held still instead of flashed by a beat.
+  R(y) = Dilate + slope * (y - 540) virtual lines, slope = (k - 512) / 512 px per virtual line with a ±8 deadband:
+  0 = the top eyes open and the bottom ones shut (±540 px at the edges), 512 = flat (the default, as v0.1.x at rest),
+  1023 = the bottom eyes flooding, the top shut. **~727 matches the still's mid-attack gradient (0.42 px / line).**
+  A per-line accumulator (e_tl, Q12 px) on active lines only, like the eye phase; R clamps at 0.
+- **Presets:** "Slip Drums" (K4 820 = a fast beat) is now "Slip Bricks" (K4 820 = moire x2.8, with Slip); "Wide
+  Open" dropped its K5 700 (the old pulse depth), so it keeps its look without a tilt. The others are unchanged.
+- v0.1.2's vhd / toml / vmprog are in `.heirloom_work/rb_pupil/` (`*_v012.*`).
+- **Build** v0.2.0, router1, all six configs on seed 1 (v0.1.2 needed seed 2 on HD Dual). Post-route Fmax: HD Analog
+  95.08, HD HDMI 96.68, HD Dual 103.97 MHz (worst HD 95.08); SD Analog 95.11, SD HDMI 103.70, SD Dual 98.05 MHz.
+  6382-6394 / 7680 LC (83 %, ~180 LC fewer than v0.1.2: the beat's logic is gone), 13 / 32 EBR. iceunpack OK x 6.
+  `out/rev_b/ron/heirloom/pupil.vmprog`. Not simulated (build-first; Ron checks on hardware). **Not flashed.**

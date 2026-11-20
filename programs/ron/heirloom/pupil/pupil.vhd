@@ -1,19 +1,19 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Pupil v0.1.0 -- Heirloom (video phase), rebuilt from the clip WIN_20230408_23_11_38 (still at 3.5 s).
+-- Pupil v0.2.0 -- Heirloom (video phase), rebuilt from the clip WIN_20230408_23_11_38 (still at 3.5 s).
 --
 -- The clip: a column of three almond "eyes" on flat green.  The left half of each eye is concentric cream /
 -- pale-green / teal ring arcs cut into brick-like dashes (a moire), with a soft dark-green halo outside; the
 -- middle is a blue core with a violet ball, a navy rim and a dark crescent, keyed only on the rows where the eye
--- is deep enough at its centre (flat top and bottom).  The eye snaps open on every beat of a rhythm (attack
--- ~1 field, sweeping down the frame) and closes in ~0.25 s.
+-- is deep enough at its centre (flat top and bottom).  (In the clip the eye snaps open on every beat of a rhythm;
+-- v0.2.0 drops the beat at Ron's request and keeps the still's top-to-bottom opening as the Tilt knob.)
 --
 -- The patch, as fitted (pupil.py has the palettes):
 --   e     = R(y) + z(y) - Kv t(y)^2 - |x - cx|        eye depth: H triangle + V parabola-tile (squared triangle)
 --           t = frac((y - 521)/522 + 0.5) - 0.5, Kv = 1730 px, cx = 1077
---   R     = dilation (P12) + the beat envelope (per line) ; z = the moire: bands of 10 virtual lines (period 20)
---           where the eye is dilated by 16..31 px
+--   R     = dilation (P12) + the tilt (per line) ; z = the moire: bands of 10 virtual lines (period 20)
+--           where the eye is dilated by 16..31 px (x Bricks)
 --   core  = rows where R + z - Kv t^2 >= 362 (scaled by Rings): the blue core
 --   colour= mix(PAL_R(core, e), PAL_L(e), A), A = clamp((K_line - x) / 128 px): rings on the left, fading right
 --   video = camera luma (or the Osc lattice) added to e: the rings and the core bend around the picture
@@ -21,8 +21,8 @@
 --   K1  Eyes      eyes per frame height: 0.73 (one giant eye) .. 2.07 (the clip) .. 5.8
 --   K2  Squint    the eye's vertical curvature: merged wavy column .. the clip .. flat slits
 --   K3  Rings     ring scale: fat rings filling the eye .. the clip .. fine rings round a big core
---   K4  Beat      the rhythm's step: 0.8 s .. 0.2 s (the clip) .. 0.05 s (Ron's 32-step hit pattern)
---   K5  Pulse     how wide each beat throws the eye open: 0 .. 440 px (the clip) .. 880 px
+--   K4  Bricks    the moire depth: clean rings (0) .. the clip (512) .. x4, heavy brick bands (1023)
+--   K5  Tilt      the opening's slope down the screen: top eyes open (0) .. flat (512) .. bottom eyes open (1023)
 --   K6  Bend      how far the camera (or the Osc) bends the eye
 --   S7  Slip      Off / sync slips: whole bands of the picture thrown sideways
 --   S8  Core      Blue (the clip) / Rings (no core: ring moire through the whole eye, the clip's rest look)
@@ -32,12 +32,14 @@
 --   P12 DILATE    the pupil's opening: closed seeds .. the clip (343) .. the eye swallowing the screen
 --
 -- Engine: vblank-zone sequencer (one serial multiplier, shared glide, exp2 ROM), a per-line engine kicked at each
--- line start (computes the NEXT line: phase, t^2, Kv t^2, the beat and its envelope, the moire band, the slip
--- band, the core test), a 15-stage pixel path (two palette ROMs, one blend), C_LAT 20.  Virtual 1080-line
+-- line start (computes the NEXT line: phase, t^2, Kv t^2, the tilt, the moire band, the slip band, the core
+-- test), a 15-stage pixel path (two palette ROMs, one blend), C_LAT 20.  Virtual 1080-line
 -- coordinates (SD shows the centre 4:3).  Generated avid; output conditioning (Y, U and V through two
 -- [1 2 2 2 2 2 2 2 1]/16 boxes with the running-sum resync, luma 13/16) before the blanking gate.  Colours in
 -- the hardware convention (u = Cr, v = Cb).
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- 2026-11-19 v0.2.0 (Ron's preview note "I do not like the beat effect"): the beat and its envelope removed;
+--   K4 Beat -> Bricks (moire depth), K5 Pulse -> Tilt (the still's top-to-bottom opening, static)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -53,8 +55,6 @@ use work.all;
 architecture pupil of program_top is
     constant C_LAT : integer := 20;   -- = processing_delay_clks
 
-    -- Ron's hit pattern from the clip: steps 0, 1, 5, 8, 14, 16, 17, 21, 24 of a 32-step loop
-    constant C_PAT : std_logic_vector(31 downto 0) := x"01234123";
 
     function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
     begin
@@ -76,6 +76,19 @@ architecture pupil of program_top is
             when 5 | 6 | 14     => return to_unsigned(3, 3);
             when others         => return to_unsigned(2, 3);
         end case;
+    end function;
+    -- bipolar knob with a +-8 deadband around 512: -503 .. 503
+    function f_db(k : unsigned(9 downto 0)) return signed is
+        variable d : signed(10 downto 0);
+    begin
+        d := signed(resize(k, 11)) - 512;
+        if d > -9 and d < 9 then
+            return to_signed(0, 11);
+        elsif d > 0 then
+            return d - 8;
+        else
+            return d + 8;
+        end if;
     end function;
     function f_tri7(v : unsigned(7 downto 0)) return unsigned is
     begin
@@ -118,23 +131,23 @@ architecture pupil of program_top is
     signal s_hcnt, s_wmax : unsigned(11 downto 0) := (others => '0');
     signal s_w    : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
-    -- knobs: glided (Q3), raw beat, switches
+    -- knobs: glided (Q3), switches
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_g4 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(354 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(343 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
-    signal s_k4 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_slip, s_coreoff, s_twin, s_pal, s_src : std_logic := '0';
 
     -- per-field constants
     signal z_v8   : signed(10 downto 0) := (others => '0');   -- exponent scratch (Q8 octaves)
-    signal z_sh1, z_sh2, z_sh4, z_shi : signed(2 downto 0) := (others => '0');
-    signal z_m1, z_m2, z_m4, z_mi : unsigned(15 downto 0) := to_unsigned(32768, 16);
+    signal z_sh1, z_sh2, z_shi : signed(2 downto 0) := (others => '0');
+    signal z_m1, z_m2, z_mi : unsigned(15 downto 0) := to_unsigned(32768, 16);
     signal c_sh3  : signed(2 downto 0) := (others => '0');
     signal c_m6   : unsigned(5 downto 0) := to_unsigned(32, 6);  -- ring scale mantissa (32..63)
     signal c_cth  : unsigned(16 downto 0) := to_unsigned(23168, 17);
@@ -145,19 +158,18 @@ architecture pupil of program_top is
     signal c_kv   : unsigned(13 downto 0) := to_unsigned(3460, 14);   -- Kv in h
     signal c_g6   : unsigned(7 downto 0) := (others => '0');
     signal c_g6e  : unsigned(9 downto 0) := (others => '0');          -- bend gain (Osc x2)
-    signal c_lb8  : unsigned(23 downto 0) := to_unsigned(12960 * 256, 24);   -- beat step, Q8 virtual lines
     signal c_rb   : unsigned(10 downto 0) := to_unsigned(476, 11);    -- dilation, px
-    signal c_dep  : unsigned(21 downto 0) := to_unsigned(512 * 3523, 22);  -- pulse depth, Q12 px
-    signal c_dcap : unsigned(10 downto 0) := to_unsigned(220, 11);
-    signal c_atk  : unsigned(12 downto 0) := to_unsigned(1728, 13);
-    signal c_dcon : unsigned(6 downto 0) := to_unsigned(8, 7);
+    signal d_k5   : signed(10 downto 0) := (others => '0');            -- Tilt, -503 .. 503
+    signal c_tls  : signed(15 downto 0) := (others => '0');            -- tilt per line, Q12 px
+    signal c_tl0  : signed(23 downto 0) := (others => '0');            -- tilt at line 0, Q12 px
+    signal z_d4   : unsigned(8 downto 0) := (others => '0');
+    signal c_zg   : unsigned(8 downto 0) := to_unsigned(128, 9);      -- Bricks gain, Q7 (x0 .. x4)
     signal c_cxh  : unsigned(11 downto 0) := to_unsigned(2154, 12);
     signal c_zph0 : unsigned(12 downto 0) := (others => '0');          -- moire phase at line 0 (Q8 lines)
     signal c_zn0  : unsigned(15 downto 0) := (others => '0');
     signal c_fcnt : unsigned(2 downto 0) := (others => '0');
     signal c_seed : unsigned(7 downto 0) := (others => '0');
     signal c_sd77 : unsigned(15 downto 0) := (others => '0');
-    signal z_t    : unsigned(15 downto 0) := (others => '0');
 
     -- field serial multiplier
     signal f_a   : unsigned(35 downto 0) := (others => '0');
@@ -189,11 +201,9 @@ architecture pupil of program_top is
     signal e_sacc : unsigned(16 downto 0) := (others => '0');
     signal e_sn   : unsigned(15 downto 0) := (others => '0');
     signal e_slen : unsigned(16 downto 0) := to_unsigned(32 * 256, 17);
-    signal e_bacc : unsigned(24 downto 0) := (others => '0');
-    signal e_bstep : unsigned(4 downto 0) := (others => '1');
-    signal e_hit, e_atk : std_logic := '0';
-    signal e_dr   : unsigned(22 downto 0) := (others => '0');
-    signal e_dec  : unsigned(19 downto 0) := (others => '0');
+    signal e_tl   : signed(23 downto 0) := (others => '0');            -- tilt, Q12 px
+    signal e_tsum : signed(12 downto 0) := (others => '0');
+    signal e_zs   : unsigned(14 downto 0) := (others => '0');
     signal e_tq   : unsigned(15 downto 0) := (others => '0');
     signal e_t2q  : unsigned(15 downto 0) := (others => '0');
     signal e_vh   : unsigned(12 downto 0) := (others => '0');
@@ -292,7 +302,6 @@ begin
     ---------------------------------------------------------------------------
     p_ctrl : process(clk)
         variable v_e  : signed(10 downto 0);
-        variable v_t  : unsigned(35 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -330,7 +339,6 @@ begin
                 s_twin    <= registers_in(6)(2);
                 s_pal     <= registers_in(6)(3);
                 s_src     <= registers_in(6)(4);
-                s_k4      <= unsigned(registers_in(3));
                 s_xs      <= s_xsr;
                 case to_integer(s_xsr) is
                     when 4      => s_x0 <= to_unsigned(480, 9); s_oxs <= to_unsigned(816, 10);
@@ -354,6 +362,7 @@ begin
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
                             when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 5      => s_gm <= s_g4; s_gr <= unsigned(registers_in(3));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -374,10 +383,11 @@ begin
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 5      => s_g4 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 5 then z_grun <= '0'; end if;
+                        if z_gc = 6 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -396,7 +406,6 @@ begin
                     when 318 => z_sel <= to_unsigned(5, 4); z_pre <= '1';
                     when 342 => z_sel <= to_unsigned(6, 4); z_pre <= '1';
                     when 366 => z_sel <= to_unsigned(7, 4); z_pre <= '1';
-                    when 390 => z_sel <= to_unsigned(8, 4); z_pre <= '1';
                     when others => null;
                 end case;
             end if;
@@ -408,15 +417,14 @@ begin
                     when 2  => z_fa <= resize(c_fvl, 36);                z_fb <= to_unsigned(521, 16);       -- phase at line 0
                     when 3  => z_fa <= to_unsigned(3460, 36);            z_fb <= z_m2;                       -- Kv
                     when 4  => z_fa <= resize(s_g6(12 downto 3), 36);    z_fb <= resize(s_g6(12 downto 3), 16);  -- bend^2
-                    when 5  => z_fa <= to_unsigned(12960, 36);           z_fb <= z_m4;                       -- beat step
+                    when 5  => z_fa <= resize(unsigned(abs(d_k5)), 36);  z_fb <= resize(s_ys, 16);           -- tilt / line
                     when 6  =>                                                                               -- dilation
                         if s_gp(12 downto 3) < 343 then
                             z_fa <= resize(s_gp(12 downto 3), 36);       z_fb <= to_unsigned(973, 16);
                         else
                             z_fa <= resize(s_gp(12 downto 3) - 343, 36); z_fb <= to_unsigned(1250, 16);
                         end if;
-                    when 7  => z_fa <= resize(s_g5(12 downto 3), 36);    z_fb <= to_unsigned(3523, 16);      -- pulse depth
-                    when others => z_fa <= resize(c_dep(21 downto 12), 36); z_fb <= resize(s_ys, 16);       -- decay cap
+                    when others => z_fa <= resize(unsigned(abs(d_k5)), 36); z_fb <= to_unsigned(4320, 16);  -- tilt at line 0
                 end case;
             end if;
             if z_ld = '1' then
@@ -442,16 +450,11 @@ begin
                         if c_fcnt = 7 then c_seed <= c_seed + 1; end if;
                     when 21 =>
                         c_sd77 <= shift_left(resize(c_seed, 16), 6) + shift_left(resize(c_seed, 16), 3);
-                        z_t <= shift_left(resize(s_ys, 16), 5) - shift_left(resize(s_ys, 16), 2);
                     when 22 =>
                         c_sd77 <= c_sd77 + shift_left(resize(c_seed, 16), 2) + resize(c_seed, 16);
-                        z_t <= z_t - resize(s_ys, 16);
-                    when 23 =>
-                        c_atk <= resize(shift_right(z_t, 2), 13);                 -- ys * 27 / 4 (Q12 px per line)
-                        c_dcon <= resize(shift_right(s_ys, 5), 7);
 
                     -- exponents: K1 eyes (a = 0.75 (k - 512)), K2 squint (b = k - 512), K3 rings
-                    -- (c = 0.75 (k - 512)) and its inverse, K4 beat (512 - k); 256 = one octave
+                    -- (c = 0.75 (k - 512)) and its inverse; 256 = one octave
                     when 30 =>
                         v_e := signed(resize(s_g1(12 downto 3), 11)) - 512;
                         z_v8 <= v_e + shift_right(v_e, 1);                        -- 1.5 (k - 512)
@@ -473,9 +476,7 @@ begin
                         z_v8 <= -z_v8;
                     when 36 =>
                         r_ex_a <= unsigned(z_v8(7 downto 0)); z_shi <= z_v8(10 downto 8);
-                        z_v8 <= 512 - signed(resize(s_k4, 11));
                     when 37 =>
-                        r_ex_a <= unsigned(z_v8(7 downto 0)); z_sh4 <= z_v8(10 downto 8);
                         c_m6 <= r_ex_q(15 downto 10);
                         -- core threshold: e * m6 >= 23168 >> sh3 (362 px of scaled depth)
                         case to_integer(c_sh3) is
@@ -486,8 +487,14 @@ begin
                         end case;
                     when 38 =>
                         z_mi <= r_ex_q;
-                    when 39 =>
-                        z_m4 <= r_ex_q;
+                    -- K5 Tilt, K4 Bricks (the glide is done by zc 30)
+                    when 41 =>
+                        d_k5 <= f_db(s_g5(12 downto 3));
+                        z_d4 <= s_g4(11 downto 3);                                -- k4 - 512 when k4 >= 512
+                    when 42 =>
+                        -- Bricks gain (Q7): k / 4 below 512 (x0 .. x1), 128 + 3 (k - 512) / 4 above (x1 .. x4)
+                        if s_g4(12) = '0' then c_zg <= resize(s_g4(12 downto 5), 9);
+                        else c_zg <= to_unsigned(128, 9) + resize(shift_right(shift_left(resize(z_d4, 11), 1) + resize(z_d4, 11), 2), 9); end if;
                     when 40 =>                       -- bias = 256 / s (h): mi >> (7 - shi)
                         case to_integer(z_shi) is
                             when -2     => c_bias <= resize(shift_right(z_mi, 9), 11);
@@ -517,20 +524,15 @@ begin
                     when 315 =>
                         if s_src = '1' then c_g6e <= shift_left(resize(c_g6, 10), 1);              -- Osc: x2
                         else c_g6e <= resize(c_g6, 10) + resize(c_g6(7 downto 2), 10); end if;   -- camera x 1.25 (max 318)
-                    when 338 =>                      -- beat step = 12960 m4 >> (15 - sh4) virtual lines, Q8
-                        case to_integer(z_sh4) is
-                            when -2     => v_t := shift_right(f_acc, 17);
-                            when -1     => v_t := shift_right(f_acc, 16);
-                            when 0      => v_t := shift_right(f_acc, 15);
-                            when 1      => v_t := shift_right(f_acc, 14);
-                            when others => v_t := shift_right(f_acc, 13);
-                        end case;
-                        c_lb8 <= v_t(15 downto 0) & x"00";
+                    when 338 =>                      -- tilt per line = kd * ys / 32 (Q12 px; 1 px per virtual line at 512)
+                        if d_k5(10) = '0' then c_tls <= signed(resize(f_acc(19 downto 5), 16));
+                        else c_tls <= -signed(resize(f_acc(19 downto 5), 16)); end if;
                     when 362 =>
                         if s_gp(12 downto 3) < 343 then c_rb <= resize(shift_right(f_acc, 10), 11) + 150;
                         else c_rb <= resize(shift_right(f_acc, 10), 11) + 476; end if;
-                    when 386 => c_dep <= f_acc(21 downto 0);
-                    when 410 => c_dcap <= resize(shift_right(f_acc, 9), 11);
+                    when 386 =>                      -- tilt at line 0 = -540 virtual lines * kd * 8 (pivot at the centre)
+                        if d_k5(10) = '0' then c_tl0 <= -signed(resize(f_acc(22 downto 0), 24));
+                        else c_tl0 <= signed(resize(f_acc(22 downto 0), 24)); end if;
                     when others => null;
                 end case;
             end if;
@@ -622,8 +624,8 @@ begin
     ---------------------------------------------------------------------------
     -- Line engine: kicked at each line start (and once in the zone for line
     -- 0), computes the NEXT line on one serial multiplier (16 iterations,
-    -- result at load + 17): the eye phase t, Kv t^2, the beat, the envelope,
-    -- the moire band, the slip band, the core test.
+    -- result at load + 17): the eye phase t, Kv t^2, the tilt, the moire band,
+    -- the slip band, the core test.
     ---------------------------------------------------------------------------
     p_line : process(clk)
         variable v_d  : signed(20 downto 0);
@@ -653,46 +655,29 @@ begin
                     if e_first = '1' then
                         e_ph <= c_ph0; e_zacc <= resize(c_zph0, 14); e_zn <= c_zn0;
                         e_sacc <= (others => '0'); e_sn <= (others => '0');
+                        e_tl <= c_tl0;
                     else
                         e_ph <= e_ph + c_fs;
                         e_zacc <= e_zacc + resize(s_ys, 14);
                         e_sacc <= e_sacc + resize(s_ys, 17);
+                        e_tl <= e_tl + resize(c_tls, 24);
                     end if;
-                    e_bacc <= e_bacc + resize(s_ys, 25);
                 when 2 =>
                     v_d := signed(resize(e_ph, 21)) - 524288;
                     if v_d < 0 then v_d := -v_d; end if;
                     e_tq <= unsigned(v_d(19 downto 4));
-                    if e_bacc >= resize(c_lb8, 25) then
-                        e_bacc <= e_bacc - resize(c_lb8, 25); e_bstep <= e_bstep + 1; e_hit <= '1';
-                    end if;
                     if e_zacc >= 5120 then e_zacc <= e_zacc - 5120; e_zn <= e_zn + 1; end if;
                     if e_first = '0' and e_sacc >= e_slen then e_sacc <= e_sacc - e_slen; e_sn <= e_sn + 1; end if;
                 when 3 =>
                     m_a <= resize(e_tq, 40); m_b <= e_tq; m_acc <= (others => '0');
-                    if e_hit = '1' and C_PAT(to_integer(e_bstep)) = '1' then e_atk <= '1'; end if;
-                    e_hit <= '0';
                 when 20 =>
                     e_t2q <= m_acc(31 downto 16);
                     m_a <= resize(c_kv, 40); m_b <= m_acc(31 downto 16); m_acc <= (others => '0');
                 when 37 =>
                     e_vh <= m_acc(28 downto 16);
-                    m_a <= resize(e_dr, 40); m_b <= resize(s_ys, 16); m_acc <= (others => '0');
                 when 54 =>
-                    e_dec <= resize(m_acc(39 downto 20), 20) + resize(c_dcon, 20);
-                when 55 =>
-                    if e_dec > resize(c_dcap, 20) then e_dec <= resize(c_dcap, 20); end if;
+                    e_tsum <= signed(resize(c_rb, 13)) + resize(e_tl(23 downto 12), 13);
                 when 56 =>
-                    if e_atk = '1' then
-                        if resize(e_dr, 24) + resize(c_atk, 24) >= resize(c_dep, 24) then
-                            e_dr <= resize(c_dep, 23); e_atk <= '0';
-                        else
-                            e_dr <= e_dr + resize(c_atk, 23);
-                        end if;
-                    else
-                        if e_dr > resize(e_dec, 23) then e_dr <= e_dr - resize(e_dec, 23);
-                        else e_dr <= (others => '0'); end if;
-                    end if;
                     m_a <= resize(e_zn, 40); m_b <= to_unsigned(40503, 16); m_acc <= (others => '0');
                 when 73 =>
                     v_h := m_acc(15 downto 0);
@@ -701,12 +686,14 @@ begin
                 when 74 =>
                     if e_zacc < 2560 then e_z <= resize(e_hz(3 downto 0), 6) + 16; else e_z <= (others => '0'); end if;
                     if e_zacc < 1280 and e_hz(6 downto 4) = "000" then e_drop <= '1'; else e_drop <= '0'; end if;
-                    e_rh1 <= resize(c_rb, 12) + resize(e_dr(22 downto 12), 12);
+                    if e_tsum < 0 then e_rh1 <= (others => '0'); else e_rh1 <= unsigned(e_tsum(11 downto 0)); end if;
                 when 75 =>
-                    e_rh <= e_rh1 + resize(e_z, 12);
+                    e_zs <= resize(e_z * c_zg, 15);                                          -- moire x Bricks (Q7)
                 when 76 =>
-                    e_evh <= signed(resize(e_rh & '0', 15)) - signed(resize(e_vh, 15));
+                    e_rh <= e_rh1 + resize(e_zs(14 downto 7), 12);
                     e_ev0 <= signed(resize(e_rh1 & '0', 15)) - signed(resize(e_vh, 15));   -- the core test ignores the moire
+                when 77 =>
+                    e_evh <= signed(resize(e_rh & '0', 15)) - signed(resize(e_vh, 15));
                 when 90 =>
                     v_h := m_acc(15 downto 0);
                     v_h := v_h xor shift_right(v_h, 8);
