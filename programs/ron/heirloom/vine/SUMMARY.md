@@ -267,3 +267,10 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
   K6 default 1023 (TOML).
 - **Render check:** `.heirloom_work/rb_vine/k6b/k6b_cmp.png` (old vs new at K6 100 %, bear, 720p dec 4: the top-left crop, vines bent and swollen further where the camera is bright, no wrap).
 - **Build:** router1. HD Analog and SD Dual on seed 2 (seed 1 stalled the router, 600 s timeout), the rest seed 1. HD worst 82.65 MHz (HD Analog 85.27, HD HDMI 85.27, HD Dual 82.65), LC 7140.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Vines 757, K2 Sway 352, K3 Wave 757, K4 Speed 775, K5 Girth 596, P12 Flame 464 (K6 Etch and S7-S11 unchanged).
+The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 184 bytes), so timing, seeds and
+LC are as in v0.1.2 (HD Analog and SD Dual seed 2). Presets are unchanged.
