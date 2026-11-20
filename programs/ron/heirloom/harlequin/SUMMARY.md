@@ -196,3 +196,11 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 - **Change.** Slot 165: the camera's et = k6^2 / 4096 + k6^2 / 16384, 0 .. 318 (was 0 .. 255). The 4-bit mantissa and shift gives x1.2 at full (288 against 240). The Osc keeps its 511 cap. It reaches the cap from about 35 % K6, so its top is unchanged. Per-field arithmetic only; the latency is unchanged.
 - **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_harlequin/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
 - **Build (v0.1.3):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom harlequin`). Post-route Fmax: HD Analog 87.97, HD HDMI 93.31, HD Dual 87.10 (worst HD 87.1), SD Analog 82.40, SD HDMI 79.37, SD Dual 85.31 MHz. Up to 7034 / 7680 LC.
+
+## v0.1.4: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Diamonds 627, K2 Stripes 551, K3 Waist 630, K4 Bend 1023, K5 Glass 784, K6 Etch 542, S9 Core On, P12 V-Hold 300
+(S7, S8, S10, S11 unchanged). K4 is continuous (glided, no zones), so 1023 loads as dialled. The vmprog was repacked
+from the v0.1.3 bitstreams (only the settings block differs, 219 bytes), so timing, seeds and LC are as in v0.1.3.
+Presets are unchanged.

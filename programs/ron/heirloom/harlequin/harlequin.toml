@@ -6,7 +6,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.harlequin"
 program_name = "Harlequin"
-program_version = "0.1.3"
+program_version = "0.1.4"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -22,7 +22,7 @@ name_label = "Diamonds"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 627
 display_float_digits = 0
 suffix_label = "%"
 
@@ -32,7 +32,7 @@ name_label = "Stripes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 551
 display_float_digits = 0
 suffix_label = "%"
 
@@ -42,7 +42,7 @@ name_label = "Waist"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 630
 display_float_digits = 0
 suffix_label = "%"
 
@@ -52,7 +52,7 @@ name_label = "Bend"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 1023
 display_float_digits = 0
 suffix_label = "%"
 
@@ -62,7 +62,7 @@ name_label = "Glass"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 784
 display_float_digits = 0
 suffix_label = "%"
 
@@ -72,7 +72,7 @@ name_label = "Etch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 542
 display_float_digits = 0
 suffix_label = "%"
 
@@ -92,7 +92,7 @@ initial_value_label = "Calm"
 parameter_id = "toggle_switch_9"
 name_label = "Core"
 value_labels = ["Orange", "Stripes"]
-initial_value_label = "Orange"
+initial_value_label = "Stripes"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -112,7 +112,7 @@ name_label = "V-Hold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 300
 display_float_digits = 0
 suffix_label = "%"
 
