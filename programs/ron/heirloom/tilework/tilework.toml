@@ -7,7 +7,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.tilework"
 program_name = "Tilework"
-program_version = "0.2.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -23,7 +23,7 @@ name_label = "Rows"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 751
 display_float_digits = 0
 suffix_label = ""
 
@@ -33,7 +33,7 @@ name_label = "Columns"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 705
 display_float_digits = 0
 suffix_label = ""
 
@@ -43,7 +43,7 @@ name_label = "Level"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 115
 display_float_digits = 0
 suffix_label = ""
 
@@ -53,7 +53,7 @@ name_label = "Sweep"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 610
 display_float_digits = 0
 suffix_label = ""
 
@@ -63,7 +63,7 @@ name_label = "Skew"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 790
 display_float_digits = 0
 suffix_label = ""
 
@@ -81,13 +81,13 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Plaid"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Stairs"
 value_labels = ["Straight", "Stairs"]
-initial_value_label = "Straight"
+initial_value_label = "Stairs"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -113,7 +113,7 @@ name_label = "Zoom"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 246
+initial_value = 127
 display_float_digits = 0
 suffix_label = "%"
 

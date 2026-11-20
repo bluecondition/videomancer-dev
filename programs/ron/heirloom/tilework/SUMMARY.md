@@ -201,3 +201,10 @@ Skew in both directions. Double the range of Level."
   (worst HD 92.95); SD 92.91 / 98.18 / 93.73 MHz. 6835–6844 / 7680 LC (89 %, the LFO's removal pays for the wider
   registers), 7 / 32 EBR; every bitstream passed iceunpack. Not simulated (build-first; Ron checks on hardware).
   v0.1.2's vmprog and VHDL are kept in `.heirloom_work/rb_tilework/`. Not flashed.
+
+## v0.2.1: HW-captured defaults (2026-11-19)
+
+Ron flashed v0.2.0, dialled the look in and captured it with `./capture_preset.sh --defaults`:
+K1 Rows 751, K2 Columns 705, K3 Level 115, K4 Sweep 610, K5 Skew 790, S7 Plaid On, S8 Stairs On, P12 Zoom 127
+(K6 Bend and S9-S11 unchanged). The vmprog was repacked from the v0.2.0 bitstreams (only the settings block differs,
+218 bytes), so timing, seeds and LC are as in v0.2.0. Presets are unchanged.
