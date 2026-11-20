@@ -24,7 +24,8 @@
 --   K1  Cells    cell size x1/3 .. x3 (the clip's dividers; 512 = the still)
 --   K2  Bricks   brick length 1 .. 16 cells (4 = the still)
 --   K3  Lean     cells each glyph steps right per group: -8 .. 23 (8 = the still)
---   K4  Climb    bipolar: the glyphs climb up (or down) the chains, ticking a row at a time
+--   K4  Climb    played: the glyphs climb up (right) or down (left) the chains by hand, one row per 16 counts,
+--                +-31 rows over the travel (512 = the still)
 --   K5  Rise     rows per group: 5 .. 20 (8 = the still)
 --   K6  Etch     how far the camera (or the Osc) moves the glyphs and recolours the bricks
 --   S7  Branch   Flicker (single-frame branches, as in the clip) / Held (the clip's first frame)
@@ -128,19 +129,17 @@ architecture staircase of program_top is
     signal s_hcnt, s_wmax : unsigned(11 downto 0) := (others => '0');
     signal s_w    : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
-    -- knobs: glided (Q3), raw climb speed, switches
+    -- knobs: glided (Q3), switches
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(448 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_g4 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(448 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(224 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(578 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
-    signal s_k4 : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal s_vm : unsigned(8 downto 0) := (others => '0');
-    signal s_vneg : std_logic := '0';
     signal s_br, s_mos, s_cross, s_pal, s_src : std_logic := '0';
     signal z_gp  : std_logic_vector(1 downto 0) := "00";
     signal z_gc  : unsigned(2 downto 0) := (others => '0');
@@ -191,7 +190,7 @@ architecture staircase of program_top is
     signal c_thr  : unsigned(8 downto 0) := to_unsigned(102, 9);
     signal c_e    : unsigned(10 downto 0) := (others => '0');
     signal c_elv  : unsigned(7 downto 0) := (others => '0');
-    signal c_inc  : unsigned(13 downto 0) := (others => '0');
+    signal z_cs   : signed(11 downto 0) := (others => '0');          -- climb, rows (-31 .. 31)
     signal c_co   : signed(5 downto 0) := (others => '0');
     signal c_base1, c_base2 : unsigned(7 downto 0) := (others => '0');
     signal c_bpos : unsigned(4 downto 0) := (others => '0');
@@ -210,7 +209,6 @@ architecture staircase of program_top is
     signal d_gm   : unsigned(7 downto 0) := (others => '0');
 
     -- climb and branch flicker (per field)
-    signal fc_ph  : unsigned(15 downto 0) := (others => '0');
     signal fc_ro  : unsigned(4 downto 0) := (others => '0');
     signal fl_r   : unsigned(15 downto 0) := x"ACE1";
     signal fl_cnt : unsigned(3 downto 0) := (others => '0');
@@ -330,10 +328,7 @@ begin
     -- clock; the zone is quasi-static but timed at the pixel clock)
     ---------------------------------------------------------------------------
     p_ctrl : process(clk)
-        variable v_s  : signed(10 downto 0);
-        variable v_m  : unsigned(9 downto 0);
         variable v_t  : unsigned(16 downto 0);
-        variable v_c  : unsigned(16 downto 0);
         variable v_g  : signed(10 downto 0);
         variable v_p  : unsigned(16 downto 0);
         variable v_s20 : unsigned(20 downto 0);
@@ -367,19 +362,6 @@ begin
                 s_hcnt <= (others => '0');
             end if;
 
-            -- climb speed: bipolar, +-8 deadband
-            s_k4 <= unsigned(registers_in(3));
-            v_s := signed(resize(s_k4, 11)) - 512;
-            s_vneg <= v_s(10);
-            if v_s > -9 and v_s < 9 then
-                v_m := (others => '0');
-            elsif v_s(10) = '1' then
-                v_m := unsigned(not v_s(9 downto 0)) - 7;     -- |v| - 8
-            else
-                v_m := unsigned(v_s(9 downto 0)) - 8;
-            end if;
-            s_vm <= v_m(8 downto 0);
-
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
                 s_br    <= registers_in(6)(0);
@@ -393,21 +375,6 @@ begin
                     when 3      => s_x0 <= (others => '0');     s_oxs <= to_unsigned(153, 9);
                     when others => s_x0 <= (others => '0');     s_oxs <= to_unsigned(102, 9);
                 end case;
-                -- climb: a 16-bit phase per field; each wrap ticks the row offset (mod Q)
-                if s_vm /= 0 then
-                    if s_vneg = '0' then
-                        v_c := ('0' & fc_ph) + resize(c_inc, 17);
-                        if v_c(16) = '1' then
-                            if fc_ro >= c_qm1 then fc_ro <= (others => '0'); else fc_ro <= fc_ro + 1; end if;
-                        end if;
-                    else
-                        v_c := ('0' & fc_ph) - resize(c_inc, 17);
-                        if v_c(16) = '1' then
-                            if fc_ro = 0 or fc_ro > c_qm1 then fc_ro <= c_qm1; else fc_ro <= fc_ro - 1; end if;
-                        end if;
-                    end if;
-                    fc_ph <= v_c(15 downto 0);
-                end if;
                 -- branch flicker: a burst on ~1 field in 256, 7 field pairs, each pair lit with p = 3/8
                 fl_r <= f_xs16(fl_r);
                 if fl_cnt = 0 then
@@ -437,6 +404,7 @@ begin
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
                             when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 5      => s_gm <= s_g4; s_gr <= unsigned(registers_in(3));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -457,10 +425,11 @@ begin
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 5      => s_g4 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 5 then z_grun <= '0'; end if;
+                        if z_gc = 6 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -478,7 +447,6 @@ begin
                     when 174 => z_sel <= to_unsigned(6, 4);  z_pre <= '1';
                     when 198 => z_sel <= to_unsigned(7, 4);  z_pre <= '1';
                     when 222 => z_sel <= to_unsigned(8, 4);  z_pre <= '1';
-                    when 246 => z_sel <= to_unsigned(9, 4);  z_pre <= '1';
                     when 270 => z_sel <= to_unsigned(10, 4); z_pre <= '1';
                     when others => null;
                 end case;
@@ -495,7 +463,6 @@ begin
                     when 6  => z_fa <= resize(s_gp(12 downto 3), 34);  z_fb <= to_unsigned(907, 16);    -- P12 exponent
                     when 7  => z_fa <= resize(s_g6(12 downto 3), 34);  z_fb <= resize(s_g6(12 downto 3), 16);
                     when 8  => z_fa <= resize(z_sq, 34);               z_fb <= resize(c_p, 16);
-                    when 9  => z_fa <= resize(s_vm, 34);               z_fb <= resize(s_vm, 16);        -- climb^2
                     when others => z_fa <= resize(fc_ro, 34);          z_fb <= resize(z_ga, 16);        -- ro * |G|
                 end case;
             end if;
@@ -528,6 +495,17 @@ begin
                     when 5 =>
                         c_f2on <= s_cross or c_gated; c_f2over <= c_gated; c_up <= not s_cross;
                         s_ot <= s_ot + 1;
+                    -- climb (played, the glide is done by zc 29): rows = (d + 8) >> 4, d = K4 - 512 less a
+                    -- +-8 deadband (-31 .. 31); ro = rows mod Q on the divmod loop (idle until zc 300)
+                    when 31 =>
+                        c_q <= C_SC_LUTQ(to_integer(s_g5(12 downto 9)));
+                        v_g := signed(resize(s_g4(12 downto 3), 11)) - 512;
+                        if v_g > -9 and v_g < 9 then v_g := (others => '0');
+                        elsif v_g < 0 then v_g := v_g + 8;
+                        else v_g := v_g - 8; end if;
+                        z_cs <= resize(shift_right(v_g + 8, 4), 12);
+                    when 32 => d_v <= z_cs; d_m <= resize(c_q, 8); d_q <= (others => '0');
+                    when 48 => fc_ro <= unsigned(d_v(4 downto 0));
                     when 20 =>                    -- K1: d = |g1 - 512|
                         v_g := signed(resize(s_g1(12 downto 3), 11)) - 512;
                         if v_g < 0 then v_g := -v_g; z_kn <= '1'; else z_kn <= '0'; end if;
@@ -597,16 +575,13 @@ begin
                         z_em <= shift_left(resize(c_pm1, 13), 4);
                     when 245 =>
                         if z_e4 < z_em then c_e <= z_e4(10 downto 0); else c_e <= z_em(10 downto 0); end if;
-                    when 265 => c_inc <= f_acc(17 downto 4);
                     when 266 =>
                         v_g := signed(resize(s_g3(12 downto 3), 11)) - 512;
                         c_g <= resize(shift_right(v_g, 5), 6) + 8;
-                        c_q <= C_SC_LUTQ(to_integer(s_g5(12 downto 9)));
                         c_l <= C_SC_LUTL(to_integer(s_g2(12 downto 9)));
                         c_thr <= C_SC_LUTT(to_integer(s_g2(12 downto 9)));
                     when 267 =>
                         c_qm1 <= c_q - 1; c_lm1 <= c_l - 1;
-                        if fc_ro >= c_q then fc_ro <= (others => '0'); end if;
                         if c_g < 0 then v_g := -resize(c_g, 11); z_gn <= '1'; else v_g := resize(c_g, 11); z_gn <= '0'; end if;
                         z_ga <= unsigned(v_g(4 downto 0));
                     when 289 =>                   -- ro * G (signed)

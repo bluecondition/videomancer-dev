@@ -240,3 +240,29 @@ Ron, after looking at fern and kiln renders with K6 at 100 %: the bend / element
 - **Change.** Only the camera's glyph shift is scaled: per field (step 244) it is E + E/4, and step 245 now caps it at 16 (P − 1) in camera mode too, as Osc mode always did. The cap keeps the shift below P, so the single mod-P subtract and the 11-bit c_e stay valid. The ×1.25 holds up to ~97 % of the knob; at 100 % the cap gives ~×1.2 at the still's P = 32. The colour walk (c_elv) and Osc mode (4 E, the same cap) are unchanged.
 - Look: `.heirloom_work/rb_staircase/k6b/k6b_cmp.png` (bear, 720p dec 4 renders the cells as coarse blocks; the bricks match and the glyph positions differ).
 - Build: router1, all six configs seed 1; HD worst 104.66 MHz (HD Dual); 6,482 LC.
+
+## v0.2.0: Ron's preview notes (2026-11-19)
+
+Ron (Heirloom Preview Queue, rework on v0.1.0): "Make the Climb knob a performance knob rather than animation"
+
+- **Before.** K4 Climb was a speed: a 16-bit phase per field (increment (|v| − 8)²/16, up to 14.5 ticks/s) ticked
+  the row offset ro (mod Q) up or down; the glyphs climbed on their own while the knob sat off centre.
+- **Now K4 is the climb position, played by hand.** K4 joins the shared glide (1/8 of the gap per field, ±2-count
+  hold), and its glided position sets the row count directly: rows = (d + 8) >> 4 with d = K4 − 512 less the ±8
+  deadband, so one row per 16 counts, −31 .. +31 over the travel (left = down the chains, right = up). ro = rows
+  mod Q on the divmod loop (a job at zone clock 32, read at 48, long before its users at 271 and 560). Each row
+  moves every glyph one cell row up and G/Q cells right along its chain, as one tick of the old animation did.
+  The picture repeats every Q rows (8 at the still), so the travel covers ~3.9 chain periods each way at Q = 8
+  and 1.5 at the largest Q (20): a sweep of the knob reads as climbing the stairs, and the glide makes a fast turn
+  tick through the rows rather than jump. Centre (512) = ro 0 = the photo, exactly as before.
+- **Removed:** the climb speed path (raw K4 decode, the climb phase, serial slot 9's climb², c_inc). Q (c_q) is now
+  looked up at zone clock 31 (was 266) so the mod uses this field's Q; the old "ro ≥ Q → 0" clamp is gone (ro is
+  always < Q now).
+- **TOML:** K4 stays bipolar −100 .. 100, default 512. Presets: the K4 speeds in Lone Stair (680), Escalator (900)
+  and Close Up (640) were dropped (they would now be arbitrary positions); "Escalator" no longer moves, so it is
+  renamed "Dense Flight".
+- **Build** v0.2.0, router1, all six seed 1: HD Analog 103.75, HD HDMI 107.74, HD Dual 110.14 MHz (worst HD
+  103.75); SD Analog 99.34, SD HDMI 105.27, SD Dual 101.71 MHz. 6365–6380 / 7680 LC (83 %, ~100 fewer than
+  v0.1.2), 6 / 32 EBR; every bitstream passed iceunpack. router1 finished every config in under a minute (no
+  self-add stall; the synth json was cleaned up before dupin could run). Not simulated. v0.1.2's vmprog and VHDL
+  are in `.heirloom_work/rb_staircase/` (`_v012`). Not flashed.

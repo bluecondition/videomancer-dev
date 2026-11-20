@@ -1,13 +1,14 @@
 # Staircase - Heirloom (video clips), built 2026-11-09 (v0.1.0) from WIN_20230318_14_13_38 at 0.5 s.
 # A digital cell pattern: a cyan / grey brick checker crossed by diagonal chains of stair glyphs (black rails,
 # magenta / yellow / white treads, yellow / white rungs) that branch for single frames.
+# v0.2.0 (2026-11-19, Ron): K4 Climb is played by hand (a row offset), no longer a climbing animation.
 # See staircase.vhd, staircase.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.staircase"
 program_name = "Staircase"
-program_version = "0.1.2"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -137,19 +138,16 @@ linear_potentiometer_12 = 700
 
 [[preset]]
 name = "Lone Stair"
-rotary_potentiometer_4 = 680
 linear_potentiometer_12 = 0
 
 [[preset]]
-name = "Escalator"
-rotary_potentiometer_4 = 900
+name = "Dense Flight"
 rotary_potentiometer_5 = 200
 linear_potentiometer_12 = 900
 
 [[preset]]
 name = "Close Up"
 rotary_potentiometer_1 = 1000
-rotary_potentiometer_4 = 640
 
 [[preset]]
 name = "Osc Weave"
