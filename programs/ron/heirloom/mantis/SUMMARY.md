@@ -293,3 +293,12 @@ the top, 200% / K6 Etch - should have a stronger effect, 150%".
   7411-7429 / 7680 LC (96.7 %, +115 over v0.1.3: the 2048-entry pillar ROM and the design hysteresis), 23 / 32 EBR
   (+6). iceunpack passes on all six. No sims (build-first). `out/rev_b/ron/heirloom/mantis.vmprog`; v0.1.3's vmprog
   and sources are in `.heirloom_work/rb_mantis/*_v013.*`. **Not flashed.**
+
+## v0.2.1: HW-captured defaults (2026-11-19)
+
+Ron flashed v0.2.0, dialled the look in and captured it with `./capture_preset.sh --defaults`:
+K1 Pillars 1023 (design 7, fluted columns, at the dense end of the ±1 octave spacing), K2 Arms 792, K3 Bands 0,
+K4 Flow 18, K5 Grain 501, P12 Wings 486 (K6 Etch and S7-S11 unchanged). K1's design latch starts at 4 and steps one
+zone per field, so 1023 (past the 836 threshold) reaches design 7 within three fields of loading. The vmprog was
+repacked from the v0.2.0 bitstreams (only the settings block differs, 212 bytes), so timing and seeds are as in
+v0.2.0 (HD HDMI seed 4). Presets are unchanged.
