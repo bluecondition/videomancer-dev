@@ -200,3 +200,10 @@ Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where 
 - **Change.** Per field (sequencer step 364), the camera's etch gain is now c_e = e + e/4 (×1.25 at every knob position; max 4391 -> 5488, which fits the 15-bit register and the 19 / 23-bit pixel products). Full white now bends u by up to 1.34 cycles instead of 1.07. The Osc path is unchanged: its 6× gain and centring still use the old e.
 - Look: `.heirloom_work/rb_coastline/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). Same coast, with more of the face pushed into the next bands.
 - Build: router1, all six configs seed 1; HD worst 88.15 MHz; 6,879 LC.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Bend 556, K2 Reach 827, K3 Waves 572, K4 Speed 173, K5 Weave 554, S8 Rainbows On, P12 Surf 437 (K6 Etch, S7,
+S9-S11 unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 212 bytes),
+so timing, seeds and LC are as in v0.1.2. Presets are unchanged.
