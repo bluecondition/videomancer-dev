@@ -214,3 +214,10 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 - **Change (v0.1.2):** the per-field etch gain `c_eg` (etch² >> 12, 0 .. 255) is now `g + (g >> 2)` (0 .. 318, 9 bits), in the sequencer state that already latched it. The two pixel partials `p4_ea / p4_eb` widened 13 -> 14 bits and their sum `v_s` 18 -> 19 bits (camera max 959 × 318 = 304 962); the camera etch now takes `v_s(18 .. 8)` (≤ 1191, inside the existing 12-bit T + etch clamp). The Osc (0 .. 765) stays under 2^18, so its ×4 path is unchanged. K6 default 1023 (TOML).
 - **Render check:** `.heirloom_work/rb_starline/k6b/k6b_cmp.png` (old vs new at K6 100 %, bear, 720p dec 4: the top-left crop, the camera blotches pushed further, no wrap).
 - **Build:** router1, all six on seed 1. HD worst 87.41 MHz (HD Analog 87.41, HD HDMI 93.22, HD Dual 87.52), LC 7130.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Arcs 747, K2 Waist 480, K3 Points 565, K4 Sweep 680, K5 Bands 539, P12 Neon 175 (K6 Etch and S7-S11 unchanged).
+The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 186 bytes), so timing, seeds and
+LC are as in v0.1.2. Presets are unchanged.
