@@ -191,7 +191,7 @@ versions from v0.1.0.
 | 26 | 20230816_00_32_31 t5.0 | temple | orange/yellow/blue symmetric sunset temple with blue flames | v0.1.0 built 2026-11-04 (ROUTER1; HD Dual seed 2; 6410–6443 LC, 23 EBR); not flashed |
 | 27 | 20230820_01_33_09 t0.5 | brushfire | orange/green/white burning-grass streaks | v0.1.3 2026-11-20: HW-captured defaults (Ron); v0.1.2 K6 camera pass (router1; HD Analog, SD Analog, HD Dual seed 2, others seed 1; worst HD 83.59 MHz; 7,156 LC, 23 EBR); flashed (v0.1.2) |
 | 28 | 20230825_00_00_20 t6.5 | arcade | orange/blue ring arches on blue stripes | v0.1.2 2026-11-20: HW-captured defaults (Ron); v0.1.1 K6 camera pass (router1; SD Analog seed 2, others seed 1; 19 EBR); flashed (v0.1.1) |
-| 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | v0.1.1 built 2026-11-09 (ROUTER1 6/6 seed 1; 6020–6035 LC, 23 EBR); not flashed |
+| 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | v0.1.4 2026-11-20: HW-captured defaults (Ron); v0.1.3 K6 default 100 % (router1; HD HDMI seed 2, others seed 1; 6,050-6,075 LC, 23 EBR); flashed (v0.1.3) |
 | 30 | 20230906_00_33_30 t11.0 | spine | magenta/purple/black torn diagonal spine | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6930–6944 LC, 22 EBR); not flashed |
 | 31 | 20230910_00_11_50 t7.0 | quill | blue/white feather plumes on black | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 7018–7057 LC, 16 EBR); not flashed |
 | 32 | 20230914_01_59_34 t4.0 | marble | cream/orange/red marble swirl arcs with blue dots | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 6891–6902 LC, 15 EBR); not flashed |

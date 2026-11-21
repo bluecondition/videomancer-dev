@@ -190,3 +190,11 @@ both follow it, and the Osc rides the same gain. Widths: the camera product <= 1
 **Build:** router1; HD Analog 77.74, HD HDMI 79.21 (**seed 2**: seed 1 missed), HD Dual 81.99 MHz (worst HD 77.74);
 SD 81.61 / 82.37 / 79.17 MHz (seed 1); 6050-6075 / 7680 LC (79 %), 23/32 EBR. `out/rev_b/ron/heirloom/coral.vmprog`.
 NOT flashed.
+
+## v0.1.4: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Rings 776, K2 Arcs 1023, K3 Eye 421, K4 Speed 715, K5 Bulb 599, K6 Camera 451, S8 Palette On, S10 Bands On,
+P12 Swell 231 (S7, S9, S11 unchanged). K2 is continuous (glided, through the per-field multiplier), so 1023 loads as
+dialled. The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 253 bytes), so timing
+and seeds are as in v0.1.3 (HD HDMI seed 2). Presets are unchanged.

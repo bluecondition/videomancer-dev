@@ -8,7 +8,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.coral"
 program_name = "Coral"
-program_version = "0.1.3"
+program_version = "0.1.4"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -24,7 +24,7 @@ name_label = "Rings"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 776
 display_float_digits = 0
 suffix_label = "%"
 
@@ -34,7 +34,7 @@ name_label = "Arcs"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 1023
 display_float_digits = 0
 suffix_label = "%"
 
@@ -44,7 +44,7 @@ name_label = "Eye"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 421
 display_float_digits = 0
 suffix_label = "%"
 
@@ -54,7 +54,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 700
+initial_value = 715
 display_float_digits = 0
 suffix_label = "%"
 
@@ -64,7 +64,7 @@ name_label = "Bulb"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 599
 display_float_digits = 0
 suffix_label = "%"
 
@@ -74,7 +74,7 @@ name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 451
 display_float_digits = 0
 suffix_label = "%"
 
@@ -88,7 +88,7 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_8"
 name_label = "Palette"
 value_labels = ["Coral", "Lagoon"]
-initial_value_label = "Coral"
+initial_value_label = "Lagoon"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -100,7 +100,7 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_10"
 name_label = "Bands"
 value_labels = ["Fold", "Steps"]
-initial_value_label = "Fold"
+initial_value_label = "Steps"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -114,7 +114,7 @@ name_label = "Swell"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 360
+initial_value = 231
 display_float_digits = 0
 suffix_label = "%"
 
