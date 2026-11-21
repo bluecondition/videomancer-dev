@@ -1,13 +1,13 @@
-# Temple - Heirloom from the video clips (phase 3), v0.2.0 (2026-11-21: Ron's preview notes), first built 2026-11-04 from the still
+# Temple - Heirloom from the video clips (phase 3), v0.3.0 (2026-11-21: Ron's second notes), first built 2026-11-04 from the still
 # WIN_20230816_00_32_31 t5.0.  An orange/yellow/blue mirror-symmetric sunset temple: cyan flame columns over
 # an orange sky, maroon shapes, a pink band of orange spindles, a stack of wavy purple bands, a cyan floor.
 # See temple.vhd, temple.py, SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 17
 program_id = "com.czartroniks.temple"
 program_name = "Temple"
-program_version = "0.2.0"
+program_version = "0.3.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

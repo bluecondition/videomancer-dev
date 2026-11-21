@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-TEMPLE v0.2.0 - build hook.  Writes temple_pkg.vhd next to this file (pure python: the builder runs it with the
+TEMPLE v0.3.0 - build hook.  Writes temple_pkg.vhd next to this file (pure python: the builder runs it with the
 system python3).  Heirloom from the video clips; still WIN_20230816_00_32_31 t5.0.
 
 The tables were fitted to the still in .heirloom_work/rb_temple (gen_tables.py, notes.md) and are embedded here
@@ -18,13 +18,14 @@ as hex strings:
                         [11:10] aux kind (1 white sparkle, 2 cyan sparkle, 3 the yellow dome)
   D   256 x 32  dark shapes per 2 rows: [8:0] / [17:9] span A (x - 768: the top ring and the centre blob),
                 [24:18] / [31:25] span B (|x - 960| - 200: the small blobs)
-  palette 1024 RGB -> Y, Cr, Cb (hardware convention; luma pre-scaled 16/13 for the shell's 13/16, cap 940), >> 2:
+  palette 1024 RGB -> Y, Cr, Cb (hardware convention; luma capped at 763, v0.3.0), >> 2:
                 0..127 sky (96 fitted + 32 wrap: blue - indigo - black - maroon), 128..255 bottom (same),
                 256..511 the stack's band profile (rows 600..855), 512..575 spindle ramp (G 0..252),
                 576..607 band shade, 608..639 dark-shape depth (608/609 = the black rim), 640..642 band->pink,
                 643..647 pink (644..647 per-line variants), 648..655 spindle rim, 656..671 dome depth,
                 672..675 white rim / sparkle, 676..679 cyan sparkle,
-                (v0.2.0) 680..687 Edges flame rim, 688..719 pink camera ramp, 768..1023 Edges stack profile
+                (v0.2.0) 680..687 Edges flame rim, 688..719 pink camera ramp, 768..1023 Edges stack profile,
+                (v0.3.0) 720..724 flame echoes, 728 pink contour line
 """
 import os
 
@@ -223,7 +224,7 @@ def rgb_to_hw10(r, g, b):
     y = 0.299 * r + 0.587 * g + 0.114 * b
     cb, cr = (b - y) / 1.772, (r - y) / 1.402
     yy = round(64 + y * 876)
-    yy = min(940, 64 + ((yy - 64) * 16) // 13)       # pre-scaled for the shell's 13/16 output luma
+    yy = min(763, yy)       # v0.3.0: no 13/16 output stage; cap 763 = the old 940 x 13/16 (the bar fix's dim white)
     return int(yy), int(round(512 + cr * 896)), int(round(512 + cb * 896))
 
 
@@ -244,6 +245,11 @@ def main():
     for i in range(32):
         t = (i / 31.0) ** 0.8
         pal[688 + i] = tuple(int(round(a + (b - a) * t)) for a, b in zip(p0, p1))
+    # v0.3.0 detail (2026-11-21): 720..724 the flame echoes (orange fading toward the pink, by ring), 728 the pink
+    # band's contour line (the stack field)
+    for i, c in enumerate([(255, 176, 40), (255, 152, 62), (253, 134, 84), (251, 120, 100), (250, 110, 108)]):
+        pal[720 + i] = c
+    pal[728] = (214, 52, 112)
     for i in range(256):
         pal[768 + i] = pal[256 + i]
     for i in list(range(311, 315)) + list(range(331, 335)) + list(range(377, 380)):

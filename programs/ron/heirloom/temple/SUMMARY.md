@@ -1,6 +1,6 @@
 # Temple — an orange sunset temple: cyan flames, maroon shapes, orange spindles in a pink band
 
-**Current: v0.2.0 (2026-11-21), Ron's preview notes: new control map (Pink Height, Flame Height, Waves, Edges), see the last section; v0.1.2 was flashed by Ron.** v0.1.0 built 2026-11-04. Heirloom from the video clips (phase 3), made from the still
+**Current: v0.3.0 (2026-11-21), Ron's second notes: taller / wider flames, a growing sun with a glow, detail all over (see the last section); v0.2.0 was flashed by Ron ("We are on the right track").** v0.1.0 built 2026-11-04. Heirloom from the video clips (phase 3), made from the still
 `photos/vid/WIN_20230816_00_32_31_t5p0.png` (clip WIN_20230816_00_32_31 at 5.0 s; 12.0 s clip). A mirror-symmetric
 orange/yellow/blue "temple": an orange and yellow sky with four soft cyan flame columns, maroon shapes with black
 rims (a ring at the top, a crooked centre block, two small blobs, two lens ellipses and a band), a salmon-pink band
@@ -252,8 +252,101 @@ Every knob and the slider ride the shared glide (1/8 of the gap per field, +-2 d
 - **HD HDMI re-seeded (the ADV7513 HSYNC skew, Ron's "hsync lines").**
   - The builder's HD HDMI router1 s1 sat at HSYNC **+0.16 ns** / data <= -0.61: positive, but inside the sub-window danger zone where wildfire showed lines at +0.65.
   - The screen (`.heirloom_work/skew_tools/screen.sh temple`: hd_hdmi router1 + router2 s1-60, 109 timing-clean, 33 in the window) put router2 s18 most positive in the window.
-  - **Installed: HD HDMI = router2 s18 (+2.28 / <= -0.71, 79.79 MHz).** Spare: router2 s3 (+2.18 / <= -0.78, 84.48 MHz) in `.heirloom_work/rb_temple/skew/temple_v020_spare_hd_hdmi_router2_s3.vmprog`.
+  - **Installed: HD HDMI = router2 s18 (+2.28 / <= -0.71, 79.79 MHz).** Spare: router2 s3 (+2.18 / <= -0.78, 84.48 MHz) in `.heirloom_work/rb_temple/skew_v020/temple_v020_spare_hd_hdmi_router2_s3.vmprog` (moved there for v0.3.0).
   - HD Analog router1 s1 (+0.76 / <= -0.66) and HD Dual router1 s1 (-1.78 / <= -1.72) kept.
   - The replaced s1 bitstream is in `.heirloom_work/rb_temple/skew/`. The shipped HD HDMI is thus a **non-1 seed (router2 s18)**.
   - **A full builder rebuild re-routes HD HDMI router1 s1 (+0.16).** Re-install afterwards with `.heirloom_work/skew_tools/install.sh temple router2 18` (same netlist), or re-screen if the RTL changed.
 - Presets (hand-written, re-aimed): Photo, Dusk (P12 120), Blaze (P12 940), **Pink Hall** (Pink Height 1000, Flame Height 360; replaces Still Temple, which used Drift), Wide Columns (K1 180, Flame Width 760), Ice Flip, **Neon Lenses** (Edges + Waves 1000; was Torn Lenses: Tear + Stack 1000), **Rising Fire** (Shadows off, Flame Height 1000, Waves 900; replaces Bare Sky: Shadows off + Flames 900).
+
+## v0.3.0: Ron's second notes (2026-11-21)
+
+Ron (hardware, v0.2.0, "We are on the right track"): "flame width and height seem underutilized, the orange flames should be much taller at their peak and wider at their peak width. the Sun control should cause the yellow sun at the bottom to grow and shrink and bleed into the pink/orange area above. we want visually stunning complexity inside the pink area and all over, more detail".
+
+Backups of v0.2.0 (vhd, toml, py, vmprog): `.heirloom_work/rb_temple/temple_v020.*`. The control map is unchanged; three controls do more.
+
+### What changed
+- **K2 Flame Width** reaches **x6** (was x3). The lower half is unchanged (x0.125 .. x1); the upper half is linear from x1 to x6, `128 + 5 (k - 512)/4` in Q7.
+  - At the top, the two flame pairs merge into one wall of fire across the pink.
+  - The flame colour ramp is not scaled with the width: wide flames keep the photo's ~+-120 px yellow-orange core inside a red-orange body. Width-scaling it cost 77 LC.
+- **K3 Flame Height** reaches **x5** (was x2.5). The lower half is unchanged (x0.15 .. x1); the upper half is linear, `256 + 2 (k - 512)` in Q8.
+  - At x5 the wing row sits near screen row 160 and the narrow tops run off the top of the screen.
+  - The flames still rise through the band into the sky and stay under the dark shapes.
+- **P12 Sun** keeps its sweep job (palette rotation, wings, the ring, the stack scroll and the clip's drift).
+  - **It now also sets the yellow sun's radius: 12 (0) .. 124 (512, the photo's dome) .. 604 (1023).**
+  - The sun is an analytic disc on row 1088, x 985, in virtual coordinates, so it stays round at every resolution.
+  - Each line computes the half-width sqrt(R^2 - dy^2): one serial product and a 10-step serial square root in the line engine.
+  - It keeps the old depth shading (pale rim, yellow inside).
+  - It is drawn over the floor, rim, stack and pink, under the dark shapes and the flames, so the flames stand silhouetted against a big sun.
+  - **The glow:** a yellow bloom outside the disc. g = (distance into the glow) / 16, max 15; the bloom adds luma + 4g and Cb - 4g (clamped).
+    - The glow width is R/4 + 3 (p - 512)/8 above 512 (up to 341 px), and R/4 below.
+    - Above the disc it rises as a cone, -(dy - R)/2, so at the top of the slider the yellow bleeds up through the stack and the pink into the sky.
+    - At the default it adds at most +4 luma (invisible). The disc's own colours are not bloomed, so the default dome is the photo's.
+- **Detail (always on):**
+  - **flame echoes**: nested outlines 8..71 px outside every flame, every 16 px (orange fading toward pink), rippling outward 1 px per field. Columns scales their spacing. Edges turns them white.
+  - **pink contour lines**: iso-lines of the stack field (every 16 rows of the stack ramp), drawn in deep rose (214, 52, 112) across the pink band. They curve like the stack's lenses and domes; Waves bends them, the camera warps them and the Sun scrolls them.
+  - **sky / floor contour lines**: iso-lines of the colouriser, nested outlines of the cyan flames and the floor columns, drawn in the opposite palette colour. They crawl as the Sun / drift rotates the palette.
+  - **rings inside the dark shapes**: every 8 px of depth, in red.
+  - **contour lines inside the flames**: every 8th colour-ramp step alternates.
+- **Output (sharper).**
+  - U and V go through one [1 2 2 2 2 2 2 2 1]/16 box (was two). That is the 9-tap chroma wrinkle confirmed as the HD HDMI bar fix.
+  - Luma goes through [1 2 1]/4 at the same centre (was the two 17-tap boxes), taken from the freed block-RAM ring.
+  - The 13/16 luma stage is gone: the palette is no longer pre-scaled and is capped at 763 (the old 940 x 13/16, the bar fix's dim white), so the output levels are the same.
+  - The picture is crisper than v0.2.0 (luma no longer smeared over 17 px), so the detail survives.
+  - Latency **C_LAT 20 -> 17** in every mode (processing_delay_clks 17).
+- **Fit work (no visual change):**
+  - the Osc's per-clock x121 multiply became a per-mode constant;
+  - k1 x xs became a 3-way case;
+  - the camera line buffer got `no_rw_check` (the beam reads 3-4 px behind the source write; emulate_transparency is now 0).
+- **Palette** (temple.py): 720..724 the echo ramp, 728 the pink contour colour.
+
+### Controls (512 = the still)
+| Control | Element | 0 .. 1023 |
+|---|---|---|
+| K1 Columns | the column spacing of every repeated element (also the echo spacing) | x0.375 .. x3 |
+| K2 Flame Width | the orange flames' width and wings | x0.125 slivers .. x6, one wall of fire |
+| K3 Flame Height | the orange flames' height, anchored at the stack | x0.15 (40 rows) .. x5 (past the top of the screen) |
+| K4 Pink Height | the pink band's height | ~70 .. ~620 visible rows |
+| K5 Waves | sky / floor flame depth and stack pinch; it also bends the pink contour lines | flat .. blazing / torn |
+| K6 Camera | bends the sky, floor, stack and pink contours, lights the pink band, heats the flames | 0 = the still .. 100 % (default) |
+| S7 Flip | upside down (the sun goes to the top) | |
+| S8 Palette | Sunset / Ice (the sun and its glow turn blue) | |
+| S9 Shadows | the band and the dark shapes off | |
+| S10 Edges | white edges (dark shapes, band, flame rims, stack rims) and white flame echoes | |
+| S11 Source | Video / Osc | |
+| P12 Sun | the sweep (palette, wings, ring, stack) + the drift; the sun's radius 12 .. 124 .. 604 and its rising glow | dusk with a pin-point sun .. blaze with a giant sun bleeding yellow up the screen |
+
+### Judgement calls
+- **Width-scaled flame core dropped** to stay at 93-94 % LC (see K2).
+- **The detail is always on, in colours drawn from the picture.** The photo stays recognisable at the defaults (same geometry and colours) with fine lines added. There is no knob to turn it off; Edges turns the echoes white.
+- **The sun follows the glided slider only**; it does not breathe with the drift.
+- **Sharper luma and narrower chroma** change the look slightly from v0.2.0's soft picture (the photo's analog softness). Both are the recipes confirmed on HD HDMI hardware (damier [1 2 1] luma + dim white, wrinkle 9-tap chroma), but this exact combination is new here.
+
+### Resolution
+- Same picture at SD, 720p and 1080p: the sun, the echoes and the contours are in virtual 1080-line coordinates.
+- **SD shows the centre 4:3 (virtual x 240..1680), so a sun with R above ~500 is cut at the sides on SD.**
+- The echo and contour lines are 1-2 px at 1080p and 1 px at SD.
+
+### Build
+- **v0.3.0 built 2026-11-21 through the shared queue with ROUTER1, all six configs on seed 1.** NOT flashed.
+  - HD Analog 87.24, HD HDMI 92.87 (builder's route, see the re-seed below), HD Dual 84.46 MHz; SD Analog 87.42, SD HDMI 79.35, SD Dual 84.36 MHz.
+  - 7,160-7,185 / 7,680 LC (93.6 % max; v0.2.0 had 7,060-7,086). 22 / 32 EBR (was 23: the second output box's rings are gone).
+  - iceunpack OK x6; the packed config carries the labels and presets. dupin: nothing.
+- **Fit.** The first v0.3.0 draft packed to 7,328 LC (95.4 %). Parallel standalone ablations ranked the costs (bloom chain 131 LUT, the 8x9 flame product 72, detail 65, sqrt 55, the curves' third segments 55). Cuts and simplifications:
+  - a fixed glow shift, and a shift-only bloom;
+  - two-segment flame curves;
+  - no sun branch in the sky zone;
+  - white Edges variants for the echoes only;
+  - no 13/16 stage;
+  - the Osc / c_dk multiplies replaced by cases;
+  - lb `no_rw_check`;
+  - and, last, the width-scaled flame core (77 LC).
+- Rebuild: `NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900 .heirloom_work/vid/build_queue.sh temple`.
+- **HD re-seed (the ADV7513 HSYNC skew, Ron's "hsync lines").** The screen covered hd_hdmi router1 + router2 s1-60 (104 timing-clean, 11 in the window).
+  - The builder's HD HDMI router1 s1 sat at HSYNC **+0.25 / data <= -0.05**: unsafe on both counts.
+  - **Installed HD HDMI = router2 s38 (+1.75 / <= -1.26, 80.81 MHz).**
+  - **HD Dual: router1 s1 (-0.30 / <= -0.37) -> router1 s7 (-2.27 / <= -1.90, 82.51 MHz).**
+  - HD Analog router1 s1 (+0.49 / <= -0.63) kept.
+  - Spare HD HDMI router2 s19 (+1.52 / <= -0.79), with the same HD Dual: `.heirloom_work/rb_temple/skew/temple_v030_spare_hd_hdmi_router2_s19.vmprog`.
+  - The replaced s1 bitstreams are in `.heirloom_work/rb_temple/skew/`. The v0.2.0 screen moved to `skew_v020/`.
+  - The shipped HD HDMI and HD Dual are thus **non-1 seeds** (router2 s38, router1 s7).
+  - **A full builder rebuild re-routes seed 1.** Afterwards re-install with `.heirloom_work/skew_tools/install.sh temple router1 7 hd_dual` and `... temple router2 38` (same netlist), or re-screen if the RTL changed.
