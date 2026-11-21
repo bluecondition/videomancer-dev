@@ -8,7 +8,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.brushfire"
 program_name = "Brushfire"
-program_version = "0.2.0"
+program_version = "0.3.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -24,7 +24,7 @@ name_label = "Tiles"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 541
+initial_value = 299
 display_float_digits = 0
 suffix_label = "%"
 
@@ -34,7 +34,7 @@ name_label = "Lobes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 946
+initial_value = 544
 display_float_digits = 0
 suffix_label = "%"
 
@@ -44,7 +44,7 @@ name_label = "Streaks"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 552
+initial_value = 266
 display_float_digits = 0
 suffix_label = "%"
 
@@ -54,7 +54,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 1023
+initial_value = 562
 display_float_digits = 0
 suffix_label = "%"
 
@@ -64,7 +64,7 @@ name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 313
+initial_value = 633
 display_float_digits = 0
 suffix_label = "%"
 
@@ -114,7 +114,7 @@ name_label = "Blaze"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 15
 display_float_digits = 0
 suffix_label = "%"
 
@@ -123,18 +123,18 @@ name = "Photo"
 
 [[preset]]
 name = "Wildfire"
-linear_potentiometer_12 = 900
+linear_potentiometer_12 = 932
 rotary_potentiometer_4 = 820
 
 [[preset]]
 name = "Ember Crown"
-linear_potentiometer_12 = 60
+linear_potentiometer_12 = 293
 rotary_potentiometer_2 = 760
 
 [[preset]]
 name = "Rising"
 toggle_switch_9 = 1
-linear_potentiometer_12 = 520
+linear_potentiometer_12 = 651
 
 [[preset]]
 name = "Zigzag Field"
@@ -154,4 +154,4 @@ rotary_potentiometer_3 = 700
 [[preset]]
 name = "Camera Burn"
 rotary_potentiometer_6 = 700
-linear_potentiometer_12 = 480
+linear_potentiometer_12 = 621

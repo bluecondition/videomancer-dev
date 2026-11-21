@@ -93,7 +93,7 @@ field contours over the still; `proto*.py` = float protos; `imodel.py` = the int
 | S9 Flip | Hang (flames from the top, the photo) / Rise (the flame field flipped: flames rising from the bottom) |
 | S10 Flames | Solid (the photo) / Lines: only the red streak lines and rims are drawn, with the bands showing through |
 | S11 Source | Video / Osc |
-| P12 Blaze | Flame height, the breath's centre: 0 = a thin crown at the top over bands and chevrons, 360 = the photo, 100 % = the frame on fire (tall lens flames to the bottom) |
+| P12 Blaze | Flame height, the breath's centre (v0.3.0: one straight line, hp = P12·227/256 − 472): 0 = Ron's hardware look (a thin crown, the breath trough on the h clamp), ≈ 52 % = the photo, 100 % = the frame on fire (tall lens flames to the bottom) |
 
 ## Video
 - **Video mode (the default).** Camera luma ((Y >> 2) − 16, one line buffer) × the K6 gain is added to the flame
@@ -276,9 +276,83 @@ timing-clean, 10 in the window).** The shipped vmprog now carries:
 | HD Dual | router1 s2 (−0.92 / ≤ −0.47: data margin fails) | **router1 s9** (−1.83 / ≤ −1.38, 88.57 MHz) |
 
 - Spare: HD HDMI router1 s34 (+1.72 / ≤ −0.61, 86.74 MHz), with the same HD Analog / HD Dual as the main vmprog:
-  `.heirloom_work/rb_brushfire/skew/brushfire_v020_spare_hd_hdmi_router1_s34.vmprog`. The replaced builder bitstreams
-  are in `.heirloom_work/rb_brushfire/skew/*_replaced_*.bin`.
+  `.heirloom_work/rb_brushfire/skew_v020/brushfire_v020_spare_hd_hdmi_router1_s34.vmprog`. The replaced builder bitstreams
+  are in `.heirloom_work/rb_brushfire/skew_v020/*_replaced_*.bin`.
 - **A full builder rebuild re-routes seed 1/2 and undoes this.** Re-install with `.heirloom_work/skew_tools/install.sh
   brushfire router2 10` (and `router1 10 hd_analog`, `router1 9 hd_dual`), or rebuild those configs with those seeds
   and routers.
 - SD configs are as built (SD Analog router1 s2, SD HDMI / SD Dual router1 s1).
+
+## v0.3.0: Ron's preview notes, round 2 (2026-11-21)
+
+Ron (hardware, v0.2.0): "there is still a big jump between 30 and 40% on blaze"
+
+**Cause: a GHDL synthesis fault. `integer − signed` is built REVERSED (as `signed − integer`).** The GHDL simulator
+computes it correctly, so every image sim, the integer model and the v0.2.0 analysis showed a smooth Blaze.
+- **What the hardware did.** The Blaze lift was `if p >= 360 then p - 360 else 360 - p`. Its lower arm synthesized
+  as p − 360, so below 360 z_pa = 1024 − (360 − p) and h_p ran −472 (P12 0) .. −727 (P12 359). That pinned h on the
+  −307 clamp, so the whole lower third of the slider did nothing. At 360 (35 %) h_p snapped to 0. The jump was 20-30×
+  a normal step in a hardware-faithful model (`.heirloom_work/rb_brushfire/blaze_v030/hwmodel.py`, `hwsweep.py`).
+  v0.1.x had the same fault (`resize(360 - v_d, 10)`).
+- **How it was found.** Model sweeps of every P12-derived term and picture metric, plus 720p RTL sims at both breath
+  extremes, were all smooth. A **gate-level sim of the synthesized netlist** then showed z_pa = 1004 at P12 340.
+  (yosys `synth_ice40` on program_top alone; `write_verilog`; iverilog with the iCE40 `cells_sim.v`; the testbench
+  is `.heirloom_work/rb_brushfire/blaze_v030/gate/tbs.v`, the checker `check.py`.)
+- **Scope** (`blaze_v030/mini/`, oss-cad-suite 20250523, GHDL 6.0.0-dev). The fault is already present right after
+  the GHDL import, before yosys optimizes anything.
+  - Reversed (1023 of 1024 values wrong): `360 - v`, `300 - w`, `0 - v` (comes out as +v), `360 - <signal>`.
+  - Correct: unary `-v`, `-360 + v`, `v + (-360)`, `v - 360`, `to_signed(360, 12) - v`, `natural - unsigned`
+    (`1079 - u`), `unsigned - natural`, `580 + v`.
+
+**Fix (P12 only).** The Blaze lift is now one straight line with no branch, `h_p = (P12 · 227 >> 8) − 472`: a product
+on the existing serial multiplier, then `signed − integer` (built correctly).
+- **0 is unchanged:** h_p −472, exactly what v0.1.x / v0.2.0 hardware showed, i.e. the look Ron captured as his
+  default. **100 % is unchanged:** h_p +435.
+- The photo height (h_p 0) is now at P12 532 (52 %); it used to be at 360 (35 %).
+- The rate is the same everywhere: about 2.0 per 8 counts in the hardware-faithful structural metric, with no point
+  more than 1.5× the median.
+- **Gate-level check of the final netlist:** z_pa, z_hp, |h| and O match the formula in all 108 sweep fields
+  (P12 130 .. 985) and in 38 fields held at P12 ≈ 0.
+- **Judgement calls:**
+  - *Straight line rather than the minimal fix.* The minimal fix (lower slope 336/256 into the unchanged ≥ 360 arm)
+    was built and verified too: 6/6 seed 1, `.heirloom_work/rb_brushfire/blaze_v030/alt_kinked/` (HD HDMI not
+    re-seeded). But it moves twice as fast per count below 35 % as above, a slope break right where Ron felt the
+    jump. The straight line has no special point. It shifts mid positions: 50 % was h_p 99 on v0.2.0 hardware and
+    is now −18.
+  - *A held trough at the bottom of the travel.* Below about 18 %, at the breath's trough moments, h stays on the
+    −307 clamp. This is part of the 0 look being kept. At Ron's K4 = 1023 the breath peaks still grow visibly over
+    that stretch.
+  - *Presets re-aimed to their designed flame heights:* Wildfire 900 → 932 (h_p 354), Rising 520 → 651 (105),
+    Camera Burn 480 → 621 (78), Ember Crown 60 → 293 (−213).
+- **New HW-captured defaults arrived mid-rework and are kept.** At 15:18 the capture flow rewrote the TOML's initial
+  values (pre-capture copy: `.heirloom_work/rb_brushfire/brushfire_pre_capture_v030.toml`): K1 Tiles 299, K2 Lobes
+  544, K3 Streaks 266, K4 Speed 562 (a slow ~26 s breath), K5 Bands 633, P12 Blaze 15 (was 541 / 946 / 552 / 1023 / 313 / 0). K6 and the switches unchanged.
+  - P12 15 was dialled on v0.2.0 hardware, where it gave h_p −482; v0.3.0 gives −459. Both sit on the −307 clamp at
+    the breath trough. The difference is 23 h units (about 2.5 % of the travel), visible only near the breath peak.
+  - I kept 0 and 100 % exact, as asked, rather than shifting the line to hit −482 at 15.
+- **Kept on purpose (same fault, part of the look Ron approved on hardware).** Both sites are annotated in the VHDL.
+  - The lobe centre above the rim, `580 - x`: on hardware it is 0, the tile axis, not 580 − x.
+  - The rim colour ramp, `300 - F`: reversed on hardware.
+  - Both are independent of P12. Fixing them would move the lobes and recolour the rims: ask Ron before doing it.
+- **Resolutions:** per-field arithmetic only, so SD / 720p / 1080p are as before.
+
+**Build (v0.3.0, router1, `NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900 .heirloom_work/vid/build_queue.sh
+brushfire`):** all six configs seed 1 (no router1 stall this time); iceunpack OK × 6.
+
+| Config | Builder seed | Fmax (MHz) | LC | Shipped (after the skew screen) |
+|---|---|---|---|---|
+| HD Analog | router1 s1 | 85.39 | 7,120 | **router1 s13** (HSYNC −0.20 / data ≤ −0.80 ns, 92.37 MHz); s1's data was +0.35 |
+| SD Analog | router1 s1 | 86.04 | 7,131 | as built |
+| HD HDMI | router1 s1 | 83.49 | 7,120 | **router2 s16** (+1.96 / ≤ −0.78, 82.47 MHz); s1 was +0.32, the danger zone |
+| SD HDMI | router1 s1 | 80.37 | 7,128 | as built |
+| HD Dual | router1 s1 | 85.44 | 7,104 | router1 s1 kept (−1.12 / ≤ −1.24) |
+| SD Dual | router1 s1 | 94.30 | 7,100 | as built |
+
+- 7,100-7,131 / 7,680 LC (92.4-92.9 %), 23 / 32 EBR. `out/rev_b/ron/heirloom/brushfire.vmprog` is 494,836 bytes,
+  unsigned.
+- Skew screen: 94 / 109 HD HDMI routes timing-clean, 19 in the window.
+- Spare: HD HDMI router1 s37 (+1.65 / ≤ −0.71, 87.37 MHz):
+  `.heirloom_work/rb_brushfire/skew/brushfire_v030_spare_hd_hdmi_router1_s37.vmprog`. The strict runner-up, router2
+  s45, closed at only 75.43 MHz. The v0.2.0 screen moved to `.heirloom_work/rb_brushfire/skew_v020/`.
+- **A full builder rebuild re-routes seed 1 and undoes the re-seed.** Re-install with `.heirloom_work/skew_tools/
+  install.sh brushfire router2 16` and `install.sh brushfire router1 13 hd_analog`.

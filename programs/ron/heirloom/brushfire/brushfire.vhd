@@ -1,10 +1,11 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Brushfire v0.2.0 -- Heirloom from the video clips, built from the still WIN_20230820_01_33_09 t0.5
+-- Brushfire v0.3.0 -- Heirloom from the video clips, built from the still WIN_20230820_01_33_09 t0.5
 -- (clip WIN_20230820_01_33_09, 9.5 s; the same patch in clips 01_32_42 and 01_36_37).
 -- 2026-11-15: K6 camera top +25 % (Ron)
 -- 2026-11-21 v0.2.0: P12 Blaze continuous over its whole travel (two narrowing-resize folds in the blaze path fixed)
+-- 2026-11-21 v0.3.0: Blaze as one straight line (the 360 - p branch synthesized reversed: GHDL synth integer - signed)
 --
 -- The still: two crowns of flame across the top (red-cored lobes, nested white/yellow arches, long orange and red
 -- streaks), red-rimmed chevrons stacked down each tile's axis in a pink/purple/brown zone, and under it all
@@ -33,7 +34,7 @@
 --   S9  Flip      Hang (flames from the top) / Rise (flames from the bottom)
 --   S10 Flames    Solid / Lines (only the red streaks and rims, the bands showing through)
 --   S11 Source    Video / Osc
---   P12 BLAZE     flame height: 0 = a thin crown at the top, 360 = the photo, 100 % = the frame on fire
+--   P12 BLAZE     flame height: 0 = a thin crown (Ron's HW look), 532 = the photo, 100 % = the frame on fire
 --
 -- Engine: vblank-zone sequencer (shared glide, exp2 knob curves, one serial multiplier), a per-line engine kicked
 -- at each line start computing the NEXT line (y', the exp / gaussian / zone tables, the band polynomials, the band
@@ -592,22 +593,22 @@ begin
                     when 162 =>
                         c_kz <= resize(f_acc(32 downto 3), 21);
                         z_fms <= to_unsigned(7, 4); z_fld <= '1';             -- job 7 at 163: k6^2
-                    when 178 =>                                       -- blaze: |p - 360| and the slope (168 above, 182 below)
-                        v_d := signed(resize(s_gp(12 downto 3), 12));
-                        -- v0.2.0: |p - 360| (0 .. 663) is SLICED to 10 bits; resize(signed, 10) kept sign + 9 bits
-                        -- and folded p >= 872 back to the photo height (the "big jump" Ron saw)
-                        if v_d >= 360 then
-                            v_d := v_d - 360; z_pa <= unsigned(v_d(9 downto 0)); z_pc <= to_unsigned(168, 16); z_t1(1) <= '0';
-                        else
-                            v_d := 360 - v_d; z_pa <= unsigned(v_d(9 downto 0)); z_pc <= to_unsigned(182, 16); z_t1(1) <= '1';
-                        end if;
+                    when 178 =>                                       -- blaze: one straight line, hp = p 227 / 256 - 472
+                        -- v0.3.0: GHDL synthesis builds "integer - signed" REVERSED (found by a gate-level sim of the
+                        -- netlist 2026-11-21; GHDL simulation is correct).  The old "if p >= 360 then p - 360 else
+                        -- 360 - p" therefore gave z_pa = 1024 - (360 - p) below 360 on hardware: hp ran -472 (P12 0) ..
+                        -- -727 (359), pinned h on the -307 clamp, and snapped to 0 at 360 = 35 %, Ron's "big jump
+                        -- between 30 and 40 %".  Now one product and a signed - integer (built correctly), no branch:
+                        -- -472 at 0 (the hardware look Ron captured as his default), +435 at 1023 (as v0.2.0), the
+                        -- photo (hp 0) at 532, the same rate everywhere.
+                        -- v0.2.0: the old |p - 360| resize(signed, 10) folded p >= 872 (fixed by slicing)
+                        z_pa <= s_gp(12 downto 3); z_pc <= to_unsigned(227, 16);
                     when 180 =>
                         v_g6 := resize(f_acc(19 downto 13), 8) + resize(f_acc(19 downto 15), 8);   -- x1.25 (K6 top +25 %)
                         c_gF <= v_g6(7 downto 2);
                         z_fms <= to_unsigned(8, 4); z_fld <= '1';             -- job 8 at 181: |p - 360| slope
                     when 198 =>
-                        if z_t1(1) = '1' then z_hp <= -signed(resize(f_acc(19 downto 8), 12));
-                        else z_hp <= signed(resize(f_acc(19 downto 8), 12)); end if;
+                        z_hp <= signed(resize(f_acc(19 downto 8), 12)) - 472;   -- p 227 >> 8 (0 .. 907) - 472
                         z_hb <= resize(shift_right(to_signed(C_COS0, 17) - z_cs, 8), 12);
                     when 199 =>                                       -- h = (w - w0) 256 + hp, (cos0 - cos) / 256
                         v_h := resize(z_hb, 13) + resize(z_hp, 13);
@@ -907,6 +908,8 @@ begin
                 when 210 =>                                           -- G by >> 11 (8 bits); job: |d| 61 (lobe centre)
                     n_gb <= m_acc(18 downto 11);
                 when 227 =>                                           -- c = 580 +- |d| 61 / 128; job: max(y' - 470, 0) 149 (floor)
+                    -- NOTE (v0.3.0): GHDL synthesis builds "580 - signed" as "signed - 580", so on hardware the lobe
+                    -- centre above the rim is 0 (the axis), not 580 - x.  Kept: it is the look Ron approved on HW.
                     if e_d < 0 then v_y := 580 - signed(resize(m_acc(18 downto 7), 14));
                     else v_y := 580 + signed(resize(m_acc(18 downto 7), 14)); end if;
                     if v_y < 0 then n_c <= (others => '0'); elsif v_y > 2047 then n_c <= (others => '1'); else n_c <= unsigned(v_y(10 downto 0)); end if;
@@ -1032,7 +1035,7 @@ begin
             p10_hb <= resize(shift_right(v_hb, 9), 12);
             if p9_f < 300 then p10_lt <= '1'; else p10_lt <= '0'; end if;
             if p9_f > 252 then p10_rim <= '1'; else p10_rim <= '0'; end if;
-            v_f := 300 - resize(p9_f, 20);
+            v_f := 300 - resize(p9_f, 20);   -- NOTE (v0.3.0): synthesizes as F - 300 (rim ramp reversed on HW; kept)
             p10_g <= unsigned(v_f(5 downto 0));
             p10_hh <= p9_hh; p10_bq <= p9_bq;
             -- 11: the streak phase Fk = F kS / 128 + flow (8 bits); heat = heat_a + heat_b
