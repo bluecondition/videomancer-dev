@@ -170,3 +170,11 @@ Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where 
 - **Change.** The per-field etch-gain product uses the constant 240 instead of 192 with the camera (sequencer slot 12), so c_eg = 1.25× at every knob position (max 191 -> 239, still 8 bits). The pixel etch sum peaks at 57,121, inside its 16 bits. The Osc keeps 192, so Osc mode is unchanged.
 - Look: `.heirloom_work/rb_frogspawn/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). Same lattice, with bright areas pushing the rings further.
 - Build: router1. SD HDMI and HD Dual closed on seed 2 (the other configs on seed 1). HD worst 75.00 MHz (HD Analog, thin as before); 6,755 LC.
+
+## v0.1.4: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Cells 807, K2 Rows 641, K3 Eyes 1023, K4 Speed 655, K5 Tilt 691, S9 Cells Diamond, P12 Split 942 (K6 Etch, S7,
+S8, S10, S11 unchanged). K3 is continuous (glided, no zones), so 1023 loads as dialled. The vmprog was repacked from
+the v0.1.3 bitstreams (only the settings block differs, 210 bytes), so timing, seeds and LC are as in v0.1.3 (SD HDMI
+and HD Dual seed 2; HD Analog thin at 75.00 MHz). Presets are unchanged.
