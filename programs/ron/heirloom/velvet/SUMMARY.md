@@ -275,3 +275,10 @@ Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where 
   - The Osc keeps 117, so its gain is unchanged (now 3.2× the camera rather than 4×).
 - Look: `.heirloom_work/rb_velvet/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). Same curtain, with the strands pushed further around the face.
 - Build: router1, all six configs seed 1. HD worst 78.34 MHz (HD Analog 89.34, HD HDMI 82.48, HD Dual 78.34; it was 84.76-90.36). 7,206 LC (93.8 %, +63).
+
+## v0.1.4: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Sway 533, K2 Pleats 645, K3 Tide 646, K4 Swell 342, K5 Hem 749, S7 Mirror On, P12 Ripple 615 (K6 Etch, S8-S11
+unchanged). The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 213 bytes), so
+timing, seeds and LC are as in v0.1.3. Presets are unchanged.
