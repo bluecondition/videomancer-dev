@@ -36,6 +36,7 @@ Platform documentation is `videomancer-sdk/docs/` (program-development-guide, to
 
 ## VHDL traps
 
+- **GHDL synthesis builds `<integer> - <signed>` REVERSED** (found 2026-11-21, brushfire): `360 - v` comes out as `v - 360`, `0 - v` as `+v`, while the GHDL simulator (and so every image sim) computes it correctly. Symptom: a control dead over part of its travel then snapping (brushfire Blaze), or a mirrored shape / reversed ramp. Write `to_signed(N, w) - x` or `-x + N` (`natural - unsigned` is fine). 61 programs/ron files carry the explicit `N - signed(` form; many define looks Ron approved, so audit per program and ask before changing a look. Repro + yosys check: `.heirloom_work/ghdl_sub_check/`.
 - `to_unsigned(N, W)` silently wraps when N ≥ 2^W (`to_unsigned(64, 6) = 0`) — symptom: a counter/step "doesn't advance". Widening to the result width costs nothing; grep `to_unsigned(` when anything is stuck. Same for out-of-range sentinels in `to_signed` — pick in-range sentinels.
 - `shift_left(x, n)` keeps the operand's own width and discards top bits — shift-add rewrites of multiplies are NOT free (`"*"` widens, shifts don't). `resize` BEFORE shifting: `shift_left(resize(s_k6, 20), 3) - resize(s_k6, 20)`, never `resize(shift_left(s_k6, 3) - s_k6, 20)`. Symptoms are knobs that cycle instead of ramping, or pinned dead at 0.
 - `resize(signed, N)` narrowing keeps sign + rightmost N−1 bits — an |value| that legitimately reaches 2^(N−1) folds in half. Negate at full width, then **slice**; use a slice, not resize, when you want modulo wrap.
