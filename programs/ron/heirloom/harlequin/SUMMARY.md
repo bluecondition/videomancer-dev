@@ -204,3 +204,25 @@ K1 Diamonds 627, K2 Stripes 551, K3 Waist 630, K4 Bend 1023, K5 Glass 784, K6 Et
 (S7, S8, S10, S11 unchanged). K4 is continuous (glided, no zones), so 1023 loads as dialled. The vmprog was repacked
 from the v0.1.3 bitstreams (only the settings block differs, 219 bytes), so timing, seeds and LC are as in v0.1.3.
 Presets are unchanged.
+
+## v0.1.5: HD HDMI re-seed for the line glitch (2026-11-20)
+
+- **Ron (HW, v0.1.4):** "glitchy horizontal bluish lines". This is the HD HDMI placement artifact (per-line U/V swap,
+  memory `hdmi_tx_placement_skew`). The shipped HD HDMI bitstream (router1 s1, re-routed byte-identical) put the ADV7513
+  HSYNC at **−1.30 ns** (data ≤ −1.58) against the forwarded TX clock. A negative HSYNC is the known-bad side: abacus at
+  −1.45 and pupil at −2.35 both showed lines.
+- **Screen:** hd_hdmi router1 and router2, seeds 1–60 (63 timing-clean of 92 routed;
+  `.heirloom_work/rb_harlequin/skew/`: synth.sh, route.sh, pick.py, screen1.txt). No placement reached the +1.0..+2.3
+  window with every data bit ≤ −0.6. The best were router2 s15 (+0.98 / ≤ −0.66, 81.89 MHz) and router1 s43
+  (+0.93 / ≤ −0.75, 90.33 MHz), with router1 s37 (+0.86 / ≤ −1.95) next.
+- **Shipped:** HD HDMI = **router1 seed 43** (+0.93 / ≤ −0.75, 90.33 MHz): the better data and timing margins, the
+  HSYNC within 0.05 ns of the best. It was installed by hand into build/.../rev_b/bitstreams/ and repacked
+  (`vmprog_pack.py --no-sign`). The other five bitstreams are v0.1.3's seed-1 builds. HD Analog s1 (HDMI −1.87 / ≤ −0.81)
+  and HD Dual s1 (−2.80 / ≤ −2.11) meet the rules used for those configs.
+- **Spare** for an A/B if lines remain: `.heirloom_work/rb_harlequin/skew/harlequin_v015_spare_hdhdmi_router2_s15.vmprog`,
+  the same except HD HDMI = router2 s15 (+0.98 / ≤ −0.66).
+- **Backups:** the old hd_hdmi.bin is kept as `skew/hd_hdmi_shipped_r1s1.bin`, the v0.1.4 vmprog as
+  `rb_harlequin/harlequin_v014.vmprog`.
+- **Defaults:** v0.1.4's HW-captured defaults are kept. Presets are unchanged.
+- **Rebuilding:** a full `build_programs.sh` rebuild would re-route HD HDMI on seed 1 and bring the lines back. Rebuild
+  with `SEED=43` (router1) for hd_hdmi, or re-install the bitstream.
