@@ -261,3 +261,10 @@ Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs 
 - **Change.** The dye constant 494 became 618, so c_dye is x 1.25 at every K6 position. c_dye went from 9 to 10 bits (top 493 -> 616) and the dye partials from 13 to 14 bits; the sum is still taken modulo one colour cycle.
 - Look: `.heirloom_work/rb_plaid/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
 - **Build.** v0.1.1, router1, all six configs on seed 1. HD worst 79.45 MHz (HD Analog 81.49, HD HDMI 79.45, HD Dual 80.98); SD 74.16–87.32 MHz; 7042–7053 / 7680 LC (92 %), 22 EBR.
+
+## v0.1.2: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.1), captured with `./capture_preset.sh --defaults`:
+K1 Warp 651, K3 Shuttle 703, K4 Bands 84, K5 Stripes 804 (K2 Weft, K6 Dye, S7-S11 and P12 Weave unchanged). The
+vmprog was repacked from the v0.1.1 bitstreams (only the settings block differs, 183 bytes), so timing, seeds and LC
+are as in v0.1.1. Presets are unchanged.
