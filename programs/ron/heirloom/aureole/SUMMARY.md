@@ -270,3 +270,11 @@ Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top 
 - Classification: **BEND.** K6 Etch multiplies the camera (or Osc) luma into the floor / horn position and the band field: it displaces and bends the drawing.
 - Change: The per-field Etch code is now 1.25 x the glided knob at half step size, c_e = (s_g6 + s_g6 >> 2) >> 6 (0 .. 159, still 8 bits), and the pixel path takes the product one bit lower (p4_pe(15:6) for the position, (15:8) for the bands), so the 8 x 8 product is unchanged in width. Full Etch: push +-476 -> +-594 px, band bend 119 -> 148 F. The gain steps are 1.6x coarser (160 steps), invisible under the glide.
 - Build: v0.1.3 built 2026-11-15 through the queue, router1. **Build seeds: HD HDMI = seed 2 (75.06 MHz), HD Dual = seed 2 (74.32, thin: +0.07)**; HD Analog s1 77.09, SD Analog s1 77.42, SD HDMI s1 78.19, SD Dual s1 72.99. 7215-7231 LC (94 %). Output `out/rev_b/ron/heirloom/aureole.vmprog`. NOT flashed. If HD Dual shows timing trouble, re-seed it first.
+
+## v0.1.4: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Width 564, K2 Horns 277, K3 Skew 794, K4 Speed 242, K5 Teeth 454, S7 Palette On, S10 Shape On, P12 Bloom 928
+(K6 Etch, S8, S9, S11 unchanged). The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs,
+197 bytes), so timing and seeds are as in v0.1.3 (HD HDMI and HD Dual seed 2; HD Dual thin, 74.32 MHz). Presets are
+unchanged.
