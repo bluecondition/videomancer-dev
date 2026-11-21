@@ -193,3 +193,10 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
 - **Change.** The camera-gain constant in the sequencer's job 7 is 2873 instead of 2298 (×1.25): `c_g6h` = (K6² / 16) × 2873 >> 18, max 573 -> 716, inside its 10 bits. The 12 × 11 camera product peaks at 773 280 (Osc) in 23 bits; the glint term still clamps at 511. Logic and latency unchanged.
 - **Render.** `.heirloom_work/rb_hawser/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same picture; the ropes bend further and more glint red grows over the bright areas.
 - **Build** v0.1.2, router1, all six configs seed 1. HD Analog 86.16, HD HDMI 92.28, HD Dual 90.19 MHz (worst HD 86.16). 6824–6840 / 7680 LC, 22 / 32 EBR. Not flashed.
+
+## v0.1.3: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Tubes 718, K2 Wave 486, K3 Cords 544, K4 Speed 763, K5 Glints 0, P12 Twist 678 (K6 Camera and S7-S11 unchanged).
+K5 is continuous (glided, bipolar), so 0 loads as dialled. The vmprog was repacked from the v0.1.2 bitstreams (only
+the settings block differs, 193 bytes), so timing, seeds and LC are as in v0.1.2. Presets are unchanged.
