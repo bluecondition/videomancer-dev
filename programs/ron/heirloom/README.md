@@ -199,7 +199,7 @@ versions from v0.1.0.
 | 34 | 20230930_01_37_53 t0.5 | brazier | blue/purple nested diamond with pink flames on a red/black ground | v0.1.3 2026-11-21: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1; HD Analog seed 2, others seed 1; LC 6,765, 18 EBR); flashed (v0.1.2) |
 | 35 | 20231002_01_20_50 t0.5 | lantern | magenta/yellow/black nested petal contours around a pink disc | v0.1.3 2026-11-21: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1, 6/6 seed 1; 5,138-5,166 LC, 18 EBR); flashed (v0.1.2) |
 | 36 | 20231009_00_32_55 t0.5 | cumulus | blue/yellow/magenta/cyan scalloped cloud waves with drips | v0.1.3 2026-11-21: HW-captured defaults (Ron); v0.1.2 K6 = camera swap (router1, 6/6 seed 1; up to 7,032 LC, 16 EBR); flashed (v0.1.2) |
-| 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | v0.1.1 built 2026-11-09 (router1; HD HDMI seed 2, others seed 1; 6,946-6,959 LC, 24 EBR); not flashed |
+| 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | v0.1.4 2026-11-21: HW-captured defaults (Ron); v0.1.3 K6 camera pass (router1, 6/6 seed 1; 6,964 LC, 24 EBR); flashed (v0.1.3) |
 | 38 | 20231116_23_41_37 t3.5 | hawser | yellow/black/red wavy rope strands with red glints | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6824–6840 LC, 22 EBR); not flashed |
 | 39 | 20231119_00_47_47 t0.5 | herringbone | blue/white zigzag herringbone stripes | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 5974–5986 LC, 12 EBR); not flashed |
 | 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | v0.1.0 built 2026-11-09 (router2; HD HDMI seed 5, others seed 1; 6,890-6,914 LC, 22 EBR); not flashed |

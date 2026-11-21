@@ -276,3 +276,10 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 - The low-nibble partial product p5_ea is now 24 bits. The 24-bit bend sum is modular, but a dropped bit 23 there would be a half-cycle error.
 - Check: `.heirloom_work/rb_streamers/k6b/k6b_cmp.png` (glide bypassed in the scratch copies). The ribbons bend and fray more: same picture, no wrap.
 - Build: v0.1.3, router1, all six on seed 1; worst HD 78.88 MHz (HD Analog 80.07, HD HDMI 79.41, HD Dual 78.88); 6,964 / 7,680 LC. `.kinetic_work/k6_builds.txt`: heirloom streamers OK router1 worst-HD 78.88 LC 6964.
+
+## v0.1.4: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Red 663, K2 Blue 1005, K4 Speed 691, K6 Bend 963, S10 Shape On (K3 Wave, K5 Width, S7-S9, S11, P12 Swing
+unchanged). The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 195 bytes), so
+timing, seeds and LC are as in v0.1.3. Presets are unchanged.
