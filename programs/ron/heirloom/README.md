@@ -184,7 +184,7 @@ versions from v0.1.0.
 | 19 | 20230620_00_50_54 t0.5 | saltire | magenta/yellow/green/blue hard-edged neon X with wavy edges | v0.1.2 2026-11-20: HW-captured defaults (Ron); v0.1.1 K6 camera pass (router1; HD Analog seed 2, others seed 1; worst HD 80.12 MHz; 7,203 LC, 24 EBR); flashed (v0.1.1) |
 | 20 | 20230703_01_29_07 t10.0 | horizon | cyan/blue/yellow planet horizon with ribs | v0.1.2 2026-11-20: HW-captured defaults (Ron); v0.1.1 K6 camera pass (router1, 6/6 seed 1; worst HD 88.54 MHz; 18 EBR); flashed (v0.1.1) |
 | 21 | 20230710_00_15_14 t1.5 | plumage | orange/magenta/green feather fan curves | v0.1.0 built 2026-11-04 (router2; HD HDMI seed 2; HD Analog thin, 75.05 MHz; 7140–7173 LC, 23 EBR); not flashed |
-| 22 | 20230712_00_46_37 t2.5 | scales | cyan/orange/pink crescent fish scales | v0.1.0 built 2026-11-04 (ROUTER1; SD Analog seed 2; 6922–6933 LC, 20 EBR); not flashed |
+| 22 | 20230712_00_46_37 t2.5 | scales | cyan/orange/pink crescent fish scales | v0.1.3 2026-11-20: HW-captured defaults (Ron); v0.1.2 K6 = camera swap (router1; HD HDMI seed 2, others seed 1; worst HD 78.11 MHz; up to 6,947 LC, 20 EBR); flashed (v0.1.2) |
 | 23 | 20230717_23_51_09 t7.5 | ironwork | magenta/green/black lace contour ironwork | v0.1.1 built 2026-11-04 (ROUTER1 6/6 seed 1; 6802–6827 LC, 22 EBR); not flashed |
 | 24 | 20230722_01_18_41 t5.5 | carpet | red/white/orange kaleidoscopic carpet | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 6777–6794 LC, 14 EBR); not flashed |
 | 25 | 20230731_01_19_22 t0.5 | pebble | red/orange concentric dotted ripple rings | v0.1.0 built 2026-11-04 (router2 6/6 seed 1; 6696–6766 LC, 21 EBR); not flashed |

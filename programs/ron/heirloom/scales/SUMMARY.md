@@ -174,3 +174,10 @@ Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **B
 - The luma × warp term p5_lw widened 25 → 26 bits and the key term p6_lk 14 → 15 bits, so the key opening never wraps: in Osc mode (twice the depth) 223 × 2,874 << 6 already exceeded 2^25 at the old top (Video mode stays under it: 239 × 3,592 << 5). The phase add uses the low 25 bits of p5_lw (whole cycles, cyclic by design). Side effect: the Osc picture at high Warp no longer shows that wrapped key (it opens further instead). Latency unchanged.
 - The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.1.2).
 - Build (router1, 2026-11-15): **HD HDMI seed 2** (seed 1 stalled router1), the rest seed 1; HD worst 78.11 MHz (HD Analog 78.11, HD HDMI 89.90, HD Dual 80.03); 6,947 / 7,680 LC max.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Scales 552, K2 Bow 923, K3 Lobes 729, K4 Drift 762, K5 Bands 803, S7 Wave On, P12 Crescents 438 (K6 Warp,
+S8-S11 unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 215 bytes),
+so timing and seeds are as in v0.1.2 (HD HDMI seed 2). Presets are unchanged.
