@@ -197,3 +197,10 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 Ron: K6 loads at 100 % (initial_value 1023, set by the orchestrator, with the version bump), and the camera effect at the top of the knob is 25 % stronger on bend / element programs. Bend-type: the camera's luma is added to the ripple phase. The etch constant is 771 -> 964 (x1.25), so c_eg peaks at 962 (was 769) and still fits 10 bits. Top: 3 -> 3.75 cycles per full luma. The ripple phase wraps by design. The camera and the Osc share this gain, so both are 25 % stronger. The gain is computed per field (no new pixel-path multiplier, latency unchanged). Checked: a GHDL render of old against new code at K6 = 100 % (the K6 glide bypassed in the scratch copies), `.heirloom_work/rb_undulate/k6b/k6b_cmp.png`: the same picture with a stronger camera bend, with no wrap and no new artifacts.
 
 - Build: router1; SD HDMI on seed 3 (seeds 1-2 stalled router1, timeout; dupin: 0 CARRY I0==I1), the other five on seed 1; worst HD 89.31 MHz (HD Analog; HD HDMI 91.79, HD Dual 98.32); SD 90.99-91.37; 7064-7071 LC, 21 / 32 EBR.
+
+## v0.1.4: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Ripples 389, K2 Bands 604, K3 Blue 546, K4 Flow 0 (−100, full-speed reverse), K5 Flecks 680, S9 Wobble On,
+P12 Undulate 661 (K6 Etch, S7, S8, S10, S11 unchanged). The vmprog was repacked from the v0.1.3 bitstreams (only the
+settings block differs, 203 bytes), so timing, seeds and LC are as in v0.1.3 (SD HDMI seed 3). Presets are unchanged.
