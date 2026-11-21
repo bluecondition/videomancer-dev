@@ -156,3 +156,11 @@ Working files are in `.heirloom_work/rb_grommets/` (`notes.md` has every number)
 - The per-field EG = (k6^2 GV >> 23) + (k6^2 GV >> 25), at most 365 (was 292), in the existing 13-bit c_eg. Full-white etch is at most 93k, far inside the 21-bit field sum.
 - Check: `.heirloom_work/rb_grommets/k6b/k6b_cmp.png` (glide bypassed in the scratch copies). At K6 = 100 % a bright camera already pushes most of the lattice into the black key. The +25 % pushes a little more: same picture, slightly blacker, no wrap.
 - Build: v0.1.1, router1, all six on seed 1; worst HD 92.65 MHz (HD Analog 93.46, HD HDMI 92.65, HD Dual 95.84); 6,674 / 7,680 LC. `.kinetic_work/k6_builds.txt`: heirloom grommets OK router1 worst-HD 92.65 LC 6674.
+
+## v0.1.2: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.1), captured with `./capture_preset.sh --defaults`:
+K1 Lattice 347, K2 Columns 660, K3 Rows 395, K4 Speed 177, K5 Stems 1023, S10 Negative On, P12 Holes 144 (K6 Etch,
+S7-S9, S11 unchanged). K5 is continuous (glided, squared), so 1023 loads as dialled. The vmprog was repacked from
+the v0.1.1 bitstreams (only the settings block differs, 222 bytes), so timing, seeds and LC are as in v0.1.1.
+Presets are unchanged.

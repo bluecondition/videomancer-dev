@@ -6,7 +6,7 @@
 processing_delay_clks = 16
 program_id = "com.czartroniks.grommets"
 program_name = "Grommets"
-program_version = "0.1.1"
+program_version = "0.1.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -22,7 +22,7 @@ name_label = "Lattice"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 347
 display_float_digits = 0
 suffix_label = "%"
 
@@ -32,7 +32,7 @@ name_label = "Columns"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 660
 display_float_digits = 0
 suffix_label = "%"
 
@@ -42,7 +42,7 @@ name_label = "Rows"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 395
 display_float_digits = 0
 suffix_label = "%"
 
@@ -52,7 +52,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 764
+initial_value = 177
 display_float_digits = 0
 suffix_label = ""
 
@@ -62,7 +62,7 @@ name_label = "Stems"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 1023
 display_float_digits = 0
 suffix_label = "%"
 
@@ -98,7 +98,7 @@ initial_value_label = "Round"
 parameter_id = "toggle_switch_10"
 name_label = "Negative"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -112,7 +112,7 @@ name_label = "Holes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 409
+initial_value = 144
 display_float_digits = 0
 suffix_label = "%"
 
