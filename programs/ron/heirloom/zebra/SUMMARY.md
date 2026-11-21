@@ -221,3 +221,10 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
   - Check: the new code at K6 915 reproduces the old code at K6 1023 bit-exactly (`.heirloom_work/rb_zebra/k6b/k6b_eqcmp.png`).
 - **Render.** `.heirloom_work/rb_zebra/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). At 100 % the stripes are already shredded, so 0.75 more cycles re-shuffles them; the bear's head reads more clearly as a bent oval.
 - **Build** v0.1.2, router1, all six configs seed 1. HD Analog 83.30, HD HDMI 79.23, HD Dual 84.43 MHz (worst HD 79.23). 6918–6935 / 7680 LC, 19 / 32 EBR. Not flashed.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Bands 382, K2 Chevron 649, K3 Shift 476, K4 Speed 122, K5 Cells 536, P12 Swirl 753 (K6 Etch and S7-S11
+unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 204 bytes), so
+timing, seeds and LC are as in v0.1.2. Presets are unchanged.
