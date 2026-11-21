@@ -197,3 +197,14 @@ model), `mkcam.py` + `cam_synth_720.png` (the synthetic camera), `rtl_*.png` (GH
 ## K6 top +25 % and default 100 % (2026-11-15)
 
 Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).
+
+## v0.1.3: HD HDMI re-seed for the hsync lines (2026-11-21)
+
+Ron (HW, preview page): "this one works good but also has the red and blue glitchy horizontal lines that might be
+indicative of hsync problems". The shipped HD HDMI bitstream (router1 s1, re-routed byte-identical) put the ADV7513
+HSYNC at **−0.89 ns** (data ≤ −2.04): the negative, known-bad side. Screen (`.heirloom_work/skew_tools/screen.sh
+tapers`, results in `.heirloom_work/rb_tapers/skew/`): 105 timing-clean HD HDMI placements, 4 in the +1.0..+2.3
+window. **Installed HD HDMI = router1 s43 (+1.73 / ≤ −0.60, 97.80 MHz)**; spare with router2 s10 (+1.27 / ≤ −0.67):
+`.heirloom_work/rb_tapers/skew/tapers_v013_spare_hd_hdmi_router2_s10.vmprog`. HD Analog (s1, −2.51 / ≤ −2.06) and
+HD Dual (s1, −1.90 / ≤ −0.88) keep the builder's seeds. No RTL or TOML change besides the version. A full builder
+rebuild re-routes HD HDMI on seed 1: re-run `.heirloom_work/skew_tools/install.sh tapers router1 43` after one.
