@@ -2,6 +2,9 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Cupola v0.1.1 -- Heirloom (video phase), from the clip WIN_20230907_00_18_59 at 5.5 s.
+-- v0.2.0 (2026-11-20, Ron: "why do the controls seem so stepped/choppy?"): K1 / K2 / K3 / K5 exponents in 1/256 octave
+--   (were 1/8: ~25 jumps of 9-12 % across each knob), the rolled rows table lerped by its phase fraction (it moved in
+--   whole entries), K4 Roll glided, K6's etch gain 2 bits finer
 -- v0.1.1: the camera's etch gain is 1/16 (was 1/4) and its luma box 8 px (was 4), so the default Etch bends the X's
 -- smoothly instead of fraying them line by line; the Osc keeps its v0.1.0 strength (now 16x the camera).
 -- 2026-11-15: K6 camera top +25 % (Ron)
@@ -149,14 +152,15 @@ architecture cupola of program_top is
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
+    signal s_g4 : unsigned(12 downto 0) := to_unsigned(701 * 8, 13);   -- K4 Roll, glided (v0.2.0)
     signal s_k4 : unsigned(9 downto 0) := to_unsigned(701, 10);
     signal s_vm : unsigned(8 downto 0) := (others => '0');
     signal s_vneg : std_logic := '0';
     signal s_flp, s_rot, s_dbl, s_neg, s_src : std_logic := '0';
 
     -- per-field constants
-    signal z_e1, z_e2, z_e3 : signed(4 downto 0) := (others => '0');   -- 1/8-octave exponents
-    signal z_e5 : signed(5 downto 0) := (others => '0');
+    signal z_e1, z_e2, z_e3 : signed(9 downto 0) := (others => '0');   -- 1/256-octave exponents (v0.2.0; were 1/8)
+    signal z_e5 : signed(9 downto 0) := (others => '0');
     signal z_k1b  : unsigned(12 downto 0) := to_unsigned(3226, 13);
     signal z_k2b  : unsigned(11 downto 0) := to_unsigned(1116, 12);
     signal z_n960 : unsigned(9 downto 0) := to_unsigned(960, 10);
@@ -175,7 +179,7 @@ architecture cupola of program_top is
     signal c_m2   : unsigned(17 downto 0) := (others => '0');           -- roll^2
     signal c_gd   : unsigned(9 downto 0) := to_unsigned(128, 10);       -- dome gain (128 = x1)
     signal c_e2   : unsigned(19 downto 0) := (others => '0');           -- etch^2
-    signal c_g6   : unsigned(6 downto 0) := to_unsigned(2, 7);          -- etch gain (0 .. 72)
+    signal c_g6   : unsigned(8 downto 0) := to_unsigned(8, 9);          -- etch gain, Q2 (0 .. 291 = 0 .. 72.8)
     signal c_lp12 : signed(10 downto 0) := (others => '0');
     signal c_lt46 : unsigned(7 downto 0) := (others => '0');
     signal c_lev  : signed(10 downto 0) := (others => '0');             -- the X level (+ = pulled apart)
@@ -215,6 +219,10 @@ architecture cupola of program_top is
     signal e_fa   : unsigned(18 downto 0) := (others => '0');
     signal e_gt   : signed(11 downto 0) := (others => '0');
     signal n_vr   : signed(11 downto 0) := (others => '0');
+    signal e_v0, e_v1 : signed(11 downto 0) := (others => '0');          -- rows table entries n, n + 1 (v0.2.0 lerp)
+    signal e_ld   : signed(12 downto 0) := (others => '0');
+    signal e_lacc : signed(21 downto 0) := (others => '0');
+    signal e_lf   : unsigned(7 downto 0) := (others => '0');
     signal n_fd   : signed(11 downto 0) := (others => '0');
     signal n_t3, n_t1, n_t2 : signed(11 downto 0) := (others => '0');
     signal n_gbg  : unsigned(7 downto 0) := (others => '0');
@@ -241,7 +249,7 @@ architecture cupola of program_top is
     signal p3_lm  : signed(8 downto 0) := (others => '0');
     signal p4_d2g : unsigned(19 downto 0) := (others => '0');
     signal p4_fr, p4_fd : signed(12 downto 0) := (others => '0');
-    signal p4_et  : signed(14 downto 0) := (others => '0');
+    signal p4_et  : signed(16 downto 0) := (others => '0');
     signal p4_kf  : signed(9 downto 0) := (others => '0');
     signal p5_d2g : unsigned(11 downto 0) := (others => '0');
     signal p5_fr, p5_fd : signed(12 downto 0) := (others => '0');
@@ -340,6 +348,7 @@ begin
         variable v_t  : signed(15 downto 0);
         variable v_u  : unsigned(19 downto 0);
         variable v_l  : signed(10 downto 0);
+        variable v_g  : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             s_tid  <= registers_in(8)(3 downto 0);
@@ -371,7 +380,7 @@ begin
                 s_hcnt <= (others => '0');
             end if;
             -- roll: bipolar, +-8 deadband
-            s_k4 <= unsigned(registers_in(3));
+            s_k4 <= s_g4(12 downto 3);
             v_s := signed(resize(s_k4, 11)) - 512;
             s_vneg <= v_s(10);
             if v_s > -9 and v_s < 9 then
@@ -421,6 +430,7 @@ begin
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
                             when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 5      => s_gm <= s_g4; s_gr <= unsigned(registers_in(3));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -441,10 +451,11 @@ begin
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 5      => s_g4 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 5 then z_grun <= '0'; end if;
+                        if z_gc = 6 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -475,17 +486,17 @@ begin
             z_ld <= z_pre;
             if z_pre = '1' then
                 case to_integer(z_sel) is
-                    when 0  => z_fa <= resize(z_k1b, 32);  z_fb <= resize(unsigned(z_e1(2 downto 0)), 16) + 8;   -- pillars
-                    when 1  => z_fa <= resize(z_k2b, 32);  z_fb <= resize(unsigned(z_e2(2 downto 0)), 16) + 8;   -- cupolas
+                    when 0  => z_fa <= resize(z_k1b, 32);  z_fb <= resize(unsigned(z_e1(7 downto 0)), 16) + 256; -- pillars
+                    when 1  => z_fa <= resize(z_k2b, 32);  z_fb <= resize(unsigned(z_e2(7 downto 0)), 16) + 256; -- cupolas
                     when 2  => z_fa <= resize(c_k1, 32);   z_fb <= resize(z_n960, 16);                           -- phase 1 start
                     when 3  => z_fa <= resize(c_k2, 32);   z_fb <= resize(z_n960, 16);                           -- phase 2 start
-                    when 4  => z_fa <= resize(s_ys, 32);   z_fb <= resize(unsigned(z_e3(2 downto 0)), 16) + 8;   -- rows
+                    when 4  => z_fa <= resize(s_ys, 32);   z_fb <= resize(unsigned(z_e3(7 downto 0)), 16) + 256; -- rows
                     when 5  => z_fa <= resize(z_dr0, 32);  z_fb <= to_unsigned(121, 16);
                     when 6  => z_fa <= resize(c_dr, 32);   z_fb <= resize(s_l540, 16);                           -- rows centre
                     when 7  => z_fa <= resize(s_vm, 32);   z_fb <= resize(s_vm, 16);                             -- roll^2
                     when 8  => z_fa <= resize(c_m2, 32);   z_fb <= to_unsigned(1942, 16);
                     when 9  => z_fa <= resize(s_g6(12 downto 3), 32); z_fb <= resize(s_g6(12 downto 3), 16);    -- etch^2
-                    when 10 => z_fa <= resize(c_e2(19 downto 4), 32); z_fb <= to_unsigned(146, 16);   -- 117 x 1.25
+                    when 10 => z_fa <= resize(c_e2(19 downto 4), 32); z_fb <= to_unsigned(146, 16);   -- 117 x 1.25 (c_g6 now Q2)
                     when 11 => z_fa <= resize(z_dp, 32);   z_fb <= to_unsigned(205, 16);                         -- the X level
                     when 12 => z_fa <= resize(z_tri, 32);  z_fb <= to_unsigned(46, 16);                          -- breath
                     when others => z_fa <= resize(z_tri, 32); z_fb <= to_unsigned(110, 16);
@@ -502,22 +513,21 @@ begin
 
             if s_zone = '1' then
                 case to_integer(s_zc) is
-                    -- motion: last field's roll and the breath LFO; exponents (1/8 octave); |P12 - 507|
+                    -- motion: last field's roll and the breath LFO; exponents (1/256 octave, v0.2.0); |P12 - 507|
                     when 20 =>
                         c_roll <= unsigned(signed(c_roll) + resize(c_droll, 25));
                         c_lf <= c_lf + 3;
                         v_d := signed(resize(s_g1(12 downto 3), 11)) - 512;                 -- pillars: 26 / 1024
-                        v_t := shift_left(resize(v_d, 16), 4) + shift_left(resize(v_d, 16), 3) + shift_left(resize(v_d, 16), 1) + 512;
-                        z_e1 <= resize(shift_right(v_t, 10), 5);
+                        v_t := shift_left(resize(v_d, 16), 4) + shift_left(resize(v_d, 16), 3) + shift_left(resize(v_d, 16), 1) + 16;
+                        z_e1 <= resize(shift_right(v_t, 5), 10);
                         v_d := signed(resize(s_g2(12 downto 3), 11)) - 512;                 -- cupolas: 24 / 1024
-                        v_t := shift_left(resize(v_d, 16), 4) + shift_left(resize(v_d, 16), 3) + 512;
-                        z_e2 <= resize(shift_right(v_t, 10), 5);
+                        v_t := shift_left(resize(v_d, 16), 4) + shift_left(resize(v_d, 16), 3) + 16;
+                        z_e2 <= resize(shift_right(v_t, 5), 10);
                         v_d := signed(resize(s_g3(12 downto 3), 11)) - 512;                 -- rows: 26 / 1024
-                        v_t := shift_left(resize(v_d, 16), 4) + shift_left(resize(v_d, 16), 3) + shift_left(resize(v_d, 16), 1) + 512;
-                        z_e3 <= resize(shift_right(v_t, 10), 5);
+                        v_t := shift_left(resize(v_d, 16), 4) + shift_left(resize(v_d, 16), 3) + shift_left(resize(v_d, 16), 1) + 16;
+                        z_e3 <= resize(shift_right(v_t, 5), 10);
                         v_d := signed(resize(s_g5(12 downto 3), 11)) - 512;                 -- dome: 32 / 1024
-                        v_t := shift_left(resize(v_d, 16), 5) + 512;
-                        z_e5 <= resize(shift_right(v_t, 10), 6);
+                        z_e5 <= resize(v_d, 10);                                             -- 1/256 octave: +-2 octaves
                         if s_gp(12 downto 3) >= 507 then
                             z_dpn <= '0'; z_dp <= s_gp(12 downto 3) - 507;
                         else
@@ -525,28 +535,27 @@ begin
                         end if;
                     when 21 =>
                         if c_lf <= 256 then z_tri <= c_lf; else z_tri <= resize(to_unsigned(512, 10) - resize(c_lf, 10), 9); end if;
-                        -- dome gain 128 x (8 + m) / 8 x 2^s
-                        case z_e5(5 downto 3) is
-                            when "110"  => c_gd <= resize(shift_right(to_unsigned(16, 10) * (resize(unsigned(z_e5(2 downto 0)), 4) + 8), 2), 10);
-                            when "111"  => c_gd <= resize(shift_right(to_unsigned(16, 10) * (resize(unsigned(z_e5(2 downto 0)), 4) + 8), 1), 10);
-                            when "000"  => c_gd <= resize(to_unsigned(16, 10) * (resize(unsigned(z_e5(2 downto 0)), 4) + 8), 10);
-                            when "001"  => c_gd <= resize(shift_left(to_unsigned(16, 10) * (resize(unsigned(z_e5(2 downto 0)), 4) + 8), 1), 10);
-                            when others => c_gd <= to_unsigned(512, 10);
+                        -- dome gain 128 x (256 + f) / 256 x 2^s (continuous mantissa, v0.2.0)
+                        v_g := to_unsigned(256, 10) + resize(unsigned(z_e5(7 downto 0)), 10);
+                        case z_e5(9 downto 8) is
+                            when "10"   => c_gd <= shift_right(v_g, 3);
+                            when "11"   => c_gd <= shift_right(v_g, 2);
+                            when "00"   => c_gd <= shift_right(v_g, 1);
+                            when others => c_gd <= v_g;
                         end case;
-                        if z_e5 = 16 then c_gd <= to_unsigned(512, 10); end if;
 
                     -- products
                     when 50  =>
-                        v_u := resize(f_acc(19 downto 3), 20);
-                        case z_e1(4 downto 3) is
+                        v_u := resize(f_acc(22 downto 8), 20);
+                        case z_e1(9 downto 8) is
                             when "10"   => c_k1 <= resize(shift_right(v_u, 2), 16);
                             when "11"   => c_k1 <= resize(shift_right(v_u, 1), 16);
                             when "00"   => c_k1 <= resize(v_u, 16);
                             when others => c_k1 <= resize(shift_left(v_u, 1), 16);
                         end case;
                     when 74  =>
-                        v_u := resize(f_acc(19 downto 3), 20);
-                        case z_e2(4 downto 3) is
+                        v_u := resize(f_acc(22 downto 8), 20);
+                        case z_e2(9 downto 8) is
                             when "10"   => c_k2 <= resize(shift_right(v_u, 2), 16);
                             when "11"   => c_k2 <= resize(shift_right(v_u, 1), 16);
                             when "00"   => c_k2 <= resize(v_u, 16);
@@ -555,8 +564,8 @@ begin
                     when 98  => c_ph1 <= to_unsigned(258111, 20) - f_acc(19 downto 0);
                     when 122 => c_ph2 <= to_unsigned(998380, 20) - f_acc(19 downto 0);
                     when 146 =>
-                        v_u := resize(f_acc(19 downto 3), 20);
-                        case z_e3(4 downto 3) is
+                        v_u := resize(f_acc(22 downto 8), 20);
+                        case z_e3(9 downto 8) is
                             when "10"   => z_dr0 <= resize(shift_right(v_u, 2), 13);
                             when "11"   => z_dr0 <= resize(shift_right(v_u, 1), 13);
                             when "00"   => z_dr0 <= resize(v_u, 13);
@@ -571,7 +580,7 @@ begin
                         if s_vneg = '1' then c_droll <= -signed(resize(f_acc(28 downto 10), 20));
                         else c_droll <= signed(resize(f_acc(28 downto 10), 20)); end if;
                     when 266 => c_e2 <= f_acc(19 downto 0);
-                    when 290 => c_g6 <= f_acc(23 downto 17);
+                    when 290 => c_g6 <= f_acc(23 downto 15);
                     when 314 =>
                         if z_dpn = '1' then c_lp12 <= -signed(resize(f_acc(18 downto 9), 11));
                         else c_lp12 <= signed(resize(f_acc(18 downto 9), 11)); end if;
@@ -719,11 +728,27 @@ begin
                 when 4 =>
                     v_a := resize(e_fa, 22) + shift_left(resize(e_dy, 22), 2) + shift_left(resize(e_dy, 22), 1) + resize(e_dy, 22);
                     n_fd <= signed(resize(v_a(21 downto 9), 12)) - resize(c_lev, 12);
-                    n_vr <= signed(r_lt_q(31 downto 20));                           -- rolled read data (address set at lc 1)
+                    e_v0 <= signed(r_lt_q(31 downto 20));                           -- rolled read data (address set at lc 1)
                 when 6 =>
                     n_gbg  <= unsigned(r_lt_q(19 downto 12));                       -- static read data (address set at lc 3)
                     n_bbg  <= unsigned(r_lt_q(11 downto 6)) & "00";
                     n_gate <= unsigned(r_lt_q(5 downto 0));
+                -- v0.2.0: the next rows entry and a lerp by the phase fraction, so the rows roll and stretch smoothly
+                -- instead of in whole table entries (~2 lines, more with long rows); serial shift-add, MSB first
+                when 5 =>
+                    r_lt_a <= e_r(24 downto 16) + 1;                                -- rolled read n + 1 (wraps with the table)
+                when 8 =>
+                    e_v1 <= signed(r_lt_q(31 downto 20));
+                when 9 =>
+                    e_ld   <= resize(e_v1, 13) - resize(e_v0, 13);
+                    e_lf   <= e_r(15 downto 8);
+                    e_lacc <= (others => '0');
+                when 10 to 17 =>
+                    if e_lf(7) = '1' then e_lacc <= shift_left(e_lacc, 1) + resize(e_ld, 22);
+                    else e_lacc <= shift_left(e_lacc, 1); end if;
+                    e_lf <= e_lf(6 downto 0) & '0';
+                when 18 =>
+                    n_vr <= e_v0 + resize(shift_right(e_lacc, 8), 12);
                 when others => null;
             end case;
         end if;
@@ -792,12 +817,13 @@ begin
             p4_d2g <= resize(p3_d2p(17 downto 8) * c_gd, 20);
             p4_fr <= signed(resize(p3_sq1, 13)) + resize(l_vr, 13);
             p4_fd <= signed(resize(p3_u2x, 13)) + resize(l_fd, 13);
-            p4_et <= resize(shift_right(p3_lm, 1) * signed('0' & c_g6), 15);
+            p4_et <= resize(shift_right(p3_lm, 1) * signed('0' & c_g6), 17);
             p4_kf <= 359 - signed(resize(p3_u2, 10));
             -- 5: D2g (clamped); etch (Osc 4x); fade = (359 - u2) x 27 / 8
             if p4_d2g(19 downto 7) > 4095 then p5_d2g <= to_unsigned(4095, 12);
             else p5_d2g <= p4_d2g(18 downto 7); end if;
-            if s_src = '1' then p5_ef <= p4_et; else p5_ef <= shift_right(p4_et, 4); end if;   -- Osc = 16x the camera
+            if s_src = '1' then p5_ef <= resize(shift_right(p4_et, 2), 15);                    -- Osc = 16x the camera
+            else p5_ef <= resize(shift_right(p4_et, 6), 15); end if;                            -- (c_g6 is Q2)
             v_k := shift_left(resize(p4_kf, 16), 4) + shift_left(resize(p4_kf, 16), 3) + shift_left(resize(p4_kf, 16), 1) + resize(p4_kf, 16);
             v_k := shift_right(v_k, 3);
             if v_k < 0 then p5_kf <= (others => '0'); elsif v_k > 255 then p5_kf <= to_unsigned(255, 8);

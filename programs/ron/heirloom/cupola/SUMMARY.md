@@ -248,3 +248,33 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 - **Change.** The etch gain's constant in the serial product is 146 (was 117), so c_g6 = k6^2 x 146 >> 21 runs 0 .. 72 (was 0 .. 58). c_g6 is 7 bits; the etch product stays within its 15 bits (max 9144). The Osc shares the gain (still 16x the camera). Per-field arithmetic only; the latency is unchanged.
 - **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_cupola/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
 - **Build (v0.1.3):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom cupola`). Post-route Fmax: HD Analog 85.72, HD HDMI 85.68, HD Dual 79.74 (worst HD 79.74), SD Analog 83.86, SD HDMI 83.91, SD Dual 82.18 MHz. Up to 6688 / 7680 LC.
+
+## v0.2.0: Ron's preview notes (2026-11-20)
+
+Ron (Heirloom Preview Queue, rework on v0.1.1): "why do the controls seem so stepped/choppy? would be a cooler program
+if smoothed out".
+
+**Why.** The four size knobs were turned into exponents in 1/8-octave steps before use, so each had only ~25 distinct
+values over its whole travel and the picture jumped 9-12 % at a time. The rolling rows also moved through their line
+table in whole entries (~2 virtual lines, more when K3 stretches the rows), so slow rolls ticked.
+
+- **K1 Pillars, K2 Cupolas, K3 Rows:** exponents now in 1/256 octave (26 x 32 / 1024 per count for K1 / K3,
+  24 x 32 / 1024 for K2) with a continuous mantissa (256 + f) / 256 in the same serial product and the same octave
+  shifts. Every knob count changes the scale (~0.07 % per count). At 512 the exponent is 0, so the default is exact.
+  The mantissa is linear within each octave (at most 6 % from a true 2^x mid-octave); it is continuous and monotonic.
+- **K5 Dome:** the dome gain is 128 (256 + f) / 256 x 2^s from a 1/256-octave exponent (was (8 + m) / 8, 1/8 octave),
+  same range 32 .. 511.
+- **Rows motion (K4 Roll, K3 Rows):** the line engine reads the rolled rows table at entries n and n + 1 and lerps
+  them by the top 8 bits of the phase fraction (a serial shift-add over 8 idle line-engine clocks, ~40 LC), so the
+  pillar rows roll and stretch smoothly at every speed.
+- **K4 Roll** now goes through the shared glide (was read raw), so the roll speed eases instead of following pot noise.
+- **K6 Etch:** the etch gain has 2 more fraction bits (Q2, 0 .. 291), so the camera bend grows smoothly from zero
+  instead of in 1/72 steps; same top end (camera and Osc within 1 %).
+- **Unchanged / still stepped:** P12 and the breath move the X level and the domes in whole lines (1 line per step,
+  which reads as smooth at 1080). The switches are instant look-flips by design.
+- No sim (build-first); the default frame should be identical to v0.1.3 except the rows lerp (the still's row
+  table is now sampled between entries as the rows roll).
+- **Build** v0.2.0, router1, all six seed 1: HD Analog 80.33, HD HDMI 81.75, HD Dual 79.79 MHz (worst HD 79.79);
+  SD 82.18 / 84.96 / 84.71 MHz. 6893–6915 / 7680 LC (90 %, +~210 for the lerp, the finer mantissas, the K4 glide
+  channel and the wider etch product), 22 / 32 EBR; iceunpack OK ×6. Not simulated, not flashed.
+  v0.1.3's VHDL, TOML and vmprog are in `.heirloom_work/rb_cupola/` (`cupola_v013.*`).
