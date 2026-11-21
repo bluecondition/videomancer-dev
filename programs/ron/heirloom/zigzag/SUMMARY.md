@@ -205,3 +205,13 @@ Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs 
 - **Change.** The gain law is x 1.25 at every K6 position: slot 10's constant 2051 became 2564 and the knee 78 became 98, so c_gain runs 0 .. 97 (50 %) .. 636 (was 0 .. 78 .. 508). c_gain went from 9 to 10 bits, the texture product p5_tg to 21 bits and p6_tg to 13 bits; kT stays 20 bits (|kT| <= 127 x 2534 < 2^19).
 - Look: `.heirloom_work/rb_zigzag/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
 - **Build.** v0.1.2, router1, all six configs on seed 1. HD worst 89.90 MHz (HD Analog 89.90, HD HDMI 91.52, HD Dual 91.99); SD 91.63–93.19 MHz; 5958–5968 / 7680 LC (78 %), 21 EBR.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Zigzags 1023, K2 Ribbon 504, K3 Lines 909, K4 Speed 322, P12 Pitch 645 (K6 Camera and S7-S11 unchanged).
+**K5 Palette stays "Still":** the device reported K5 = 4, a real knob position (turned fully down = zone 0 = Still in
+the `registers_in(4)(9 downto 7)` decode), which the tool's "raw < label count = label index" rule misread as label 4
+(GRB). GRB would also not have loaded as GRB: this program has no `v < N` index decode, so a labelled default > 0
+reads as zone 0 (memory `labelled_default_index_trap`). The vmprog was repacked from the v0.1.2 bitstreams (only the
+settings block differs, 192 bytes), so timing, seeds and LC are as in v0.1.2. Presets are unchanged.

@@ -9,7 +9,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.zigzag"
 program_name = "Zigzag"
-program_version = "0.1.2"
+program_version = "0.1.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -25,7 +25,7 @@ name_label = "Zigzags"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 520
+initial_value = 1023
 display_float_digits = 0
 suffix_label = "%"
 
@@ -35,7 +35,7 @@ name_label = "Ribbon"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 504
 display_float_digits = 0
 suffix_label = "%"
 
@@ -45,7 +45,7 @@ name_label = "Lines"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 909
 display_float_digits = 0
 suffix_label = "%"
 
@@ -55,7 +55,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 612
+initial_value = 322
 display_float_digits = 0
 suffix_label = ""
 
@@ -111,7 +111,7 @@ name_label = "Pitch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 424
+initial_value = 645
 display_float_digits = 0
 suffix_label = "%"
 

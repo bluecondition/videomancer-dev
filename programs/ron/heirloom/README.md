@@ -165,7 +165,7 @@ versions from v0.1.0.
 |---|---|---|---|---|
 | 1 | 20230127_01_48_55 t25.5 | tongues | twin red/yellow flame tongues mirrored, green ground at right, black | v0.1.0 built 2026-11-04 (ROUTER1; SD HDMI seed 2, others seed 1; 6957–6992 LC, 16 EBR); not flashed |
 | 2 | 20230203_00_19_56 t6.0 | tapers | magenta/cyan/blue candle-flame columns on black | v0.1.0 built 2026-11-04 (router2; HD Analog seed 2; 6296–6308 LC, 9 EBR); not flashed |
-| 3 | 20230205_00_16_05 t0.5 | zigzag | green/rainbow zigzag V ribbons with white/blue highlights | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 5863–5882 LC, 21 EBR); not flashed |
+| 3 | 20230205_00_16_05 t0.5 | zigzag | green/rainbow zigzag V ribbons with white/blue highlights | v0.1.3 2026-11-20: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1, 6/6 seed 1; 5,958-5,968 LC, 21 EBR); flashed (v0.1.2) |
 | 4 | 20230206_00_35_06 t0.5 | frogspawn | green/black cellular contour lattice | v0.1.1 built 2026-11-04 (router2; HD Analog seed 2, HD Dual seed 3; HD HDMI and HD Dual thin, +0.3/+0.5 MHz; 6730–6752 LC, 17 EBR); not flashed |
 | 5 | 20230210_01_00_21 t3.0 | peaks | pink/orange/violet sunset peaks with teeth | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 7033–7048 LC, 17 EBR); not flashed |
 | 6 | 20230216_01_27_34 t2.5 | grommets | purple/blue ring lattice with black holes | v0.1.0 built 2026-11-04 (router2; HD HDMI seed 3, HD Dual seed 2; 6650–6675 LC, 23 EBR); not flashed |
