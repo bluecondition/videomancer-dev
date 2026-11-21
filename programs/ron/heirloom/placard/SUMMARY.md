@@ -227,3 +227,135 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
 - **Change.** The etch gain `c_eg` = min(16 383, 16.25 q) with q = K6² >> 10 (was 13 q). `z_eg` is 15 bits (16 q + q / 4) and saturates into the 14-bit `c_eg` (zone clocks 195 / 196): exactly ×1.25 up to K6 ≈ 1016, ×1.233 at 1023. The pixel etch p5_le peaks at 4 177 665, inside its 22 bits. Latency unchanged.
 - **Render.** `.heirloom_work/rb_placard/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same picture; the zone edges and arcs wobble further with the camera.
 - **Build** v0.1.2, router1, all six configs seed 1. HD Analog 95.81, HD HDMI 81.70, HD Dual 86.72 MHz (worst HD 81.70). 7149–7167 / 7680 LC, 15 / 32 EBR. Not flashed.
+
+## v0.2.0: Ron's preview notes (2026-11-21)
+
+Ron (hardware): "this program also has the red and blue horizontal lines glitch problem. it would be more interesting
+if the big white/green/red/gray/black arc could change with the movement of some other knobs"
+
+**Reading.** "The big arc" is the road: the band of fine coloured lines that sweeps in from the left across the
+picture (the narrow middle road), and its wide twin at the top / bottom. Both are shells of one product field
+P = (x + a) 1.2 T (T = the vertical phase), so their edges are hyperbolae T = T0 + C / (x + a). Three existing knobs
+now reshape that field. Each keeps its old job, and at 512 the roads are as in v0.1.2 (within 0.05 line).
+
+| Knob | Old job (kept) | New: what it does to the arcs |
+|---|---|---|
+| K1 Arcs | the thin black arcs' pitch x2.8 .. x0.35 | the **sweep**: the hyperbola constants C of the narrow road and of both wide-road edges, x0.354 (0) .. x0.595 (256) .. x1 (512) .. x1.68 (768) .. x2.82 (1023), the same exp2 scale as the arc rate. Left: the narrow road flattens (its row at x 218 is 511 instead of 580) and the wide road spans the whole width. Right: the road bows far up (773 at x 218, 536 at the right edge instead of 496) and the wide road's wedge starts mid-screen (x ~640). |
+| K2 Squeeze | the vertical oscillator's depth (square law) | the narrow road's **thickness**, same square law: 33 lines (0) .. 41 (256) .. 65 (512, the clip) .. 105 (768) .. 161 (1023). The upper range matches the alt clip 00_56_54 (wide grey roads with the deep S-curves). |
+| K5 Zones | the diagonal zones' scale x0.40 .. x2.46 | the roads' **knee** a = 200 s^2 px (s = the zone scale): 32 (0, a tight hook at the left) .. 80 (256) .. 200 (512) .. 497 (768) .. 1214 (1023, nearly flat). Wider zones give flatter, wider arcs. A bigger a also makes the contour lines inside the roads denser (P grows with a): at 1023 they are fine lines everywhere. |
+
+P12 Flood, K3, K4, K6 and the switches are unchanged. The TOML defaults are kept (no control changed meaning).
+
+**How (RTL).**
+- **c_A per field.** c_A, the product field's per-line value at the line start (9.6 (x0h + 2a)), is now computed
+  every field:
+  - slot 20 = 3840 s5; slot 21 = that times s5 again, taken straight from z_res; + 4608 at SD (x0h 480).
+  - It is computed late in the zone into c_An and committed at state 40 of the next zone, so the wrap constants
+    and slots 8 .. 15 of a field all see the same value.
+- **Road ramps.** They are now (row x c_A) and (row x c_B) >> 4, with rows 474 / c_knl / 396 / 944.
+  - Before: (9.6 row) x (x0h + 400) and x xs. c_xa is gone.
+  - The new form is exactly consistent with P's own per-pixel step; the old one used 9.6 x 474 = 4550 against
+    4550.4.
+- **Thickness.** c_knl (Q2) = 2028 + q / 2, with q = K2^2 / 1024 (the oscillator's slot-1 product), at state 100.
+- **Sweep.**
+  - Slots 22 .. 24 multiply C_C1, C_CW1 and C_CW2 (/ 4) by K1's mantissa and shift; the results are stored / 512
+    in 14 bits.
+  - They add into c_rn0 / c_rl0 / c_rw20, and into the wide road's lower-edge compare `b_pw1(25..9) > c_cw1`
+    (before, a constant compare).
+- **Wrap constants.** c_wp = 940 c_A and c_ws = 940 c_B moved onto the serial multiplier (slots 25, 26). With c_A
+  now a real register, the old three-adder chains would have cost ~70 LUTs.
+- **Widths.**
+  - c_rw20 / c_r30 / b_rw2 / b_r3 are 27-bit signed: with a small a and a big C, the ramps for the wide road's upper
+    edge and for the skirt start negative at the left.
+  - c_wp is 25 bits and c_dp0 17 bits (SD 480i with K5 at full needs 124082 >> 8).
+- **Checks.** A width sweep over the full K1 / K2 / K5 travel at every timing is in
+  `.heirloom_work/rb_placard/v020/check_widths.py`; everything is in range. Road masks from the integer formulas at
+  the knob extremes are in `v020/roads_sheet.png`. No image sim.
+- **Unchanged.**
+  - The latency (C_LAT 18).
+  - The pixel path, apart from the two compares.
+  - The generated avid, output conditioning, blanking gate and running-sum resync.
+
+**Judgement calls.**
+- I read "the big arc" as the roads. Ron's colours (white / green / red / grey / black) are the Neon band palette;
+  in Print the same band is white / grey / cyan / magenta / olive / black.
+- K1 takes the sweep partly because it is labelled "Arcs". K2's thickness follows the alt clip.
+- The narrow road's colour lines still cycle by P, so a thicker road shows more line cycles.
+- Presets are still the hand-written placeholders. "Dense" (K1 800, K5 300) and "Flood" (K5 700) now also reshape the
+  roads.
+
+**Resolutions.** The geometry is in virtual 1080-line coordinates, so SD and 720p show the same arcs. SD still shows
+the centre 4:3, with the letterbox sides off-screen, as before. At K5 near full, the very fine road lines alias more
+at SD's coarser pixels.
+
+**Build v0.2.0**, router1. All configs closed on seed 1 except SD HDMI:
+
+| Config | Fmax (MHz) | Seed |
+|---|---|---|
+| HD Analog | 92.76 | 1 |
+| SD Analog | 85.87 | 1 |
+| HD HDMI | 86.21 | 1 |
+| SD HDMI | 80.37 | **2** |
+| HD Dual | 89.62 | 1 |
+| SD Dual | 82.66 | 1 |
+
+- **SD HDMI seed 2.** Seed 1 stalled router1 into the 900 s timeout. dupin.py finds no self-add carries or
+  duplicate LUT inputs in the netlist, so this was congestion under heavy machine load.
+- **Size.** 7256-7280 / 7680 LC (94.5-94.8 %, up ~110 from v0.1.2), 15 / 32 EBR. iceunpack OK x6.
+- **Output.** `out/rev_b/ron/heirloom/placard.vmprog` (now v0.2.1, HD HDMI re-seeded: see below). The v0.1.2 files are in `.heirloom_work/rb_placard/`
+  (`placard_v012.*`).
+
+## v0.2.1: the horizontal lines, and the colours (2026-11-21)
+
+Ron flashed the v0.2.0 seed-1 build: "placard is not fixed, it still has yellow or cyan horizontal lines across the
+whole screen and the colors seem washed out or off."
+
+**Lines: an HD HDMI placement, not the RTL.** The skew screen of the v0.2.0 netlist (`.heirloom_work/skew_tools/
+screen.sh`) found the following. hs is the HDMI encoder's HSYNC minus the forwarded clock; data is the closest data
+bit.
+
+| Config | Shipped placement | hs (ns) | data (ns) | Fmax (MHz) | Verdict |
+|---|---|---|---|---|---|
+| HD HDMI | router1 s1 | **−1.12** | ≤ −1.40 | 86.21 | NEGATIVE: the known-bad case (abacus at −1.45 showed red / blue lines) |
+| HD Analog | router1 s1 | −0.89 | ≤ −1.24 | 92.76 | kept |
+| HD Dual | router1 s1 | −1.59 | ≤ −0.74 | 89.62 | kept |
+
+- **Data margin.** HD HDMI's closest data bit is −1.40, so data-bit corruption is not the colour cause. A negative
+  HSYNC makes the encoder miscount Cb / Cr on random lines. Those per-line swaps turn the yellow zones cyan-green
+  and the magenta violet, and over the whole screen they read as off colours.
+- **v0.1.2.** Its "red and blue lines" were presumably the same class on its own placement. That bitstream was not
+  re-analysed.
+- **The screen.**
+  - HD HDMI router1 + router2 seeds 1-60: 87 routed, 78 timing-clean (33 timed out at 900 s), 5 in the window
+    +1.0..+2.3 / data ≤ −0.6.
+  - HD Analog s1-16: 14 routed. HD Dual s1-12: 5 routed.
+  - The first screen run was cut off by a WSL restart and was re-run.
+- **Installed.** HD HDMI = **router2 s2 (+1.93 / ≤ −0.89, 77.88 MHz)**. The replaced seed-1 bin is in
+  `.heirloom_work/rb_placard/skew/hd_hdmi_replaced_202611211445.bin`.
+- **Spare.** HD HDMI router1 s33 (+1.22 / ≤ −0.78, 91.35 MHz):
+  `.heirloom_work/rb_placard/skew/placard_v021_spare_hd_hdmi_router1_s33.vmprog`.
+- **Version.** The TOML is 0.2.1 so the re-seeded build can be told apart from the flashed v0.2.0. The bitstreams
+  are the v0.2.0 RTL.
+- **Rebuilds.** A full builder rebuild re-routes HD HDMI on router1 seed 1 (the bad placement). Re-install it with
+  `.heirloom_work/skew_tools/install.sh placard router2 2` after a rebuild of the same netlist, or re-screen after
+  any RTL change.
+
+**Colours, program side: nothing wrong found.**
+- **Palette convention.** The palette ROM is in the hardware convention (U = Cr): magenta U 876 / V 650, cyan U 131
+  / V 649, yellow V 90. These are the same words as v0.1.x.
+- **Old against new.** A GHDL render of v0.1.2 against v0.2.0 at the default knobs (720p60 / 2, bear video, K6 at
+  100 %) has identical palette and levels: the mean RGB matches to 0.1. The only differences are a 1-px shift on one
+  road edge and the road lines' colour phase. The arc rework did not touch the palette, the levels or the shell.
+- **Levels.** Luma is scaled 16/13 in the ROM and 13/16 at the output (drawn white ~777, the standard cap), and
+  chroma is clipped 24..1000 (no saturation loss). The output conditioning is chroma [1 2 2 2 2 2 2 2 1]/16 and luma
+  [1 2 1]; neither touches large flat areas.
+- **Black.** It is the photo's measured black (12,12,14), which is Y 107 at the output, not 64. It looks slightly
+  grey but is unchanged since v0.1.0. It could be dropped to 64 if Ron wants more contrast.
+- **Generated avid and resync.**
+  - The generated avid's parity lock (p_gavid) is identical to the HW-run heirloom programs (hawser, cumulus,
+    lantern, brazier, streamers).
+  - The output running-sum resync (it snaps to the palette black after 8 blank samples) is intact.
+  - The rings are collision-free.
+- **Sim-only side finding.** The output filter's ~4-px lag shows one pixel per line of the beam's line-end state at
+  the left edge. On HD the beam ends at x 3840, inside the frame test, so it is frame-black. At SD (beam ends at
+  3360) one dim pixel can show at the very left. It is unchanged since v0.1.0 and not the reported issue.

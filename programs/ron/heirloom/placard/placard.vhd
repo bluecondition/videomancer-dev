@@ -1,8 +1,11 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- 2026-11-21 v0.2.0: the roads (the big arcs of fine coloured lines) follow K1 / K2 / K5 (Ron): K1 scales
+--   the road hyperbolae's constants (the sweep), K2 the narrow road's thickness, K5 the hyperbolae's x-offset
+--   a = 200 s^2 (the knee: hooked .. flat).  All at their old values at 512.
 --
--- Placard v0.1.0 -- Heirloom from the clip WIN_20230221_00_58_22 (0.5 s).
+-- Placard v0.2.0 -- Heirloom from the clip WIN_20230221_00_58_22 (0.5 s).
 --
 -- The picture: a magenta ground with thin black arcs, cut by diagonal CMYK zones (white / cyan / flat
 -- magenta / yellow / black, the fold of a diagonal ramp), vertical bars and horizontal stripes keyed inside
@@ -25,11 +28,13 @@
 --            yellow (50-px sample and hold of the product field; hashed depths under the wide road)
 --   scroll = 172 px/s down (K4, bipolar)
 --
---   K1  Arcs      arc pitch x0.35 .. x2.8 (512 = the clip)
---   K2  Squeeze   depth of the vertical oscillator into the arcs: 0 = straight lines .. the clip .. 4x
+--   K1  Arcs      arc pitch x0.35 .. x2.8 (512 = the clip); the roads' sweep: their hyperbola constants
+--                 x0.35 (flat) .. x2.8 (bowed far up)
+--   K2  Squeeze   depth of the vertical oscillator into the arcs: 0 = straight lines .. the clip .. 4x; the
+--                 narrow road's thickness 33 .. 65 (the clip) .. 161 lines
 --   K3  Bars      bar and mosaic-column pitch x0.5 .. x2
 --   K4  Speed     bipolar roll (+-8 deadband, square law); 672 = the clip's 172 px/s down
---   K5  Zones     diagonal zone scale x0.41 .. x2.46
+--   K5  Zones     diagonal zone scale x0.41 .. x2.46; the roads' knee a = 200 s^2 = 32 (hooked) .. 1214 (flat)
 --   K6  Etch      the camera (or the Osc) bends the arcs and the zone edges
 --   S7  Fold      Fold (the clip) / Ramp (the zone sequence runs one way, black zone visible)
 --   S8  Stripes   Stripes (the clip) / Bars in the first region
@@ -62,15 +67,16 @@ use work.all;
 architecture placard of program_top is
     constant C_LAT : integer := 18;   -- = processing_delay_clks
 
-    -- product-field constants, Q4 (P = (x + 200) * 1.2 * T, divided by 16)
-    constant C_C1  : integer := 848000;    -- narrow road top (53000 * 16)
-    constant C_CW1 : integer := 776000;    -- wide road lower hyperbola (48500 * 16)
-    constant C_CW2 : integer := 1488000;   -- wide road upper hyperbola (93000 * 16)
-    constant C_C3  : integer := 1408000;   -- mosaic skirt (88000 * 16)
-    constant C_KN  : integer := 4550;      -- 9.6 * 474
-    constant C_KNL : integer := 5174;      -- 9.6 * 474 + 78 * 8
-    constant C_KW2 : integer := 3802;      -- 9.6 * 396
-    constant C_K3  : integer := 9062;      -- 9.6 * 944
+    -- product-field constants, Q4 (P = (x + a) * 1.2 * T * 16; a = 200 at K5 512, so P per T at the line
+    -- start is c_A = 9.6 (x0h + 2a) and per pixel c_B / 16).  The road hyperbolae's constants are scaled by
+    -- K1's arc scale per field (slots 22 .. 24, stored / 512); the base values / 4:
+    constant C_C1Q  : integer := 212000;   -- narrow road top (53000 * 16 / 4)
+    constant C_CW1Q : integer := 194000;   -- wide road lower hyperbola (48500 * 16 / 4)
+    constant C_CW2Q : integer := 372000;   -- wide road upper hyperbola (93000 * 16 / 4)
+    constant C_C3   : integer := 1408000;  -- mosaic skirt (88000 * 16)
+    constant C_TN   : integer := 474;      -- the narrow road's asymptote row (T)
+    constant C_TW2  : integer := 396;      -- the wide road's upper asymptote
+    constant C_T3   : integer := 944;      -- the skirt's asymptote
     constant C_BAR : unsigned(15 downto 0) := to_unsigned(29950, 16);   -- bar duty 0.457
 
     function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
@@ -208,16 +214,22 @@ architecture placard of program_top is
     signal c_bph0 : unsigned(15 downto 0) := (others => '0');
     signal c_x0h50 : unsigned(8 downto 0) := to_unsigned(50, 9);
     signal c_x0neg : std_logic := '1';
-    signal c_xa   : unsigned(9 downto 0) := to_unsigned(400, 10);     -- x0h + 400
-    signal c_A    : unsigned(13 downto 0) := to_unsigned(3840, 14);   -- 9.6 (x0h + 400)
+    signal c_sd   : std_logic := '0';                                 -- SD (x0h = 480)
+    signal c_A    : unsigned(14 downto 0) := to_unsigned(3840, 15);   -- 9.6 (x0h + 2a), a = 200 s5^2
+    signal c_An   : unsigned(14 downto 0) := to_unsigned(3840, 15);   -- the next field's c_A (committed at state 40)
+    signal c_knl  : unsigned(11 downto 0) := to_unsigned(2156, 12);   -- narrow road bottom row, Q2 (474 + thickness)
+    signal c_c1   : unsigned(13 downto 0) := to_unsigned(1656, 14);   -- road constants x K1's arc scale, / 512
+    signal c_cw1  : unsigned(13 downto 0) := to_unsigned(1515, 14);
+    signal c_cw2  : unsigned(13 downto 0) := to_unsigned(2906, 14);
     signal c_B    : unsigned(9 downto 0) := to_unsigned(307, 10);     -- 9.6 xs * 16
-    signal c_wp   : unsigned(22 downto 0) := to_unsigned(3609600, 23);
+    signal c_wp   : unsigned(24 downto 0) := to_unsigned(3609600, 25);
     signal c_ws   : unsigned(19 downto 0) := to_unsigned(288580, 20);
-    signal c_dp0  : unsigned(15 downto 0) := to_unsigned(3840, 16);
+    signal c_dp0  : unsigned(16 downto 0) := to_unsigned(3840, 17);
     signal c_dstep : unsigned(11 downto 0) := to_unsigned(307, 12);
     signal c_pw10 : unsigned(25 downto 0) := (others => '0');
     signal c_stw0 : unsigned(19 downto 0) := (others => '0');
-    signal c_rn0, c_rl0, c_rw20, c_r30 : unsigned(25 downto 0) := (others => '0');
+    signal c_rn0, c_rl0 : unsigned(25 downto 0) := (others => '0');
+    signal c_rw20, c_r30 : signed(26 downto 0) := (others => '0');       -- can start negative (small a, big C)
     signal c_rns, c_rls, c_rw2s, c_r3s : unsigned(15 downto 0) := (others => '0');
     signal c_phi0 : unsigned(13 downto 0) := to_unsigned(1888, 14);   -- line-0 phase, Q4
     signal c_phl0 : unsigned(10 downto 0) := to_unsigned(122, 11);    -- (phi0 >> 4) + 4
@@ -292,7 +304,8 @@ architecture placard of program_top is
     signal b_xh   : unsigned(12 downto 0) := (others => '0');
     signal b_f    : unsigned(19 downto 0) := (others => '0');
     signal b_pw1  : unsigned(25 downto 0) := (others => '0');
-    signal b_rn, b_rl, b_rw2, b_r3 : unsigned(25 downto 0) := (others => '0');
+    signal b_rn, b_rl : unsigned(25 downto 0) := (others => '0');
+    signal b_rw2, b_r3 : signed(26 downto 0) := (others => '0');
     signal b_zu   : unsigned(14 downto 0) := (others => '0');
     signal b_bph  : unsigned(15 downto 0) := (others => '0');
     signal b_tick : std_logic := '0';
@@ -401,7 +414,6 @@ begin
         variable v_m  : unsigned(9 downto 0);
         variable v_d  : signed(10 downto 0);
         variable v_k  : std_logic_vector(31 downto 0);
-        variable v_w  : signed(23 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -527,6 +539,13 @@ begin
                     when 462 => z_sel <= to_unsigned(17, 5); z_pre <= '1';
                     when 486 => z_sel <= to_unsigned(18, 5); z_pre <= '1';
                     when 510 => z_sel <= to_unsigned(19, 5); z_pre <= '1';
+                    when 534 => z_sel <= to_unsigned(20, 5); z_pre <= '1';
+                    when 558 => z_sel <= to_unsigned(21, 5); z_pre <= '1';
+                    when 582 => z_sel <= to_unsigned(22, 5); z_pre <= '1';
+                    when 606 => z_sel <= to_unsigned(23, 5); z_pre <= '1';
+                    when 630 => z_sel <= to_unsigned(24, 5); z_pre <= '1';
+                    when 654 => z_sel <= to_unsigned(25, 5); z_pre <= '1';
+                    when 678 => z_sel <= to_unsigned(26, 5); z_pre <= '1';
                     when others => null;
                 end case;
             end if;
@@ -546,14 +565,21 @@ begin
                     when 9  => z_fa <= resize(c_B, 36);                z_fb <= resize(c_phl0, 16);                  -- P step at line 0
                     when 10 => z_fa <= resize(c_A, 36);                z_fb <= resize(s_ys, 16);                    -- P per line
                     when 11 => z_fa <= resize(c_B, 36);                z_fb <= resize(s_ys, 16);                    -- step per line
-                    when 12 => z_fa <= to_unsigned(C_KN, 36);          z_fb <= resize(c_xa, 16);                    -- ramp starts
-                    when 13 => z_fa <= to_unsigned(C_KNL, 36);         z_fb <= resize(c_xa, 16);
-                    when 14 => z_fa <= to_unsigned(C_KW2, 36);         z_fb <= resize(c_xa, 16);
-                    when 15 => z_fa <= to_unsigned(C_K3, 36);          z_fb <= resize(c_xa, 16);
-                    when 16 => z_fa <= to_unsigned(C_KN, 36);          z_fb <= resize(s_xs, 16);                    -- ramp steps
-                    when 17 => z_fa <= to_unsigned(C_KNL, 36);         z_fb <= resize(s_xs, 16);
-                    when 18 => z_fa <= to_unsigned(C_KW2, 36);         z_fb <= resize(s_xs, 16);
-                    when others => z_fa <= to_unsigned(C_K3, 36);      z_fb <= resize(s_xs, 16);
+                    when 12 => z_fa <= to_unsigned(C_TN, 36);          z_fb <= resize(c_A, 16);                     -- ramp starts: row x c_A
+                    when 13 => z_fa <= resize(c_knl, 36);              z_fb <= resize(c_A, 16);                     -- (Q2)
+                    when 14 => z_fa <= to_unsigned(C_TW2, 36);         z_fb <= resize(c_A, 16);
+                    when 15 => z_fa <= to_unsigned(C_T3, 36);          z_fb <= resize(c_A, 16);
+                    when 16 => z_fa <= to_unsigned(C_TN, 36);          z_fb <= resize(c_B, 16);                     -- ramp steps: row x c_B
+                    when 17 => z_fa <= resize(c_knl, 36);              z_fb <= resize(c_B, 16);
+                    when 18 => z_fa <= to_unsigned(C_TW2, 36);         z_fb <= resize(c_B, 16);
+                    when 19 => z_fa <= to_unsigned(C_T3, 36);          z_fb <= resize(c_B, 16);
+                    when 20 => z_fa <= to_unsigned(3840, 36);          z_fb <= z_m5;  z_shc <= z_e5(10 downto 8);   -- 3840 s5
+                    when 21 => z_fa <= resize(z_res(13 downto 0), 36); z_fb <= z_m5;  z_shc <= z_e5(10 downto 8);   -- 3840 s5^2 (z_res = slot 20)
+                    when 22 => z_fa <= to_unsigned(C_C1Q, 36);         z_fb <= z_m1;  z_shc <= z_e1(10 downto 8);   -- road constants x s1
+                    when 23 => z_fa <= to_unsigned(C_CW1Q, 36);        z_fb <= z_m1;  z_shc <= z_e1(10 downto 8);
+                    when 24 => z_fa <= to_unsigned(C_CW2Q, 36);        z_fb <= z_m1;  z_shc <= z_e1(10 downto 8);
+                    when 25 => z_fa <= to_unsigned(940, 36);           z_fb <= resize(c_A, 16);                     -- wrap: 940 c_A
+                    when others => z_fa <= to_unsigned(940, 36);       z_fb <= resize(c_B, 16);                     -- 940 c_B
                 end case;
             end if;
             if z_ld = '1' then
@@ -591,16 +617,14 @@ begin
                     -- per-field constants by timing; motion from the last field's step
                     when 40 =>
                         if s_ys = 256 then c_p30 <= '1'; else c_p30 <= '0'; end if;
+                        c_A <= c_An;                  -- the knee from the last zone: slots 8 .. 15 and 25 all see it
                         case to_integer(s_xs) is
                             when 4 =>
-                                c_x0h50 <= to_unsigned(430, 9); c_x0neg <= '0'; c_xa <= to_unsigned(880, 10);
-                                c_A <= to_unsigned(8448, 14); c_B <= to_unsigned(614, 10);
+                                c_x0h50 <= to_unsigned(430, 9); c_x0neg <= '0'; c_sd <= '1'; c_B <= to_unsigned(614, 10);
                             when 3 =>
-                                c_x0h50 <= to_unsigned(50, 9); c_x0neg <= '1'; c_xa <= to_unsigned(400, 10);
-                                c_A <= to_unsigned(3840, 14); c_B <= to_unsigned(461, 10);
+                                c_x0h50 <= to_unsigned(50, 9); c_x0neg <= '1'; c_sd <= '0'; c_B <= to_unsigned(461, 10);
                             when others =>
-                                c_x0h50 <= to_unsigned(50, 9); c_x0neg <= '1'; c_xa <= to_unsigned(400, 10);
-                                c_A <= to_unsigned(3840, 14); c_B <= to_unsigned(307, 10);
+                                c_x0h50 <= to_unsigned(50, 9); c_x0neg <= '1'; c_sd <= '0'; c_B <= to_unsigned(307, 10);
                         end case;
                         -- line-0 phase (Q4 lines, mod 15040): the structure rolls down, so the phase at line 0 falls
                         if c_vneg = '1' then
@@ -625,23 +649,13 @@ begin
                         elsif z_zt >= signed(resize(c_wl, 23)) then c_zuf <= unsigned(resize(z_zt - signed(resize(c_wl, 23)), 22));
                         else c_zuf <= unsigned(resize(z_zt, 22)); end if;
                     when 42 => c_phl0 <= resize(c_phi0(13 downto 4), 11) + 4;
-                    -- wrap constants of the product field: A 940, B 940 = x (1024 - 64 - 16 - 4)
-                    when 45 =>
-                        v_w := signed(shift_left(resize(c_A, 24), 10)) - signed(shift_left(resize(c_A, 24), 6));
-                        c_wp <= unsigned(v_w(22 downto 0));
-                        v_w := signed(shift_left(resize(c_B, 24), 10)) - signed(shift_left(resize(c_B, 24), 6));
-                        c_ws <= unsigned(v_w(19 downto 0));
-                    when 46 =>
-                        c_wp <= c_wp - shift_left(resize(c_A, 23), 4);
-                        c_ws <= c_ws - shift_left(resize(c_B, 20), 4);
-                    when 47 =>
-                        c_wp <= c_wp - shift_left(resize(c_A, 23), 2);
-                        c_ws <= c_ws - shift_left(resize(c_B, 20), 2);
 
                     -- slot results (z_res = the product >> 15 with the slot's exponent shift)
                     when 74  => c_invl <= z_res(15 downto 0);
                     when 98  => z_q <= f_acc(19 downto 10);
                     when 99  => c_k2g <= z_q - shift_right(z_q, 2) - shift_right(z_q, 3);
+                    -- the narrow road's bottom row (Q2): 474 + 65 (0.5 + 0.5 k2^2 / 512^2) lines (33 .. 65 .. 161)
+                    when 100 => c_knl <= to_unsigned(2028, 12) + resize(z_q(9 downto 1), 12);
                     when 122 => c_binc <= z_res(9 downto 0);
                     when 123 =>
                         case to_integer(s_xs) is
@@ -690,16 +704,26 @@ begin
                         if c_x0neg = '1' then c_bph0 <= (not f_acc(15 downto 0)) + 1; else c_bph0 <= f_acc(15 downto 0); end if;
                     when 266 => c_pw10 <= f_acc(25 downto 0);
                     when 290 => c_stw0 <= f_acc(19 downto 0);
-                    when 314 => c_dp0 <= f_acc(23 downto 8);
+                    when 314 => c_dp0 <= f_acc(24 downto 8);
                     when 338 => c_dstep <= f_acc(19 downto 8);
-                    when 362 => c_rn0  <= resize(f_acc(23 downto 0), 26) + to_unsigned(C_C1, 26);
-                    when 386 => c_rl0  <= resize(f_acc(23 downto 0), 26) + to_unsigned(C_C1, 26);
-                    when 410 => c_rw20 <= resize(f_acc(23 downto 0), 26) - to_unsigned(C_CW2, 26);
-                    when 434 => c_r30  <= resize(f_acc(23 downto 0), 26) - to_unsigned(C_C3, 26);
-                    when 458 => c_rns  <= f_acc(15 downto 0);
-                    when 482 => c_rls  <= f_acc(15 downto 0);
-                    when 506 => c_rw2s <= f_acc(15 downto 0);
-                    when 530 => c_r3s  <= f_acc(15 downto 0);
+                    when 362 => c_rn0  <= resize(f_acc(24 downto 0), 26) + shift_left(resize(c_c1, 26), 9);
+                    when 386 => c_rl0  <= resize(f_acc(26 downto 2), 26) + shift_left(resize(c_c1, 26), 9);
+                    when 410 => c_rw20 <= signed(resize(f_acc(24 downto 0), 27)) - signed(shift_left(resize(c_cw2, 27), 9));
+                    when 434 => c_r30  <= signed(resize(f_acc(24 downto 0), 27)) - to_signed(C_C3, 27);
+                    when 458 => c_rns  <= f_acc(19 downto 4);
+                    when 482 => c_rls  <= f_acc(21 downto 6);
+                    when 506 => c_rw2s <= f_acc(19 downto 4);
+                    when 530 => c_r3s  <= f_acc(19 downto 4);
+                    -- K5 knee (slot 20's 3840 s5 feeds slot 21 straight from z_res), K1 sweep; used from the
+                    -- next field
+                    when 578 =>
+                        if c_sd = '1' then c_An <= z_res(14 downto 0) + 4608; else c_An <= z_res(14 downto 0); end if;
+                    when 602 => c_c1  <= z_res(20 downto 7);
+                    when 626 => c_cw1 <= z_res(20 downto 7);
+                    when 650 => c_cw2 <= z_res(20 downto 7);
+                    -- the product field's wrap constants (940 lines) from this zone's c_A / c_B (slots 25, 26)
+                    when 674 => c_wp <= f_acc(24 downto 0);
+                    when 698 => c_ws <= f_acc(19 downto 0);
                     when others => null;
                 end case;
             end if;
@@ -911,7 +935,7 @@ begin
                 b_f   <= b_f + resize(l_fst, 20);
                 b_pw1 <= b_pw1 + resize(l_stw, 26);
                 b_rn <= b_rn + resize(c_rns, 26); b_rl <= b_rl + resize(c_rls, 26);
-                b_rw2 <= b_rw2 + resize(c_rw2s, 26); b_r3 <= b_r3 + resize(c_r3s, 26);
+                b_rw2 <= b_rw2 + signed(resize(c_rw2s, 27)); b_r3 <= b_r3 + signed(resize(c_r3s, 27));
                 if b_zu > c_wx then b_zu <= b_zu - c_wx; else b_zu <= b_zu + resize(s_xs, 15); end if;
                 v_bp := resize(b_bph, 17) + resize(c_bincx, 17);
                 b_bph <= v_bp(15 downto 0);
@@ -940,9 +964,9 @@ begin
             -- palette index, the zone fold
             if b_pw1 > b_rn then p2_fl(0) <= '1'; else p2_fl(0) <= '0'; end if;
             if b_pw1 < b_rl then p2_fl(1) <= '1'; else p2_fl(1) <= '0'; end if;
-            if b_pw1 > C_CW1 then p2_fl(2) <= '1'; else p2_fl(2) <= '0'; end if;
-            if b_pw1 < b_rw2 then p2_fl(3) <= '1'; else p2_fl(3) <= '0'; end if;
-            if b_pw1 < b_r3 then p2_mb <= '1'; else p2_mb <= '0'; end if;
+            if b_pw1(25 downto 9) > resize(c_cw1, 17) then p2_fl(2) <= '1'; else p2_fl(2) <= '0'; end if;
+            if signed(resize(b_pw1, 27)) < b_rw2 then p2_fl(3) <= '1'; else p2_fl(3) <= '0'; end if;
+            if signed(resize(b_pw1, 27)) < b_r3 then p2_mb <= '1'; else p2_mb <= '0'; end if;
             if b_bph < C_BAR then p2_fl(4) <= '1'; else p2_fl(4) <= '0'; end if;
             if b_xh < 436 or b_xh > 3654 then p2_fl(5) <= '1'; else p2_fl(5) <= '0'; end if;
             if b_xh < 1160 then p2_fl(6) <= '1'; else p2_fl(6) <= '0'; end if;

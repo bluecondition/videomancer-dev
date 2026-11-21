@@ -1,13 +1,15 @@
 # Placard - Heirloom from the clip WIN_20230221_00_58_22 (0.5 s), built 2026-11-04 (v0.1.0).
 # A magenta ground with black arcs, diagonal CMYK zones, bars and stripes keyed in the white and cyan zones,
 # two "roads" of fine coloured lines, dark mosaic skirts, rolling down inside a black letterbox frame.
+# v0.2.0 (2026-11-21): the roads (big arcs) follow K1 (sweep), K2 (thickness) and K5 (knee).
+# v0.2.1 (2026-11-21): same bitstreams, HD HDMI re-seeded (router2 s2) against the red/blue line artifact.
 # See placard.vhd, placard.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 18
 program_id = "com.czartroniks.placard"
 program_name = "Placard"
-program_version = "0.1.2"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
