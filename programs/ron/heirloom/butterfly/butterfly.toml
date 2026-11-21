@@ -6,7 +6,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.butterfly"
 program_name = "Butterfly"
-program_version = "0.1.3"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -139,7 +139,7 @@ rotary_potentiometer_5 = 700
 
 [[preset]]
 name = "Twin Swarm"
-rotary_potentiometer_1 = 800
+rotary_potentiometer_1 = 664
 toggle_switch_10 = 1
 
 [[preset]]

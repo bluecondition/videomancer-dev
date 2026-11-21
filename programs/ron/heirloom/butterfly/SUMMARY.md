@@ -241,3 +241,25 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
   - Osc mode is unchanged: its gain (K6² >> 9, 8 bits) already saturates at 255 from K6 ≈ 362 up.
 - **Render.** `.heirloom_work/rb_butterfly/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same picture; the magenta floods a little further over the bent bands.
 - **Build** v0.1.3, router1, all six configs seed 1. HD Analog 91.26, HD HDMI 84.56, HD Dual 93.22 MHz (worst HD 84.56). 7032–7059 / 7680 LC, 20 / 32 EBR. Not flashed.
+
+## v0.2.0: Ron's preview notes (2026-11-20)
+
+Ron (Heirloom Preview Queue, rework on v0.1.1): "more range on K1 and K2 on both ends".
+
+- **K1 Columns** (H oscillator): x0.5 .. x1 (512, the still) .. x3 → **x0.25 .. x1 .. x8**. The exponent is now
+  d (two octaves down) below the still and d · 385 / 256 (3.0 octaves up) above it (was d / 2 and d · 203 / 256).
+  0 = a quarter of a butterfly fills the screen (the lens cell ~3760 virtual px); 1023 = ~16 butterflies across
+  (cell ~118 px).
+- **K2 Rows** (V oscillator): the same curve, x0.25 .. x1 .. x8: 0 = one lens row taller than four screens;
+  1023 = ~16.5 cells down the screen (cell ~66 lines, was ~6 at x3).
+- The default (512) is unchanged, bit for bit: the exponent is 0 there in both curves.
+- Widths: the exp2 shift range is now −2 .. 3 (kxh = 8924 · 2^e ≤ 71,392, 18 bits; kyl = 31987 · 2^e ≤ 255,896,
+  18 bits); c_kstep 19 bits (kxh × 4 at SD ≤ 285,568), c_kys 21 bits (kyl · ys >> 8 ≤ 1.14 M at NTSC). The phases
+  are modular 24-bit, so the larger line-start products wrap as designed.
+- Caveat: at the top of either knob the cells get small (~118 px / ~33 lines), so the thin rings and fine contours
+  inside a cell alias on the pixel grid (the ROM-driven shapes are evaluated per pixel); that is the mesh end of
+  the knob, not a fault.
+- Preset "Twin Swarm" K1 800 → 664 (the same x1.85 on the new curve). The other presets don't touch K1 / K2.
+- **Build** v0.2.0, router1, all six seed 1: HD Analog 95.17, HD HDMI 92.74, HD Dual 84.25 MHz (worst HD 84.25);
+  SD 88.05 / 90.62 / 91.72 MHz. 7084–7107 / 7680 LC (+50), 20 / 32 EBR; iceunpack OK ×6. Not simulated, not flashed.
+  v0.1.3's VHDL, TOML and vmprog are in `.heirloom_work/rb_butterfly/` (`*_v013.*`).

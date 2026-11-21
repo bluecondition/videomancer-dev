@@ -21,8 +21,9 @@
 --   |g|    = min(|F1 + cam|, |F2 + cam|)               whichever field is nearer its blue line wins
 --   colour = palette(|g|): 0 blue, 1 black, 2.45+ magenta
 --
---   K1  Columns   H oscillator rate: butterflies across (x0.5 .. x3; 2.04 in the still)
---   K2  Rows      V oscillator rate: butterfly rows (x0.5 .. x3)
+--   K1  Columns   H oscillator rate: butterflies across (x0.25 .. x8; 2.04 in the still)
+--   K2  Rows      V oscillator rate: butterfly rows (x0.25 .. x8)
+-- 2026-11-20 v0.2.0 (Ron's preview notes): K1 / K2 ranges doubled both ways (-2 / +3 octaves, were -1 / +1.585)
 --   K3  Hearts    heart size: small lobes in rings (0) .. the still (512) .. hearts swallowing the diamonds (1023)
 --   K4  Flap      wing beat: the lenses open while the hearts shrink, and back (0 = still, as in the clip)
 --   K5  Rings     band weight of every ring: wide soft bands (0) .. the still .. hairlines (1023)
@@ -168,7 +169,7 @@ architecture butterfly of program_top is
     signal z_sh   : signed(2 downto 0) := (others => '0');
     signal z_mt   : unsigned(15 downto 0) := to_unsigned(32768, 16);
     signal z_a    : unsigned(15 downto 0) := (others => '0');
-    signal z_kxh  : unsigned(16 downto 0) := to_unsigned(8924, 17);
+    signal z_kxh  : unsigned(17 downto 0) := to_unsigned(8924, 18);
     signal z_kyl  : unsigned(17 downto 0) := to_unsigned(31987, 18);
     signal z_l0p  : signed(12 downto 0) := (others => '0');
     signal z_lfa  : signed(10 downto 0) := (others => '0');
@@ -177,9 +178,9 @@ architecture butterfly of program_top is
     signal s_lph  : unsigned(15 downto 0) := (others => '0');       -- flap LFO phase
     signal s_lfo  : signed(9 downto 0) := (others => '0');          -- -256 .. 255
     signal c_lstep : unsigned(11 downto 0) := (others => '0');
-    signal c_kstep : unsigned(16 downto 0) := to_unsigned(17848, 17);
+    signal c_kstep : unsigned(18 downto 0) := to_unsigned(17848, 19);
     signal c_phx0 : unsigned(23 downto 0) := (others => '0');
-    signal c_kys  : unsigned(19 downto 0) := to_unsigned(31987, 20);
+    signal c_kys  : unsigned(20 downto 0) := to_unsigned(31987, 21);
     signal c_phy0 : unsigned(23 downto 0) := (others => '0');
     signal c_k1q  : unsigned(8 downto 0) := to_unsigned(150, 9);
     signal c_g2q  : unsigned(8 downto 0) := to_unsigned(104, 9);
@@ -473,9 +474,9 @@ begin
             z_ld <= z_pre;
             if z_pre = '1' then
                 case to_integer(z_sel) is
-                    when 0  => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(203, 16);     -- K1 exponent
+                    when 0  => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(385, 16);     -- K1 exponent
                     when 1  => z_fa <= to_unsigned(8924, 36);           z_fb <= z_mt;                      -- kxh
-                    when 2  => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(203, 16);     -- K2 exponent
+                    when 2  => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(385, 16);     -- K2 exponent
                     when 3  => z_fa <= to_unsigned(31987, 36);          z_fb <= z_mt;                      -- kyl
                     when 4  => z_fa <= resize(z_kyl, 36);               z_fb <= resize(s_ys, 16);          -- kys
                     when 5  => z_fa <= resize(z_kyl, 36);               z_fb <= to_unsigned(540, 16);      -- 540 kyl
@@ -521,10 +522,10 @@ begin
                             s_lfo <= 255 - signed(resize(v_ph(14 downto 6), 10));
                         end if;
                     when 12 =>
-                        -- K1: d = k - 512; down = d / 2 (one octave), up = d * 203 / 256 (1.585 octaves)
+                        -- K1: d = k - 512; down = d (two octaves, x0.25), up = d * 385 / 256 (3 octaves, x8)
                         v_d := signed(resize(s_g1(12 downto 3), 11)) - 512;
                         z_neg <= v_d(10);
-                        if v_d(10) = '1' then z_a <= (others => '0'); z_e <= resize(shift_right(v_d, 1), 12);
+                        if v_d(10) = '1' then z_a <= (others => '0'); z_e <= resize(v_d, 12);
                         else z_a <= resize(unsigned(v_d(9 downto 0)), 16); end if;
                     when 13 =>
                         if s_pal = '1' then v_k := C_BF_PAL(128 + 26); else v_k := C_BF_PAL(26); end if;
@@ -534,21 +535,24 @@ begin
                         if z_neg = '0' then z_e <= signed(resize(f_acc(17 downto 8), 12)); end if;
                     when 51 => r_ex_a <= unsigned(z_e(7 downto 0)); z_sh <= z_e(10 downto 8);
                     when 53 => z_mt <= r_ex_q;
-                    when 74 =>                                -- kxh = 8924 mt >> (15 - sh), sh = -1 .. 1
+                    when 74 =>                                -- kxh = 8924 mt >> (15 - sh), sh = -2 .. 3 (<= 71392)
                         case to_integer(z_sh) is
-                            when -1     => z_kxh <= f_acc(32 downto 16);
-                            when 0      => z_kxh <= f_acc(31 downto 15);
-                            when others => z_kxh <= f_acc(30 downto 14);
+                            when -2     => z_kxh <= f_acc(34 downto 17);
+                            when -1     => z_kxh <= f_acc(33 downto 16);
+                            when 0      => z_kxh <= f_acc(32 downto 15);
+                            when 1      => z_kxh <= f_acc(31 downto 14);
+                            when 2      => z_kxh <= f_acc(30 downto 13);
+                            when others => z_kxh <= f_acc(29 downto 12);
                         end case;
                         v_d := signed(resize(s_g2(12 downto 3), 11)) - 512;
                         z_neg <= v_d(10);
-                        if v_d(10) = '1' then z_a <= (others => '0'); z_e <= resize(shift_right(v_d, 1), 12);
+                        if v_d(10) = '1' then z_a <= (others => '0'); z_e <= resize(v_d, 12);
                         else z_a <= resize(unsigned(v_d(9 downto 0)), 16); end if;
                     when 75 =>
                         case to_integer(s_xs) is
-                            when 4      => c_kstep <= shift_left(z_kxh, 2);
-                            when 3      => c_kstep <= shift_left(z_kxh, 1) + z_kxh;
-                            when others => c_kstep <= shift_left(z_kxh, 1);
+                            when 4      => c_kstep <= shift_left(resize(z_kxh, 19), 2);
+                            when 3      => c_kstep <= shift_left(resize(z_kxh, 19), 1) + resize(z_kxh, 19);
+                            when others => c_kstep <= shift_left(resize(z_kxh, 19), 1);
                         end case;
                     -- K2 exponent -> kyl = 31987 * 2^e
                     when 98 =>
@@ -556,12 +560,15 @@ begin
                     when 99  => r_ex_a <= unsigned(z_e(7 downto 0)); z_sh <= z_e(10 downto 8);
                     when 101 => z_mt <= r_ex_q;
                     when 122 =>
-                        case to_integer(z_sh) is
+                        case to_integer(z_sh) is                 -- kyl = 31987 mt >> (15 - sh), sh = -2 .. 3 (<= 255896)
+                            when -2     => z_kyl <= f_acc(34 downto 17);
                             when -1     => z_kyl <= f_acc(33 downto 16);
                             when 0      => z_kyl <= f_acc(32 downto 15);
-                            when others => z_kyl <= f_acc(31 downto 14);
+                            when 1      => z_kyl <= f_acc(31 downto 14);
+                            when 2      => z_kyl <= f_acc(30 downto 13);
+                            when others => z_kyl <= f_acc(29 downto 12);
                         end case;
-                    when 146 => c_kys <= f_acc(27 downto 8);                                -- kyl * ys >> 8
+                    when 146 => c_kys <= f_acc(28 downto 8);                                -- kyl * ys >> 8 (<= 1.14 M)
                     when 170 => c_phy0 <= to_unsigned(C_PHY_C, 24) - f_acc(23 downto 0);    -- - 540 kyl
                     when 194 =>
                         c_phx0 <= to_unsigned(C_PHX_C, 24) - f_acc(23 downto 0);           -- - (1920 - x0) kxh
