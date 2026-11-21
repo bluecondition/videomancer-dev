@@ -1,17 +1,20 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- 2026-11-21: v0.2.0 Ron's preview notes: Pink Height and Flame Height knobs (row remaps), Waves (sky flames
+--             + stack pinch merged), wider Columns / Flame Width, Edges switch (replaces Tear), the camera in the
+--             pink band (a light ramp) and the flames (hotter where bright); the drift runs at the clip's rate.
 --
--- Temple v0.1.0 -- Heirloom from the video clips, built from the still WIN_20230816_00_32_31 t5.0
+-- Temple v0.2.0 -- Heirloom from the video clips, built from the still WIN_20230816_00_32_31 t5.0
 -- (a 12 s clip: one knob-like sweep moves the colouriser through the palette -- the sky corners go orange ->
 -- yellow -> white -> cyan, the bottom cycles white -> cyan -> blue -> black -> red, the spindles' arrow wings
 -- grow into needles and the dark ring at the top sinks -- while the pink band and the dark shapes hold).
 --
 -- The still: an orange/yellow/blue mirror-symmetric "sunset temple".  A sky of orange and yellow with four
 -- soft cyan flame columns, maroon shapes with black rims (a ring, a crooked centre block, two small blobs,
--- two lens ellipses, a band), a salmon-pink band holding four orange spindles with yellow cores, arrow wings
--- and torn white rims, a stack of wavy purple / pink / red / yellow bands with blue rims, a jagged white rim,
--- and a cyan bottom with darker columns and a yellow half-dome.
+-- two lens ellipses, a band), a salmon-pink band holding four orange spindles ("flames") with yellow cores,
+-- arrow wings and torn white rims, a stack of wavy purple / pink / red / yellow bands with blue rims, a jagged
+-- white rim, and a cyan bottom with darker columns and a yellow half-dome.
 --
 -- The patch, as fitted (temple.py has every table; .heirloom_work/rb_temple/notes.md the measurements):
 --   sky, bottom:  S = a(y) + g(y) T(xc)               a colouriser over one H waveform through a per-line VCA
@@ -23,25 +26,30 @@
 --                 (|xc - c| < hw(y) k2 + wings dc, interior G = gp - kk |dx|, white rim on the pink side)
 --   dark shapes:  per-line spans (ring, centre block, small blobs, lens ellipses), depth-shaded maroon
 --   xc = |x - 960| k1 (the Columns scale, a per-pixel DDA)
+--   rows:         table row y = a piecewise-linear remap of the screen row (Pink Height stretches table rows
+--                 468..628, the rest shares the remaining height); the flames read their own row
+--                 645 + (v - v645) kf (Flame Height, anchored where the flames meet the stack)
 --
---   K1  Columns   column spacing (flames, spindles, stack pinches, small shapes): x0.5 .. x2 (512 = the still)
---   K2  Spindles  the spindles' size x0.3 .. x2
---   K3  Flames    the H-waveform depth of the sky and bottom (0 = plain gradients, 512 = the still, x2)
---   K4  Drift     the sweep LFO rate: 0 = still, 512 = the clip (8 s), 1023 = 4 s
---   K5  Stack     the stack's pinch depth: 0 = flat bands, 512 = the still, x4 = deep lenses
---   K6  Camera    how far the camera's light (or the Osc lattice) bends the fields
---   S7  Flip      upright / upside down
---   S8  Palette   Sunset / Ice (Cr and Cb swapped)
---   S9  Shadows   On (the still) / Off: the band and the dark shapes gone, the pink band reaching the sky
---   S10 Tear      Off (the still's faint line jitter) / On (sync-tear bursts)
---   S11 Source    Video / Osc
---   P12 Sun       the sweep position: dusk (0) .. the still (512) .. blaze (1023)
+--   K1  Columns       column spacing (flames, spindles, stack pinches, small shapes): x0.375 .. x3 (512 = x1)
+--   K2  Flame Width   the orange flames' width x0.125 .. x3
+--   K3  Flame Height  the orange flames' height x0.15 .. x2.5 (tall flames rise through the band into the sky)
+--   K4  Pink Height   the pink band's height 0.2x .. 3.7x (the sky and the lower part share the rest)
+--   K5  Waves         the column waveform depth: sky / floor flames (0 .. x2.5) and the stack pinch (0 .. x4)
+--   K6  Camera        how far the camera's light (or the Osc lattice) bends the fields, lights the pink band
+--                     and heats the flames
+--   S7  Flip          upright / upside down
+--   S8  Palette       Sunset / Ice (Cr and Cb swapped)
+--   S9  Shadows       On (the still) / Off: the band and the dark shapes gone, the pink band reaching the sky
+--   S10 Edges         Off (the still) / On: white edges on the dark shapes, the band, the flames, the stack rims
+--   S11 Source        Video / Osc
+--   P12 Sun           the sweep position: dusk (0) .. the still (512) .. blaze (1023), plus the clip's drift
 --
--- Engine: vblank-zone sequencer (shared glide, knob curves, the LFO), a per-line engine kicked at each line
--- start computing the NEXT line (table reads, four serial products: the VCA gain, the stack ramp, the spindle
--- size and the beam's DDA start), a 14-stage pixel path ending in a 1024-entry palette, then the shell's output
--- conditioning (Y, U, V through two [1 2 2 2 2 2 2 2 1]/16 boxes whose 8-back taps sit in block-RAM rings,
--- luma 13/16, blanking gate).  Virtual 1080-line coordinates (SD shows the centre 4:3).  Hardware colours.
+-- Engine: vblank-zone sequencer (shared glide, knob curves, the LFO, a serial divider for the remap slopes),
+-- a per-line engine kicked at each line start computing the NEXT line (the two row remaps, table reads, serial
+-- products: the VCA gain, the stack ramp, the spindle size and the beam's DDA start), a 14-stage pixel path
+-- ending in a 1024-entry palette, then the shell's output conditioning (Y, U, V through two
+-- [1 2 2 2 2 2 2 2 1]/16 boxes whose 8-back taps sit in block-RAM rings, luma 13/16, blanking gate).
+-- Virtual 1080-line coordinates (SD shows the centre 4:3).  Hardware colours.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -170,7 +178,7 @@ architecture temple of program_top is
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
-    signal s_flip, s_ice, s_shad, s_tear, s_src : std_logic := '0';
+    signal s_flip, s_ice, s_shad, s_edge, s_src : std_logic := '0';
     signal z_gp_c : std_logic_vector(1 downto 0) := "00";
     signal z_gc_c : unsigned(2 downto 0) := (others => '0');
     signal z_grun_c : std_logic := '0';
@@ -178,18 +186,40 @@ architecture temple of program_top is
     -- per-field constants
     signal c_k1   : unsigned(8 downto 0) := to_unsigned(128, 9);     -- columns, Q7
     signal c_k2   : unsigned(8 downto 0) := to_unsigned(128, 9);     -- spindle size, Q7
-    signal c_k3   : unsigned(8 downto 0) := to_unsigned(256, 9);     -- flame depth, Q8
+    signal c_k3   : unsigned(9 downto 0) := to_unsigned(256, 10);    -- sky / floor flame depth, Q8 (Waves)
     signal c_k5   : unsigned(9 downto 0) := to_unsigned(256, 10);    -- stack pinch, Q8
     signal c_k6   : unsigned(7 downto 0) := to_unsigned(25, 8);      -- camera gain, Q8
     signal c_dcp  : signed(7 downto 0) := (others => '0');           -- sun position (+-48)
     signal c_dc   : signed(7 downto 0) := (others => '0');           -- sun + LFO
     signal c_lfo  : unsigned(15 downto 0) := x"4000";
-    signal c_lst  : unsigned(9 downto 0) := to_unsigned(136, 10);
     signal c_tri  : signed(6 downto 0) := (others => '0');
     signal c_ycd  : unsigned(10 downto 0) := to_unsigned(688, 11);   -- stack centre line
     signal c_ro   : signed(9 downto 0) := (others => '0');           -- ring row offset
     signal c_dk   : unsigned(10 downto 0) := to_unsigned(256, 11);   -- DDA step per pixel (k1 xs)
     signal c_xb0  : unsigned(11 downto 0) := to_unsigned(16, 12);
+    -- row remaps (Pink Height, Flame Height)
+    signal c_pht, c_pha, c_fht, c_fha : unsigned(9 downto 0) := (others => '0');
+    signal c_ph    : unsigned(9 downto 0) := to_unsigned(160, 10);    -- pink screen rows (table rows 468..628)
+    signal c_fh    : unsigned(9 downto 0) := to_unsigned(256, 10);    -- flame height, Q8
+    signal c_om   : unsigned(10 downto 0) := to_unsigned(920, 11);   -- 1080 - P
+    signal c_pat  : unsigned(20 downto 0) := (others => '0');
+    signal c_ptt  : unsigned(15 downto 0) := (others => '0');
+    signal c_pa   : unsigned(10 downto 0) := to_unsigned(468, 11);   -- screen row of table row 468
+    signal c_pb   : unsigned(10 downto 0) := to_unsigned(628, 11);   -- screen row of table row 628
+    signal c_pt   : unsigned(10 downto 0) := to_unsigned(645, 11);   -- screen row of table row 645 (flame anchor)
+    signal c_sp   : unsigned(10 downto 0) := to_unsigned(256, 11);   -- pink slope, table rows per screen row Q8
+    signal c_so   : unsigned(10 downto 0) := to_unsigned(256, 11);   -- outside slope
+    signal c_kf   : unsigned(10 downto 0) := to_unsigned(256, 11);   -- flame slope
+    signal c_w2t, c_w3t : unsigned(11 downto 0) := (others => '0');
+    signal c_w1, c_w2, c_w3 : signed(11 downto 0) := (others => '0');   -- wing terms 3dc/2, 3dc, 9dc/2
+    signal e_wo   : signed(11 downto 0) := (others => '0');
+    -- serial divider (12 quotient bits, vblank only)
+    signal d_go   : std_logic := '0';
+    signal d_num  : unsigned(17 downto 0) := (others => '0');
+    signal d_den  : unsigned(10 downto 0) := to_unsigned(1, 11);
+    signal d_rem, d_dsh : unsigned(21 downto 0) := (others => '0');
+    signal d_q    : unsigned(11 downto 0) := (others => '0');
+    signal d_cnt  : unsigned(3 downto 0) := (others => '0');
 
     -- generated avid
     signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
@@ -205,12 +235,16 @@ architecture temple of program_top is
     signal e_zk   : std_logic := '0';
     signal e_vy   : unsigned(18 downto 0) := (others => '0');
     signal e_lfsr : unsigned(15 downto 0) := x"ACE1";
-    signal e_bc   : unsigned(5 downto 0) := (others => '0');          -- tear burst lines left
-    signal e_bo   : signed(9 downto 0) := (others => '0');            -- tear burst offset (h)
-    signal e_bm   : unsigned(8 downto 0) := (others => '0');          -- tear burst magnitude (h)
     signal e_ox   : signed(9 downto 0) := (others => '0');
     signal e_vl   : unsigned(10 downto 0) := (others => '0');
     signal e_v    : unsigned(10 downto 0) := (others => '0');         -- the line's virtual row (after Flip)
+    signal e_lta, e_ltb, e_rsv : std_logic := '0';
+    signal e_da, e_db, e_dt : signed(11 downto 0) := (others => '0');
+    signal e_base : unsigned(9 downto 0) := (others => '0');
+    signal e_r    : unsigned(10 downto 0) := (others => '0');         -- the line's table row (Pink Height)
+    signal e_rs   : unsigned(9 downto 0) := (others => '0');          -- the line's flame row (Flame Height)
+    signal e_ris  : unsigned(8 downto 0) := (others => '0');
+    signal e_s0, e_s1 : std_logic_vector(15 downto 0) := (others => '0');
     signal e_ri   : unsigned(8 downto 0) := (others => '0');
     signal e_vr   : signed(11 downto 0) := (others => '0');
     signal e_w0, e_w1 : std_logic_vector(15 downto 0) := (others => '0');
@@ -218,7 +252,7 @@ architecture temple of program_top is
     signal e_xb   : signed(12 downto 0) := (others => '0');
     signal e_sg   : std_logic := '0';
     signal m_a    : unsigned(23 downto 0) := (others => '0');
-    signal m_b    : unsigned(9 downto 0) := (others => '0');
+    signal m_b    : unsigned(10 downto 0) := (others => '0');
     signal m_acc  : unsigned(23 downto 0) := (others => '0');
     -- results for the next line
     signal n_zone : unsigned(1 downto 0) := (others => '0');
@@ -296,7 +330,12 @@ architecture temple of program_top is
     signal p5_dm  : unsigned(3 downto 0) := (others => '0');          -- dome depth
     signal p5_dmon : std_logic := '0';
     signal p5_cam : unsigned(7 downto 0) := (others => '0');
+    signal p5_d7  : unsigned(6 downto 0) := (others => '0');
     signal p6_p1  : signed(17 downto 0) := (others => '0');
+    signal p6_p3  : unsigned(12 downto 0) := (others => '0');          -- spindle slope x distance
+    signal p6_gc  : unsigned(7 downto 0) := (others => '0');           -- spindle peak + camera / 2
+    signal p7_pk, p8_pk : unsigned(4 downto 0) := (others => '0');     -- pink camera ramp index
+    signal p8_dkw, p8_dk3, p8_erim, p8_bw : std_logic := '0';
     signal p6_p2  : signed(18 downto 0) := (others => '0');
     signal p6_d   : unsigned(9 downto 0) := (others => '0');
     type t_fl6 is array (6 to 8) of std_logic_vector(31 downto 0);
@@ -398,6 +437,9 @@ begin
         variable v_s  : signed(12 downto 0);
         variable v_d  : signed(9 downto 0);
         variable v_tr : unsigned(5 downto 0);
+        variable v_u9 : unsigned(8 downto 0);
+        variable v_u8 : unsigned(7 downto 0);
+        variable v_w  : unsigned(20 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -433,7 +475,7 @@ begin
                 s_flip <= registers_in(6)(0);
                 s_ice  <= registers_in(6)(1);
                 s_shad <= registers_in(6)(2);
-                s_tear <= registers_in(6)(3);
+                s_edge <= registers_in(6)(3);
                 s_src  <= registers_in(6)(4);
                 s_xs   <= s_xsr;
                 case to_integer(s_xsr) is
@@ -488,25 +530,31 @@ begin
                 end case;
             end if;
 
-            -- knob curves and the sweep: zc 40 .. 60 (one small operation per clock)
+            -- knob curves, the sweep, the row-remap constants: zc 40 .. 108 (one small operation per clock)
+            d_go <= '0';
             if s_zone = '1' then
                 case to_integer(s_zc) is
-                    when 40 =>                                        -- columns: 64 + k/8 | 128 + (k - 512)/4
+                    when 40 =>                                        -- Columns: 48 + 5k/32 | 128 + (k - 512)/2
                         v_k := s_g1(12 downto 3);
-                        if v_k(9) = '0' then c_k1 <= resize(64 + shift_right(v_k, 3), 9);
-                        else c_k1 <= resize(128 + shift_right(v_k - 512, 2), 9); end if;
-                    when 41 =>                                        -- spindles: 38 + 90 k / 512 | 128 + (k - 512)/4
+                        if v_k(9) = '0' then
+                            c_k1 <= resize(48 + resize(shift_right(v_k, 3), 9) + resize(shift_right(v_k, 5), 9), 9);
+                        else c_k1 <= resize(128 + shift_right(v_k - 512, 1), 9); end if;
+                    when 41 =>                                        -- Flame Width: 16 + 7k/32 | 128 + (k - 512)/2
                         v_k := s_g2(12 downto 3);
                         if v_k(9) = '0' then
-                            v_t := resize(shift_right(v_k, 3), 13) + resize(shift_right(v_k, 5), 13) + resize(shift_right(v_k, 6), 13)
-                                 + resize(shift_right(v_k, 9), 13);
-                            c_k2t <= v_t;                              -- 38 + k (1/8 + 1/32 + 1/64 + 1/512) = 38 + 0.174 k
+                            v_t := resize(shift_right(v_k, 3), 13) + resize(shift_right(v_k, 4), 13) + resize(shift_right(v_k, 5), 13);
+                            c_k2t <= v_t;
                         else
-                            c_k2t <= resize(90 + shift_right(v_k - 512, 2), 13);
+                            c_k2t <= resize(112 + shift_right(v_k - 512, 1), 13);
                         end if;
-                    when 42 =>                                        -- flames: k / 2
-                        c_k3 <= resize(shift_right(s_g3(12 downto 3), 1), 9);
-                    when 43 =>                                        -- stack: k / 2 | 256 + 3 (k - 512) / 2
+                    when 42 =>                                        -- Waves, sky / floor: k/2 | 256 + 3 (k - 512)/4
+                        v_k := s_g5(12 downto 3);
+                        if v_k(9) = '0' then c_k3 <= resize(shift_right(v_k, 1), 10);
+                        else
+                            v_u9 := resize(v_k - 512, 9);
+                            c_k3 <= 256 + resize(shift_right(v_u9, 1), 10) + resize(shift_right(v_u9, 2), 10);
+                        end if;
+                    when 43 =>                                        -- Waves, stack: k / 2 | 256 + 3 (k - 512) / 2
                         v_k := s_g5(12 downto 3);
                         if v_k(9) = '0' then c_k5 <= resize(shift_right(v_k, 1), 10);
                         else
@@ -515,16 +563,23 @@ begin
                         end if;
                     when 44 =>                                        -- camera: (k + k/4) / 8, Q8 (K6 top +25 %)
                         c_k6 <= resize(shift_right(resize(s_g6(12 downto 3), 11) + resize(s_g6(12 downto 5), 11), 3), 8);
-                    when 45 =>                                        -- LFO rate: k/4 + k/64 (0 below 16)
-                        v_k := s_g4(12 downto 3);
-                        if v_k < 16 then c_lst <= (others => '0');
-                        else c_lst <= resize(shift_right(v_k, 2), 10) + resize(shift_right(v_k, 6), 10); end if;
-                    when 46 =>                                        -- sun: 3 (p - 512) / 32
-                        v_s := signed(resize(s_gp(12 downto 3), 13)) - 512;
-                        v_s := shift_left(v_s, 1) + v_s;
+                    when 45 =>                                        -- Flame Height, Q8: 38 + 0.426 k | 256 + 3 (k - 512)/4
+                        v_k := s_g3(12 downto 3);
+                        if v_k(9) = '0' then
+                            c_fht <= shift_right(v_k, 2) + shift_right(v_k, 3) + shift_right(v_k, 5);
+                            c_fha <= 38 + shift_right(v_k, 6) + shift_right(v_k, 8);
+                        else
+                            v_u9 := resize(v_k - 512, 9);
+                            c_fht <= resize(shift_right(v_u9, 1), 10) + resize(shift_right(v_u9, 2), 10);
+                            c_fha <= to_unsigned(256, 10);
+                        end if;
+                    when 46 =>                                        -- sun: (3p - 1536) / 32 = 3 (p - 512) / 32
+                        -- (3p on the unsigned knob: no sign-extended self-add, which hung router1)
+                        v_t := shift_left(resize(s_gp(12 downto 3), 13), 1) + resize(s_gp(12 downto 3), 13);
+                        v_s := signed(v_t) - 1536;
                         c_dcp <= resize(shift_right(v_s, 5), 8);
-                    when 47 =>
-                        c_lfo <= c_lfo + resize(c_lst, 16);
+                    when 47 =>                                        -- the drift: the clip's 8 s triangle
+                        c_lfo <= c_lfo + 136;
                     when 48 =>
                         v_tr := c_lfo(14 downto 9);
                         if c_lfo(15) = '0' then c_tri <= signed(resize(v_tr, 7)) - 32;
@@ -536,8 +591,52 @@ begin
                         c_ro  <= shift_left(resize(c_dc, 10), 2);
                     when 51 =>
                         c_dk <= resize(c_k1 * s_xs, 11);
-                    when 52 =>
-                        c_k2 <= resize(38 + c_k2t, 9);
+                    when 52 =>                                        -- Pink Height (screen rows): 32 + k/4 | 160 + 0.84 (k - 512)
+                        c_k2 <= resize(16 + c_k2t, 9);
+                        v_k := s_g4(12 downto 3);
+                        if v_k(9) = '0' then
+                            c_pht <= shift_right(v_k, 2);
+                            c_pha <= to_unsigned(32, 10);
+                        else
+                            v_u9 := resize(v_k - 512, 9);
+                            c_pht <= resize(shift_right(v_u9, 1), 10) + resize(shift_right(v_u9, 2), 10);
+                            c_pha <= 160 + resize(shift_right(v_u9, 4), 10) + resize(shift_right(v_u9, 5), 10);
+                        end if;
+                    when 53 =>
+                        c_ph <= c_pht + c_pha;
+                        c_fh <= c_fht + c_fha;
+                    when 54 =>
+                        c_om <= to_unsigned(1080, 11) - resize(c_ph, 11);
+                    when 55 =>                                        -- A = 468 (1080 - P) / 920 ~ (1080 - P) 521 / 1024
+                        c_pat <= shift_left(resize(c_om, 21), 9) + shift_left(resize(c_om, 21), 3);
+                    when 56 =>
+                        v_w := c_pat + resize(c_om, 21);
+                        c_pa <= v_w(20 downto 10);
+                        c_ptt <= shift_left(resize(c_om, 16), 4) + shift_left(resize(c_om, 16), 1);
+                    when 57 =>                                        -- B = A + P; 17 (1080 - P) / 920 ~ (1080 - P) 19 / 1024
+                        c_pb <= c_pa + resize(c_ph, 11);
+                        c_ptt <= c_ptt + resize(c_om, 16);
+                    when 58 =>
+                        c_pt <= c_pb + resize(c_ptt(15 downto 10), 11);
+                    when 60 =>                                        -- slopes (Q8): 160 * 256 / P, 920 * 256 / (1080 - P), 65536 / F
+                        d_num <= to_unsigned(40960, 18); d_den <= resize(c_ph, 11); d_go <= '1';
+                    when 76 =>
+                        c_sp <= resize(d_q, 11);
+                        d_num <= to_unsigned(235520, 18); d_den <= c_om; d_go <= '1';
+                    when 92 =>
+                        c_so <= resize(d_q, 11);
+                        d_num <= to_unsigned(65536, 18); d_den <= resize(c_fh, 11); d_go <= '1';
+                    when 62 =>                                        -- wing terms from u = dc + 128 (offset binary)
+                        v_u8 := unsigned(c_dc); v_u8(7) := not v_u8(7);
+                        c_w2t <= shift_left(resize(v_u8, 12), 1) + resize(v_u8, 12);              -- 3u
+                        c_w3t <= shift_left(resize(v_u8, 12), 2) + resize(shift_right(v_u8, 1), 12); -- 4u + u/2
+                    when 63 =>
+                        c_w2 <= signed(c_w2t) - 384;                  -- 3 dc
+                        c_w3 <= signed(c_w3t) - 576;                  -- 4 dc + dc/2
+                    when 64 =>
+                        c_w1 <= shift_right(c_w2, 1);                 -- 3 dc / 2
+                    when 108 =>
+                        c_kf <= resize(d_q, 11);
                     when others => null;
                 end case;
             end if;
@@ -548,6 +647,30 @@ begin
             end loop;
         end if;
     end process p_ctrl;
+
+    -- serial restoring divider: d_q = d_num / d_den (12 quotient bits; every use has a quotient < 4096)
+    p_div : process(clk)
+        variable v_df : unsigned(22 downto 0);
+    begin
+        if rising_edge(clk) then
+            if d_go = '1' then
+                d_rem <= resize(d_num, 22);
+                d_dsh <= shift_left(resize(d_den, 22), 11);
+                d_q   <= (others => '0');
+                d_cnt <= to_unsigned(12, 4);
+            elsif d_cnt /= 0 then
+                v_df := ('0' & d_rem) - ('0' & d_dsh);
+                if v_df(22) = '0' then
+                    d_rem <= v_df(21 downto 0);
+                    d_q <= d_q(10 downto 0) & '1';
+                else
+                    d_q <= d_q(10 downto 0) & '0';
+                end if;
+                d_dsh <= shift_right(d_dsh, 1);
+                d_cnt <= d_cnt - 1;
+            end if;
+        end if;
+    end process p_div;
 
     ---------------------------------------------------------------------------
     -- Generated avid (parity-locked start 3/4 clocks after the source's avid
@@ -626,19 +749,20 @@ begin
 
     ---------------------------------------------------------------------------
     -- Line engine: kicked at each line start (and once in the zone for line
-    -- 0), computes the NEXT line.  Table reads, then serial products (16
-    -- iterations, result stable from load + 17); one small operation per clock.
-    -- ~110 clocks: fits SD's 858-clock line.
+    -- 0), computes the NEXT line.  The two row remaps, table reads, then
+    -- serial products (11 iterations, read 18 clocks after the load); one
+    -- small operation per clock.  ~125 clocks: fits SD's 858-clock line.
     ---------------------------------------------------------------------------
     p_line : process(clk)
-        variable v_vf  : signed(11 downto 0);
-        variable v_r   : unsigned(15 downto 0);
         variable v_ri  : unsigned(14 downto 0);
+        variable v_r   : unsigned(15 downto 0);
         variable v_s   : signed(12 downto 0);
         variable v_g   : signed(9 downto 0);
         variable v_u   : unsigned(10 downto 0);
         variable v_h   : signed(11 downto 0);
         variable v_p   : signed(23 downto 0);
+        variable v_t   : unsigned(13 downto 0);
+        variable v_rs  : signed(15 downto 0);
     begin
         if rising_edge(clk) then
             e_zk <= '0';
@@ -657,7 +781,7 @@ begin
 
             if m_b(0) = '1' then m_acc <= m_acc + m_a; end if;
             m_a <= m_a(22 downto 0) & '0';
-            m_b <= '0' & m_b(9 downto 1);
+            m_b <= '0' & m_b(10 downto 1);
 
             case to_integer(e_lc) is
                 when 1 =>
@@ -665,109 +789,130 @@ begin
                 when 2 =>
                     if s_flip = '1' then e_v <= 1079 - e_vl; else e_v <= e_vl; end if;
                 when 3 =>
-                    v_ri := resize(e_v, 15);
-                    v_ri := shift_left(v_ri, 4) - v_ri;                   -- 15 v
-                    e_ri <= v_ri(13 downto 5);
-                    e_vr <= signed(resize(e_v, 12)) - resize(c_ro, 12);
+                    if e_v < c_pa then e_lta <= '1'; else e_lta <= '0'; end if;
+                    if e_v < c_pb then e_ltb <= '1'; else e_ltb <= '0'; end if;
+                    e_da <= signed(resize(e_v, 12)) - signed(resize(c_pa, 12));
+                    e_db <= signed(resize(e_v, 12)) - signed(resize(c_pb, 12));
+                    e_dt <= signed(resize(e_v, 12)) - signed(resize(c_pt, 12));
                 when 4 =>
+                    -- Pink Height: table row = base + (v - segment start) x slope (Q8)
+                    m_acc <= (others => '0');
+                    if e_lta = '1' then
+                        e_base <= (others => '0'); m_a <= resize(e_v, 24); m_b <= c_so;
+                    elsif e_ltb = '1' then
+                        e_base <= to_unsigned(468, 10); m_a <= resize(unsigned(e_da(10 downto 0)), 24); m_b <= c_sp;
+                    else
+                        e_base <= to_unsigned(628, 10); m_a <= resize(unsigned(e_db(10 downto 0)), 24); m_b <= c_so;
+                    end if;
+                when 22 =>
+                    v_t := resize(e_base, 14) + resize(m_acc(20 downto 8), 14);
+                    if v_t > 1079 then e_r <= to_unsigned(1079, 11); else e_r <= v_t(10 downto 0); end if;
+                    -- Flame Height: flame row = 645 + (v - v645) x kf (Q8)
+                    m_a <= resize(unsigned(abs(e_dt)), 24); m_b <= c_kf; m_acc <= (others => '0');
+                    e_sg <= e_dt(11);
+                when 40 =>
+                    if e_sg = '1' then v_rs := 645 - signed(resize(m_acc(21 downto 8), 16));
+                    else v_rs := 645 + signed(resize(m_acc(21 downto 8), 16)); end if;
+                    if v_rs >= 0 and v_rs < 1024 then e_rsv <= '1'; else e_rsv <= '0'; end if;
+                    e_rs <= unsigned(v_rs(9 downto 0));
+                when 43 =>
+                    v_ri := resize(e_r, 15);
+                    v_ri := shift_left(v_ri, 4) - v_ri;                   -- 15 r
+                    e_ri <= v_ri(13 downto 5);
+                    e_vr <= signed(resize(e_r, 12)) - resize(c_ro, 12);
+                    v_ri := resize(e_rs, 15);
+                    v_ri := shift_left(v_ri, 4) - v_ri;
+                    e_ris <= v_ri(13 downto 5);
+                when 44 =>
                     r_r_a <= e_ri & '0';
-                    r_d_a <= e_v(8 downto 1);
-                when 5 =>
+                    r_d_a <= e_r(8 downto 1);
+                when 45 =>
                     r_r_a <= e_ri & '1';
                     if e_vr >= 0 and e_vr < 110 then r_d_a <= unsigned(e_vr(8 downto 1)); n_ron <= s_shad;
                     else n_ron <= '0'; end if;
-                when 6 =>
+                when 46 =>
                     e_w0 <= r_r_q;
+                    r_r_a <= e_ris & '0';
                     -- blob row (span A only below row 200: the ring has its own read)
-                    if e_v(10 downto 9) = "00" and s_shad = '1' then
+                    if e_r(10 downto 9) = "00" and s_shad = '1' then
                         n_la <= unsigned(r_d_q(8 downto 0)); n_ra <= unsigned(r_d_q(17 downto 9));
                         n_lb <= unsigned(r_d_q(24 downto 18)); n_rb <= unsigned(r_d_q(31 downto 25));
-                        if e_v >= 200 then n_aon <= '1'; else n_aon <= '0'; end if;
+                        if e_r >= 200 then n_aon <= '1'; else n_aon <= '0'; end if;
                         n_bon <= '1';
                     else
                         n_aon <= '0'; n_bon <= '0';
                     end if;
-                when 7 =>
+                when 47 =>
                     e_w1 <= r_r_q;
+                    r_r_a <= e_ris & '1';
                     n_lr <= unsigned(r_d_q(8 downto 0)); n_rr <= unsigned(r_d_q(17 downto 9));
-                when 8 =>
+                when 48 =>
+                    e_s0 <= r_r_q;
                     n_zone <= unsigned(e_w0(15 downto 14));
                     n_a    <= unsigned(e_w0(6 downto 0));
                     n_aux  <= unsigned(e_w0(13 downto 7));
-                    n_gp   <= unsigned(e_w0(13 downto 7));
-                    e_hw   <= unsigned(e_w0(6 downto 0));
                     n_kind <= unsigned(e_w1(11 downto 10));
-                    n_kk   <= unsigned(e_w1(5 downto 0));
                     n_band <= e_w1(6) and s_shad;
                     n_bsh  <= unsigned(e_w1(11 downto 7));
-                    e_ww   <= unsigned(e_w1(13 downto 12));
                     n_prow <= e_w1(14);
-                    n_v    <= e_v;
+                    n_v    <= e_r;
                     n_pv   <= e_lfsr(5 downto 4);
                     -- the VCA gain g (signed, Q2) times Flames (Q8): magnitude product
                     v_g := signed(e_w1(9 downto 0));
                     e_sg <= v_g(9);
-                    m_a <= resize(unsigned(abs(v_g)), 24); m_b <= resize(c_k3, 10); m_acc <= (others => '0');
-                    -- the stack ramp (v - centre)
-                    e_dv <= signed(resize(e_v, 12)) - signed(resize(c_ycd, 12));
-                    e_bm <= 80 + shift_left(resize(e_lfsr(14 downto 9), 9), 2) + resize(e_lfsr(14 downto 9), 9);
-                when 9 =>
-                    -- tear / jitter offset (h) for this line, from the line's LFSR
+                    m_a <= resize(unsigned(abs(v_g)), 24); m_b <= resize(c_k3, 11); m_acc <= (others => '0');
+                    -- the stack ramp (r - centre)
+                    e_dv <= signed(resize(e_r, 12)) - signed(resize(c_ycd, 12));
+                when 49 =>
+                    e_s1 <= r_r_q;
+                    -- the still's faint line jitter (h) for this line, from the line's LFSR
                     v_r := e_lfsr;
-                    if s_tear = '1' then
-                        if e_bc /= 0 then
-                            e_bc <= e_bc - 1;
-                            e_ox <= e_bo + signed(resize(v_r(1 downto 0), 10)) - 2;
-                        elsif v_r(2 downto 0) = "000" then
-                            e_bc <= resize(v_r(8 downto 4), 6) + 7;
-                            if v_r(15) = '1' then
-                                e_bo <= -signed(resize(e_bm, 10)); e_ox <= -signed(resize(e_bm, 10));
-                            else
-                                e_bo <= signed(resize(e_bm, 10)); e_ox <= signed(resize(e_bm, 10));
-                            end if;
-                        else
-                            e_ox <= (others => '0');
-                        end if;
+                    if v_r(2 downto 0) = "000" then
+                        if v_r(7) = '1' then e_ox <= -signed(resize(v_r(6 downto 4), 10)) - 2;
+                        else e_ox <= signed(resize(v_r(6 downto 4), 10)) + 2; end if;
                     else
-                        e_bc <= (others => '0');
-                        if v_r(2 downto 0) = "000" then
-                            if v_r(7) = '1' then e_ox <= -signed(resize(v_r(6 downto 4), 10)) - 2;
-                            else e_ox <= signed(resize(v_r(6 downto 4), 10)) + 2; end if;
-                        else
-                            e_ox <= (others => '0');
-                        end if;
+                        e_ox <= (others => '0');
                     end if;
-                when 10 =>
+                when 50 =>
                     e_xb <= signed(resize(c_xb0, 13)) + resize(e_ox, 13);
-                when 26 =>
+                    -- the flame words: valid only where the flame row lands in the middle zone
+                    if e_rsv = '1' and e_s0(15 downto 14) = "01" then
+                        e_hw <= unsigned(e_s0(6 downto 0)); n_gp <= unsigned(e_s0(13 downto 7));
+                        n_kk <= unsigned(e_s1(5 downto 0)); e_ww <= unsigned(e_s1(13 downto 12));
+                    else
+                        e_hw <= (others => '0'); n_gp <= (others => '0');
+                        n_kk <= (others => '0'); e_ww <= (others => '0');
+                    end if;
+                when 51 =>
+                    case to_integer(e_ww) is
+                        when 1      => e_wo <= c_w1;
+                        when 2      => e_wo <= c_w2;
+                        when 3      => e_wo <= c_w3;
+                        when others => e_wo <= (others => '0');
+                    end case;
+                when 66 =>
                     if e_sg = '1' then n_gk <= -signed(resize(m_acc(18 downto 8), 11));
                     else n_gk <= signed(resize(m_acc(18 downto 8), 11)); end if;
                     -- the stack ramp times Stack (Q8)
-                    m_a <= resize(unsigned(abs(e_dv)), 24); m_b <= c_k5; m_acc <= (others => '0');
+                    m_a <= resize(unsigned(abs(e_dv)), 24); m_b <= resize(c_k5, 11); m_acc <= (others => '0');
                     e_sg <= e_dv(11);
-                when 44 =>
+                when 84 =>
                     if m_acc(23 downto 19) /= "00000" then v_u := (others => '1'); else v_u := m_acc(18 downto 8); end if;
                     if e_sg = '1' then n_e <= -signed(resize(v_u, 12)); else n_e <= signed(resize(v_u, 12)); end if;
                     -- the spindle size (Q7)
-                    m_a <= resize(e_hw, 24); m_b <= resize(c_k2, 10); m_acc <= (others => '0');
-                when 62 =>
+                    m_a <= resize(e_hw, 24); m_b <= resize(c_k2, 11); m_acc <= (others => '0');
+                when 102 =>
                     e_hk <= resize(m_acc(15 downto 7), 9);
                     -- the beam's DDA start: (xb - 1920) k1
                     v_h := resize(e_xb, 12) - 1920;
                     e_sg <= v_h(11);
-                    m_a <= resize(unsigned(abs(v_h)), 24); m_b <= resize(c_k1, 10); m_acc <= (others => '0');
-                when 63 =>
+                    m_a <= resize(unsigned(abs(v_h)), 24); m_b <= resize(c_k1, 11); m_acc <= (others => '0');
+                when 103 =>
                     -- wings: hk + 3/2 dc ww, at least 5/8 hk
-                    v_s := signed(resize(e_hk, 13));
-                    case to_integer(e_ww) is
-                        when 1      => v_s := v_s + shift_right(shift_left(resize(c_dc, 13), 1) + resize(c_dc, 13), 1);
-                        when 2      => v_s := v_s + shift_left(resize(c_dc, 13), 1) + resize(c_dc, 13);
-                        when 3      => v_s := v_s + shift_left(resize(c_dc, 13), 2) + shift_right(resize(c_dc, 13), 1);
-                        when others => null;
-                    end case;
+                    v_s := signed(resize(e_hk, 13)) + resize(e_wo, 13);
                     e_dv <= resize(v_s, 12);
                     e_lo <= e_hk - shift_right(e_hk, 2) - shift_right(e_hk, 3);
-                when 64 =>
+                when 104 =>
                     if e_dv < signed(resize(e_lo, 12)) then
                         n_hwe <= e_lo;
                     elsif e_dv > 511 then
@@ -775,7 +920,7 @@ begin
                     else
                         n_hwe <= unsigned(e_dv(8 downto 0));
                     end if;
-                when 80 =>
+                when 120 =>
                     v_p := signed(resize(m_acc(22 downto 0), 24));
                     if e_sg = '1' then n_xc <= resize(-v_p, 22); else n_xc <= resize(v_p, 22); end if;
                     n_xb <= e_xb;
@@ -874,6 +1019,7 @@ begin
             p5_pb <= to_unsigned(645, 11) - resize(shift_right(shift_left(resize(p4_bbo, 9), 3) + resize(p4_bbo, 9), 4), 11);
             if p4_dx1 < p4_dxs then v_t := p4_dx1; else v_t := p4_dxs; end if;
             if v_t(10) = '1' then p5_d <= (others => '1'); else p5_d <= v_t(9 downto 0); end if;
+            if v_t(10 downto 7) /= "0000" then p5_d7 <= (others => '1'); else p5_d7 <= v_t(6 downto 0); end if;
             if (l_kind = 1 or l_kind = 2) and (p4_dx1 < l_aux & '0' or p4_dxs < l_aux & '0') then p5_spk <= '1'; else p5_spk <= '0'; end if;
             if p4_dx1 < l_aux or p4_dxs < l_aux then p5_spi <= '1'; else p5_spi <= '0'; end if;
             -- dark shapes: the deepest wins (A centre block / B small blobs / ring / ellipse in sky rows)
@@ -895,13 +1041,12 @@ begin
                 p5_dmon <= '0'; p5_dm <= (others => '0');
             end if;
             p5_cam <= p4_cam;
-            -- 6: the two products (VCA gain x waveform or spindle slope x distance; stack ramp x (M - 1))
-            if l_zone = 1 then
-                p6_p1 <= signed(resize(l_kk * p5_d, 18));
-            else
-                p6_p1 <= resize(l_gk * signed(resize(p5_t, 8)), 18);
-            end if;
+            -- 6: the three products (VCA gain x waveform; stack ramp x (M - 1); spindle slope x distance), the
+            --    spindle peak plus half the camera (the flames burn hotter where the picture is bright)
+            p6_p1 <= resize(l_gk * signed(resize(p5_t, 8)), 18);
             p6_p2 <= resize(l_e * p5_mm, 19);
+            p6_p3 <= l_kk * p5_d7;
+            p6_gc <= resize(l_gp, 8) + resize(p5_cam(7 downto 1), 8);
             p6_d <= p5_d; p6_spi <= p5_spi;
             p6_rim <= p5_rim; p6_bb <= p5_bb; p6_pb <= p5_pb; p6_cam <= p5_cam;
             p_fl(6) <= x"000" & '0' & p5_spk & p5_dmon & std_logic_vector(p5_dm) & p5_dkon & std_logic_vector(p5_dk)
@@ -910,7 +1055,8 @@ begin
             v_s := signed(resize(l_a, 11)) + resize(shift_right(p6_p1, 9), 11) + signed(resize(p6_cam, 11));
             p7_s <= v_s;
             p7_st <= signed(resize(l_v, 14)) + resize(shift_right(p6_p2, 4), 14) + signed(resize(p6_cam(7 downto 1), 14));
-            p7_g2 <= signed(resize(l_gp, 13)) - resize(shift_right(p6_p1, 4), 13);
+            p7_g2 <= signed(resize(p6_gc, 13)) - signed(resize(shift_right(p6_p3, 4), 13));
+            if p6_cam(7) = '1' then p7_pk <= (others => '1'); else p7_pk <= p6_cam(6 downto 2); end if;
             if l_v < p6_pb + 6 then p7_bpb6 <= '1'; else p7_bpb6 <= '0'; end if;
             if signed(resize(p6_d, 11)) < signed(resize(l_hwe, 11)) and l_hwe /= 0 then p7_body <= '1'; else p7_body <= '0'; end if;
             v_d := signed(resize(p6_d, 12)) - signed(resize(l_hwe, 12));
@@ -937,25 +1083,48 @@ begin
             -- p8_f: 15 dkon, 14..10 dk, 9 dmon, 8..5 dm, 4 spk, 3 body, 2 rimz, 1 lowst, 0 stk
             p8_f <= v_f(12) & v_f(11 downto 7) & v_f(17) & v_f(16 downto 13) & v_f(18) & p7_body & p7_rimz & p7_lowst & p7_stk;
             p8_rd <= p7_rd; p8_rimln <= p7_rimln; p8_rlv <= p7_rlv; p8_bnd <= p7_bnd; p8_mix <= p7_mix; p8_mxl <= p7_mxl;
-            p8_bpb6 <= p7_bpb6; p8_spi <= p7_spi;
+            p8_bpb6 <= p7_bpb6; p8_spi <= p7_spi; p8_pk <= p7_pk;
+            -- Edges: white for the dark shapes' rims (depth < 8 px), the band's top rim, the flames' rim
+            if s_edge = '1' and v_f(11 downto 9) = "000" then p8_dkw <= '1'; else p8_dkw <= '0'; end if;
+            if v_f(8 downto 7) = "11" then p8_dk3 <= '1'; else p8_dk3 <= '0'; end if;
+            p8_erim <= s_edge and p7_rimz;
+            if s_edge = '1' and l_bsh < 3 then p8_bw <= '1'; else p8_bw <= '0'; end if;
             -- 9: the palette address (priority)
             if p8_f(15) = '1' then
-                v_ad := to_unsigned(608, 10) + resize(unsigned(p8_f(14 downto 10)), 10);
+                if p8_dkw = '1' then
+                    if p8_dk3 = '1' then v_ad := to_unsigned(674, 10); else v_ad := to_unsigned(675, 10); end if;
+                else
+                    v_ad := to_unsigned(608, 10) + resize(unsigned(p8_f(14 downto 10)), 10);
+                end if;
             elsif l_zone = 0 then
-                v_ad := "000" & p8_fi;
+                if p8_f(3) = '1' then                             -- tall flames rising into the sky
+                    v_ad := to_unsigned(512, 10) + resize(p8_gi, 10);
+                elsif p8_erim = '1' then
+                    v_ad := to_unsigned(680, 10) + resize(p8_rd, 10);
+                else
+                    v_ad := "000" & p8_fi;
+                end if;
             elsif l_zone = 1 then
                 if p8_f(3) = '1' and p8_bpb6 = '1' then
                     v_ad := to_unsigned(512, 10) + resize(p8_gi, 10);
+                elsif p8_erim = '1' and p8_bpb6 = '1' then
+                    v_ad := to_unsigned(680, 10) + resize(p8_rd, 10);
                 elsif p8_f(0) = '1' then
-                    v_ad := to_unsigned(256, 10) + resize(p8_si, 10);
+                    v_ad := "01" & p8_si; v_ad(9) := s_edge;      -- 256 + si, Edges: 768 + si (white rims)
                 elsif p8_bnd = '1' then
-                    v_ad := to_unsigned(576, 10) + resize(l_bsh, 10);
+                    if p8_bw = '1' then v_ad := to_unsigned(675, 10);
+                    else v_ad := to_unsigned(576, 10) + resize(l_bsh, 10); end if;
                 elsif p8_mix = '1' then
-                    if p8_mxl = "11" then v_ad := to_unsigned(643, 10); else v_ad := to_unsigned(640, 10) + resize(p8_mxl, 10); end if;
+                    if p8_mxl = "11" then v_ad := to_unsigned(643, 10);
+                    elsif s_edge = '1' then
+                        if p8_mxl = "01" then v_ad := to_unsigned(675, 10); else v_ad := to_unsigned(673, 10); end if;
+                    else v_ad := to_unsigned(640, 10) + resize(p8_mxl, 10); end if;
                 elsif p8_f(2) = '1' then
                     v_ad := to_unsigned(648, 10) + resize(p8_rd, 10);
-                else
+                elsif p8_pk = 0 then
                     v_ad := to_unsigned(644, 10) + resize(l_pv, 10);
+                else
+                    v_ad := to_unsigned(688, 10) + resize(p8_pk, 10);  -- the camera lights the pink band
                 end if;
             else
                 if p8_f(9) = '1' then
@@ -967,7 +1136,7 @@ begin
                         if p8_spi = '1' then v_ad := to_unsigned(675, 10); else v_ad := to_unsigned(673, 10); end if;
                     elsif p8_f(4) = '1' and l_kind = 2 then
                         if p8_spi = '1' then v_ad := to_unsigned(678, 10); else v_ad := to_unsigned(676, 10); end if;
-                    else v_ad := to_unsigned(256, 10) + resize(p8_si, 10); end if;
+                    else v_ad := "01" & p8_si; v_ad(9) := s_edge; end if;
                 else
                     v_ad := to_unsigned(128, 10) + resize(p8_fi, 10);
                 end if;

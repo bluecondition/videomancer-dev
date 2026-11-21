@@ -1,4 +1,4 @@
-# Temple - Heirloom from the video clips (phase 3), v0.1.0, built 2026-11-04 from the still
+# Temple - Heirloom from the video clips (phase 3), v0.2.0 (2026-11-21: Ron's preview notes), first built 2026-11-04 from the still
 # WIN_20230816_00_32_31 t5.0.  An orange/yellow/blue mirror-symmetric sunset temple: cyan flame columns over
 # an orange sky, maroon shapes, a pink band of orange spindles, a stack of wavy purple bands, a cyan floor.
 # See temple.vhd, temple.py, SUMMARY.md.
@@ -7,7 +7,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.temple"
 program_name = "Temple"
-program_version = "0.1.2"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -29,7 +29,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Spindles"
+name_label = "Flame Width"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -39,7 +39,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Flames"
+name_label = "Flame Height"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -49,7 +49,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Drift"
+name_label = "Pink Height"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -59,7 +59,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Stack"
+name_label = "Waves"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -97,7 +97,7 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Tear"
+name_label = "Edges"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
@@ -129,8 +129,9 @@ name = "Blaze"
 linear_potentiometer_12 = 940
 
 [[preset]]
-name = "Still Temple"
-rotary_potentiometer_4 = 0
+name = "Pink Hall"
+rotary_potentiometer_4 = 1000
+rotary_potentiometer_3 = 360
 
 [[preset]]
 name = "Wide Columns"
@@ -143,11 +144,12 @@ toggle_switch_7 = 1
 toggle_switch_8 = 1
 
 [[preset]]
-name = "Torn Lenses"
+name = "Neon Lenses"
 toggle_switch_10 = 1
 rotary_potentiometer_5 = 1000
 
 [[preset]]
-name = "Bare Sky"
+name = "Rising Fire"
 toggle_switch_9 = 0
-rotary_potentiometer_3 = 900
+rotary_potentiometer_3 = 1000
+rotary_potentiometer_5 = 900

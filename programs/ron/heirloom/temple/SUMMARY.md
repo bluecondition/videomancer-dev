@@ -1,6 +1,6 @@
 # Temple — an orange sunset temple: cyan flames, maroon shapes, orange spindles in a pink band
 
-**v0.1.0 built 2026-11-04, NOT flashed.** Heirloom from the video clips (phase 3), made from the still
+**Current: v0.2.0 (2026-11-21), Ron's preview notes: new control map (Pink Height, Flame Height, Waves, Edges), see the last section; v0.1.2 was flashed by Ron.** v0.1.0 built 2026-11-04. Heirloom from the video clips (phase 3), made from the still
 `photos/vid/WIN_20230816_00_32_31_t5p0.png` (clip WIN_20230816_00_32_31 at 5.0 s; 12.0 s clip). A mirror-symmetric
 orange/yellow/blue "temple": an orange and yellow sky with four soft cyan flame columns, maroon shapes with black
 rims (a ring at the top, a crooked centre block, two small blobs, two lens ellipses and a band), a salmon-pink band
@@ -170,3 +170,90 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
   - Check: the new code at K6 818 reproduces the old code at K6 1023 (0.4 % of pixels differ by > 8; `.heirloom_work/rb_temple/k6b/k6b_eqcmp.png`).
 - **Render.** `.heirloom_work/rb_temple/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same frame structure: the bright areas move further along the colouriser, so on the bear the ears and eyes pass cyan back toward blue and the bright chest clamps at the end of the ramp (less orange). That is the palette's cycle, not a wrap (see the K6 818 check).
 - **Build** v0.1.2, router1, all six configs seed 1 (v0.1.0's HD Dual needed seed 2). HD Analog 88.05, HD HDMI 95.62, HD Dual 89.06 MHz (worst HD 88.05). 6426–6446 / 7680 LC, 23 / 32 EBR. Not flashed.
+
+## v0.2.0: Ron's preview notes (2026-11-21)
+
+Ron (hardware, v0.1.2): "I would like more control of the individual elements with knobs - the height of the overall pink middle should be adjustable. the height of the orange flames should be separate. make the controls more dynamic. there should be a setting for white edges around some of the internal geometry. incoming video in the pink section should do something."
+
+The "orange flames" are the four spindles in the pink band (orange bodies, yellow cores, arrow wings). No fault, five feature requests. v0.1.2 backups (vhd, toml, py, vmprog): `.heirloom_work/rb_temple/temple_v012.*`.
+
+### Control map, old -> new
+| Slot | v0.1.2 | v0.2.0 |
+|---|---|---|
+| K1 | Columns x0.5 .. x2 | **Columns** x0.375 .. x1 .. x3 (wider) |
+| K2 | Spindles x0.3 .. x2 | **Flame Width**: the same job under Ron's word, x0.125 .. x1 .. x3 |
+| K3 | Flames (sky / floor waveform depth) | **Flame Height** (new) x0.15 .. x1 .. x2.5 |
+| K4 | Drift (sweep LFO rate) | **Pink Height** (new) 0.2x .. 1x .. 3.7x |
+| K5 | Stack (stack pinch) | **Waves**: old K3 + old K5 merged |
+| K6 | Camera | **Camera** (same curve, default 100 %), now also in the pink band and the flames |
+| S7 / S8 / S9 / S11 | Flip / Palette / Shadows / Source | unchanged |
+| S10 | Tear (sync-tear bursts) | **Edges** (new): Off = the still, On = white edges |
+| P12 | Sun | Sun (unchanged); the drift now always runs at the clip's rate |
+
+- **Retired:** the Drift rate knob and the Tear bursts.
+  - The sweep LFO always runs at the old default (the clip's 8 s triangle, +-32 palette units around the Sun position), so the default picture moves as before. It can no longer be stopped or sped up.
+  - The still's faint per-line jitter (the old Tear Off) stays.
+- **Merged:** the sky / floor flame depth and the stack pinch were both VCA depths of the same column waveform. Waves drives both with their old curves; the sky's top end widened from x2 to x2.5.
+
+### Controls (512 = the still)
+| Control | Element | 0 .. 1023 |
+|---|---|---|
+| K1 Columns | the column spacing of every repeated element | x0.375 (outer flames off-screen, two huge inner ones) .. x3 (the pattern crowded into the centre) |
+| K2 Flame Width | the orange flames' width and wings | x0.125 slivers .. x3, the four flames merge into a wall of fire |
+| K3 Flame Height | the orange flames' height, anchored where they meet the stack | x0.15 (40-row flames on the stack) .. x2.5 (they rise through the maroon band into the sky between the cyan flame columns, to the top of the screen) |
+| K4 Pink Height | the pink band's height; the sky and the lower part share the rest of the screen | about 70 visible pink rows .. about 620 rows, with the sky and the stack/floor squeezed to half height |
+| K5 Waves | the column waveform depth | plain sky gradient, flat floor and flat stack bands .. blazing blue flame columns, deep floor columns, the stack torn into lenses (x4) |
+| K6 Camera | the camera's light (or the Osc lattice) | 0 = the still .. 100 % (default): bends the sky / floor colouriser and the stack as before, lights the pink band (a 32-step ramp from the still's pink to near white, index = camera / 4) and heats the flames (+ camera / 2 on the flame ramp: yellow cores where the picture is bright) |
+| S7 Flip | upside down | |
+| S8 Palette | Sunset / Ice (Cr and Cb swapped) | |
+| S9 Shadows | the band and the dark shapes off | |
+| S10 Edges | On: the dark shapes' black rims turn white (depth < 8 px, so they survive the output box blur); the band's top rim and lower edge white; a white rim all round the orange flames (through the band and in the sky too, where the still has it on the pink side only); the stack's three blue band rims white | |
+| S11 Source | Video / Osc | |
+| P12 Sun | the sweep position (palette rotation, wings into needles, the ring sinking, the stack scrolling) plus the drift | dusk .. night blue |
+
+Every knob and the slider ride the shared glide (1/8 of the gap per field, +-2 deadband).
+
+### How
+- **Pink Height remap.** The line engine maps the screen's virtual row v to a table row r through three linear segments: above the pink, table rows 468..628, below.
+  - The slopes come from a serial divider in the vblank zone: 160 x 256 / P and 920 x 256 / (1080 - P).
+  - The segment starts are A = (1080 - P) 521 / 1024 and B = A + P.
+  - Everything except the flames uses r: zones, band, stack, white rim, dark shapes, the ring.
+- **Flame Height remap.** The orange flames read their own table row, 645 + (v - v645) x 65536 / F, so their height is independent of Pink Height. Their table words (half-width, peak, slope, wings) count only where that row lands in the middle zone.
+- **Checked.** At the defaults both maps are exactly the identity for every row. `.heirloom_work/rb_temple/v020/remap_check.py` (an integer model) also checks monotonicity, continuity and the product widths over the knob grid.
+- **Flames in the sky.** The flame colour product (slope x distance) has its own 6 x 7 multiplier, so the flames can be drawn in the sky zone (under the dark shapes) as well as in the middle zone.
+- **Palette** (temple.py):
+  - 680..687: the Edges flame rim (white);
+  - 688..719: the pink camera ramp;
+  - 768..1023: a copy of the stack profile with its blue rims white (Edges selects it with one address bit).
+- **Router1 self-add.** Router1 hung on HD Analog seed 1 of the first v0.2.0 build (remaining arcs frozen at 3,823). dupin found two LUTs with the same net on two pins, from the sign-extended self-adds in the Sun curve 3(p - 512) and the wing term 3 dc (code unchanged since v0.1.0, whose HD Dual seed 1 also stalled).
+  - Both are now computed in offset binary: 3p - 1536, and the wing terms 3u - 384, their half, and 4u + u/2 - 576 with u = dc + 128.
+  - The wing terms are per-field constants, selected per line and added once.
+  - Bit-identical over the full ranges; dupin now reports nothing.
+- **Unchanged:** the latency (C_LAT 20 in all modes), the generated avid, the output boxes, luma 13/16, the blanking gate and the running-sum resync.
+
+### Judgement calls
+- The Drift knob and the Tear switch were retired to make room (see above). The drift itself was kept at the clip's rate.
+- **Pink Height stretches table rows 468..628, not the whole pink (440..645).** The maroon band's bulge (440..467) and the stack's top dome (630..645) keep their shapes; the visible pink grows around them.
+- **Flame Height is in screen rows, independent of Pink Height ("separate").** With a short pink band, the default-height flames rise past the band into the sky. With a tall one they stand at its bottom with bare pink above. K3 sets them.
+- **The camera lights the pink geometry but does not move it.** Black or no input leaves the still.
+
+### Resolution
+- The remaps work in virtual 1080-line rows, so SD, 720p and 1080p show the same picture (SD still shows the centre 4:3, as before).
+- The row tables step every 2.1 rows. Where Flame Height stretches the flames 2.5x, their outlines step every ~5 lines at 1080p (~3.5 at 720p, ~2.5 at SD); the per-line jitter already tears those edges.
+- Pink Height stretches only flat pink, so it shows no steps.
+
+### Build
+- **v0.2.0 built 2026-11-21 through the shared queue with ROUTER1, all six configs on seed 1.** NOT flashed.
+  - HD Analog 92.62, HD HDMI 80.59, HD Dual 80.19 MHz (worst HD 80.19; v0.1.2 had 88.05); SD Analog 78.69, SD HDMI 80.90, SD Dual 91.43 MHz (SD Fmin 27).
+  - 7,060-7,086 / 7,680 LC (92.3 %, was 83.9 %), 23 / 32 EBR (unchanged). Standalone synth: LUT 3,531 -> 3,981, CARRY 1,399 -> 1,605.
+  - iceunpack OK x6; the packed config carries the new labels and presets. dupin: nothing (no CARRY I0==I1, no duplicate LUT inputs).
+  - The first v0.2.0 build (before the self-add fix) hung router1 on HD Analog seed 1 and passed on seed 2 at 78.09 MHz; that build was stopped and is not shipped (log `.heirloom_work/rb_temple/v020/build_v0.2.0_selfadd_attempt.log`).
+- Output: `out/rev_b/ron/heirloom/temple.vmprog`. Rebuild: `NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900 .heirloom_work/vid/build_queue.sh temple`.
+- **HD HDMI re-seeded (the ADV7513 HSYNC skew, Ron's "hsync lines").**
+  - The builder's HD HDMI router1 s1 sat at HSYNC **+0.16 ns** / data <= -0.61: positive, but inside the sub-window danger zone where wildfire showed lines at +0.65.
+  - The screen (`.heirloom_work/skew_tools/screen.sh temple`: hd_hdmi router1 + router2 s1-60, 109 timing-clean, 33 in the window) put router2 s18 most positive in the window.
+  - **Installed: HD HDMI = router2 s18 (+2.28 / <= -0.71, 79.79 MHz).** Spare: router2 s3 (+2.18 / <= -0.78, 84.48 MHz) in `.heirloom_work/rb_temple/skew/temple_v020_spare_hd_hdmi_router2_s3.vmprog`.
+  - HD Analog router1 s1 (+0.76 / <= -0.66) and HD Dual router1 s1 (-1.78 / <= -1.72) kept.
+  - The replaced s1 bitstream is in `.heirloom_work/rb_temple/skew/`. The shipped HD HDMI is thus a **non-1 seed (router2 s18)**.
+  - **A full builder rebuild re-routes HD HDMI router1 s1 (+0.16).** Re-install afterwards with `.heirloom_work/skew_tools/install.sh temple router2 18` (same netlist), or re-screen if the RTL changed.
+- Presets (hand-written, re-aimed): Photo, Dusk (P12 120), Blaze (P12 940), **Pink Hall** (Pink Height 1000, Flame Height 360; replaces Still Temple, which used Drift), Wide Columns (K1 180, Flame Width 760), Ice Flip, **Neon Lenses** (Edges + Waves 1000; was Torn Lenses: Tear + Stack 1000), **Rising Fire** (Shadows off, Flame Height 1000, Waves 900; replaces Bare Sky: Shadows off + Flames 900).
