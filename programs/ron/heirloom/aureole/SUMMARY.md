@@ -278,3 +278,9 @@ K1 Width 564, K2 Horns 277, K3 Skew 794, K4 Speed 242, K5 Teeth 454, S7 Palette 
 (K6 Etch, S8, S9, S11 unchanged). The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs,
 197 bytes), so timing and seeds are as in v0.1.3 (HD HDMI and HD Dual seed 2; HD Dual thin, 74.32 MHz). Presets are
 unchanged.
+
+## v0.1.5: HW-captured defaults, second take (2026-11-20)
+
+Ron re-dialled and captured again minutes after v0.1.4: K1 Width 851, K2 Horns 118, K3 Skew 304, K4 Speed 179,
+K5 Teeth 1023, P12 Bloom 340 (S7 Palette and S10 Shape stay On; K6 Etch, S8, S9, S11 unchanged). Repacked from the
+same v0.1.3 bitstreams (only the settings block differs).
