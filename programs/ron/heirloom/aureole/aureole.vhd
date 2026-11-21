@@ -2,6 +2,10 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- v0.2.0 (2026-11-21, Ron): K3 Skew is continuous through 512.  It used to negate the whole horn wave at the
+-- centre (the floor jumped ~1.1 A and the horns turned over).  Now the left half is unchanged out to 341 (the
+-- captured 304 is bit-identical), the slow side straightens over 341..683, and the two halves meet in the same
+-- straight triangle at 512; the right half mirrors it as sharp-rise / slow-fall teeth with the trough fixed.
 --
 -- Aureole v0.1.1 -- Heirloom from the video clips, from WIN_20230314_23_42_54 at 7.5 s.
 -- v0.1.1: S9 Gold is a full-frame gold halo on every line (was only the afterglow below the warm cap,
@@ -25,7 +29,8 @@
 --
 --   K1  Width    the bands' spread: x0.25 .. x4 of the clip's parabola
 --   K2  Horns    the horn wave's height, 0 .. +-400 px (80 = the clip)
---   K3  Skew     the horn wave's shape: slow rise / sharp fall .. triangle .. sharp rise / slow fall
+--   K3  Skew     the horn wave's shape: slow rise / sharp fall .. straight triangle .. sharp rise / slow fall,
+--                continuous through the centre
 --   K4  Speed    bipolar: the warm cap scrolls down (+) or up (-), still in the centre
 --   K5  Teeth    horns per screen width, 2 .. 12
 --   K6  Etch     how far the picture (or the Osc) pushes the floor and bends the bands
@@ -184,6 +189,9 @@ architecture aureole of program_top is
     signal c_sneg : std_logic := '0';
     signal c_as   : unsigned(22 downto 0) := (others => '0');            -- A S
     signal c_ai   : unsigned(19 downto 0) := (others => '0');            -- A inc
+    signal c_a2   : unsigned(14 downto 0) := (others => '0');            -- A inc^2 >> 15
+    signal c_mk   : unsigned(9 downto 0) := (others => '0');             -- |k3 - 512|
+    signal c_nu   : unsigned(8 downto 0) := to_unsigned(256, 9);         -- slow-side curvature, Q8 (256 = full)
     signal c_dw0, c_dw2 : signed(21 downto 0) := (others => '0');
     signal c_incr : unsigned(16 downto 0) := (others => '0');
     signal c_wrst : signed(23 downto 0) := (others => '0');
@@ -473,6 +481,8 @@ begin
                     when 270 => z_sel <= to_unsigned(15, 5); z_pre <= '1';
                     when 294 => z_sel <= to_unsigned(16, 5); z_pre <= '1';
                     when 318 => z_sel <= to_unsigned(17, 5); z_pre <= '1';
+                    when 342 => z_sel <= to_unsigned(18, 5); z_pre <= '1';
+                    when 366 => z_sel <= to_unsigned(19, 5); z_pre <= '1';
                     when others => null;
                 end case;
             end if;
@@ -498,6 +508,9 @@ begin
                             when others => z_fa <= resize(shift_left(resize(c_d0a, 16), 2) - 4, 36);
                         end case;
                         z_fb <= resize(c_kl, 16);
+                    when 18 => z_fa <= resize(c_ai, 36);                                                     -- A inc (2 - nu)
+                               z_fb <= resize(to_unsigned(512, 10) - resize(c_nu, 10), 16);
+                    when 19 => z_fa <= resize(c_a2, 36);                z_fb <= resize(c_nu, 16);            -- (A inc^2 >> 15) nu
                     when others => z_fa <= (others => '0');             z_fb <= (others => '0');
                 end case;
             end if;
@@ -542,9 +555,19 @@ begin
                         c_sneg <= v_e(10);
                         if v_e(10) = '1' then v_e := -v_e; end if;
                         v_m := unsigned(v_e(9 downto 0));
+                        c_mk <= v_m;
                         z_a <= shift_left(resize(v_m, 24), 1) + resize(v_m(9 downto 3), 24);
                     when 23 => z_mt <= r_ex_q;                                      -- width mantissa
                     when 24 => r_ex_a <= z_a(7 downto 0); z_sh2 <= z_a(10 downto 8);
+                    when 25 =>
+                        -- v0.2.0 continuous skew: the slow side's curvature nu = 1.5 |k3 - 512| / 256, full
+                        -- (256) from |k3 - 512| = 171 out, 0 at the centre (a straight triangle, the same
+                        -- wave on both sides of 512).  nu = 256 leaves every seed bit-identical with v0.1.x.
+                        if c_mk >= 171 then
+                            c_nu <= to_unsigned(256, 9);
+                        else
+                            c_nu <= c_mk(8 downto 0) + resize(c_mk(8 downto 1), 9);
+                        end if;
                     when 27 =>                                                      -- S = exp2 >> (6 - sh2)
                         case to_integer(z_sh2) is
                             when 0      => c_s <= resize(r_ex_q(15 downto 6), 14);
@@ -591,12 +614,16 @@ begin
                         c_lw <= to_unsigned(40, 12) + f_acc(19 downto 8);
                     when 171 => c_lc <= to_unsigned(C_P, 12) - c_lw;
                     when 194 => c_as <= f_acc(22 downto 0);                         -- A S
-                    when 195 => c_wrst <= signed(shift_left(resize(c_a, 24), 8)) - signed(resize(c_as, 24));
+                    when 195 =>
+                        -- the fast line: left (negated) falls into the trough as before; right rises from it
+                        if c_sneg = '1' then
+                            c_wrst <= signed(shift_left(resize(c_a, 24), 8)) - signed(resize(c_as, 24));
+                        else
+                            c_wrst <= -signed(shift_left(resize(c_a, 24), 8));
+                        end if;
                     when 218 => c_incr <= f_acc(25 downto 9);                       -- incR
                     when 242 => c_ai <= f_acc(19 downto 0);                         -- A inc
-                    when 266 =>                                                     -- A inc^2 -> Dw0, Dw2
-                        c_dw0 <= -signed(resize(c_ai, 22) + resize(f_acc(29 downto 16), 22));
-                        c_dw2 <= -signed(resize(f_acc(29 downto 15), 22));
+                    when 266 => c_a2 <= f_acc(29 downto 15);                        -- A inc^2 >> 15
                     when 290 => z_a <= f_acc(23 downto 0);                          -- d0^2
                     when 314 => c_am <= f_acc(31 downto 0);                         -- A2 at the line start
                     when 338 => c_dm <= -signed(resize(f_acc(27 downto 0), 28));    -- D at the line start (descending)
@@ -607,6 +634,10 @@ begin
                             when 3      => c_dr0 <= signed(shift_left(resize(c_kr, 28), 3) + resize(c_kr, 28));
                             when others => c_dr0 <= signed(shift_left(resize(c_kr, 28), 2));
                         end case;
+                    -- the slow side A (1 - (2 - nu) u - nu u^2): Dw0 = -(A inc (2 - nu) + A inc^2 >> 16),
+                    -- Dw2 = -(A inc^2 >> 15) nu  (nu = 1 is the v0.1.x curve A (1 - u - u^2))
+                    when 362 => c_dw0 <= -signed(resize(f_acc(28 downto 8), 22) + resize(c_a2(14 downto 1), 22));
+                    when 386 => c_dw2 <= -signed(resize(f_acc(23 downto 8), 22));
                     when others => null;
                 end case;
             end if;
@@ -930,10 +961,12 @@ begin
         variable v_c   : signed(18 downto 0);
     begin
         if rising_edge(clk) then
-            -- 1: field quotient and the larger of the two wave parts (Q8 px)
+            -- 1: field quotient and the two wave parts combined (Q8 px): the larger for a left Skew (then
+            -- negated: slow rise / sharp fall), the smaller for a right Skew (sharp rise / slow fall).  Both
+            -- keep the trough at the wrap, so the two sides meet in the same straight triangle at 512.
             p1_fq <= b_a2(31 downto 20);
             v_ws8 := resize(b_ws(26 downto 8), 24);
-            if v_ws8 > b_wr then p1_w <= v_ws8; else p1_w <= b_wr; end if;
+            if (v_ws8 > b_wr) = (c_sneg = '1') then p1_w <= v_ws8; else p1_w <= b_wr; end if;
             -- 2: field height (arch or well), the clipped displacement in px
             if s_well = '1' then
                 if p1_fq > 511 then p2_fh <= to_unsigned(511, 9); else p2_fh <= p1_fq(8 downto 0); end if;
@@ -945,7 +978,7 @@ begin
             if v_w > v_a8 then v_w := v_a8; end if;
             if v_w < -v_a8 then v_w := -v_a8; end if;
             p2_dw <= v_w(17 downto 8);
-            -- 3: luma of this pixel; skew sign
+            -- 3: luma of this pixel; skew sign (left Skew: the max above, negated)
             p3_fh <= p2_fh;
             if c_sneg = '1' then p3_dw <= -p2_dw; else p3_dw <= p2_dw; end if;
             p3_lm <= unsigned(s_lb_q);

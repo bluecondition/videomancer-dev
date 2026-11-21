@@ -2,12 +2,13 @@
 # A soft cyan bloom in nested vertical bands with a dark-red horned floor and a warm cap (white, orange, pink)
 # scrolling down through it.  See aureole.vhd, aureole.py and SUMMARY.md.
 # v0.1.1: S9 Gold = a full-frame gold halo (bold at any scroll phase); the default frame is unchanged.
+# v0.2.0: K3 Skew is continuous through the centre (no flip at 50 %); the captured default is unchanged.
 
 [program]
 processing_delay_clks = 24
 program_id = "com.czartroniks.aureole"
 program_name = "Aureole"
-program_version = "0.1.5"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

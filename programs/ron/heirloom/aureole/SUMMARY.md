@@ -86,6 +86,9 @@ Working files are in `.heirloom_work/rb_aureole/`: `notes.md`, `proto_final.py`,
    - The slow side `A (1 − u − u²)` is a second-order DDA; the rise `A (1 + (u − 1) S/256)` is a ramp. Both reset
      at the wrap.
    - The output is the larger of the two, clipped to ±A, and negated for a negative Skew.
+   - v0.2.0: a positive Skew takes the SMALLER of the two instead (no negation), with the rise anchored at the
+     trough (start −A). The slow side is `A (1 − (2 − ν) u − ν u²)`, with ν = 1 (the curve above) from
+     |K3 − 512| ≥ 171 and ν → 0 (a straight line) at the centre, so both sides meet in one straight triangle.
 4. **Colour.** `RGB = PC(F) · gc(Z) + PW(F) · gw(Z) + glow(line)`, with per-channel gates:
    - gcR / gcG / gcB reach full at 80 / 110 / 150 px into the cool band;
    - gwR runs from −200 px (0) through the floor (0.44) to +200 px (1); gwG over 0..200 px; gwB over 10..190 px of
@@ -109,7 +112,7 @@ Working files are in `.heirloom_work/rb_aureole/`: `notes.md`, `proto_final.py`,
 |---|---|
 | K1 Width | the bands' spread: the parabola ×0.25 (the core fills the frame) .. ×4 (a narrow core with ten bands); 512 = the clip |
 | K2 Horns | the horn wave's height on both floors: 0 (flat floors) .. ±399 px; 205 = ±80 px, the clip |
-| K3 Skew | the horn wave's shape, bipolar: left = slow rise / sharp fall (the clip at 0.5 s), centre = near-triangle teeth, right = sharp rise / slow fall; 820 = the clip at 7.5 s |
+| K3 Skew | the horn wave's shape, bipolar and continuous (v0.2.0): left = slow rise / sharp fall, horns pointing up (the clip at 0.5 s); the slow side straightens over 341..683 into a straight triangle at 512; right = sharp rise / slow fall, horns pointing down (the clip at 7.5 s, ~820). The trough stays put at every tooth's start, so only the apex slides (u 0.95 -> 0.5 -> 0.06). Captured 304 is unchanged |
 | K4 Speed | bipolar (±8 deadband, square law): the warm cap scrolls down (+) or up (−), 0 .. 12 virtual px per field; 761 = the clip's ~165 px/s |
 | K5 Teeth | horns per screen width, 2 .. 12, linear; 357 = 5.5 (the clip's 350-px period) |
 | K6 Etch | how far the picture (or the Osc lattice) pushes the floor and horns (0 .. ±476 px) and bends the bands (0 .. 119 F); 400 = ±187 px / 47 F |
@@ -284,3 +287,103 @@ unchanged.
 Ron re-dialled and captured again minutes after v0.1.4: K1 Width 851, K2 Horns 118, K3 Skew 304, K4 Speed 179,
 K5 Teeth 1023, P12 Bloom 340 (S7 Palette and S10 Shape stay On; K6 Etch, S8, S9, S11 unchanged). Repacked from the
 same v0.1.3 bitstreams (only the settings block differs).
+
+## v0.2.0: Ron's preview notes (2026-11-21)
+
+Ron (hardware, v0.1.5): "can you make the skew a more smooth control where it doesn't visually flip in a jarring way
+at 50%"
+
+**Cause (a fault).** K3 below 512 negated the whole horn wave (pixel stage 3); from 512 up it did not.
+- At the centre the wave was max(slow curve, fast line), spanning +0.12 A .. +A. One count lower it was the negative
+  of that, −A .. −0.12 A.
+- So crossing 50 %, the floor and both horned edges jumped ~1.1 A in one field (~53 px at the captured Horns 118,
+  ~440 px at full Horns), and the sharp tooth tips turned over from pointing up to pointing down.
+- In the integer model, one knob count at 512 moved every horn pixel by 2 A: 92 px at Horns 118, 798 px at full
+  Horns.
+
+**Change (K3 only; every other control and the HW-captured defaults are unchanged).**
+- **Left half (K3 < 512)** keeps the v0.1.x formula: −max(slow curve, fast line). The trough sits at each tooth's
+  start and the sharp tips point up.
+  - For K3 0..341 it is bit-identical with v0.1.5, so the captured 304 is exactly as Ron dialled it.
+  - Checked in the model: identical wave at every pixel at all three rasters, Horns 118 / 512 / 1023, Teeth 0 / 357 /
+    1023.
+- **Right half (K3 ≥ 512)** takes min(slow curve, fast line) with no negation. The fast line rises from the trough at
+  each tooth's start instead of climbing to +A at its end.
+  - The tooth character is the same as before: a sharp rise, a slow fall that accelerates, and a sharp downward tip.
+  - But the trough stays on the same x and at the same level (−A) as on the left.
+- **The slow side straightens near the centre.** Slow side = `A (1 − (2 − ν) u − ν u²)`, where ν = 1.5 |K3 − 512| / 256,
+  clamped at 1. ν = 1 is the old curve, from |K3 − 512| ≥ 171, i.e. outside K3 341..683.
+  - At 512 both halves are the same straight, symmetric triangle (−A .. 0, apex mid-tooth), so they meet with no step.
+- **Result.** The apex slides continuously across the travel and the trough never moves:
+
+  | K3 | apex position (u) |
+  |---|---|
+  | 0 | 0.95 |
+  | 304 | 0.78 |
+  | 512 | 0.5 |
+  | 720 | 0.26 |
+  | 1023 | 0.06 |
+
+  - The largest per-pixel change for one knob count anywhere is now 2–9 px. These sit on the steep fast side, and in
+    0..341 they are the old knob's own steps.
+  - K3 stays in the shared glide (1/8 per field).
+- **Teeth at the captured knobs** (A = 46 px, Teeth 12):
+
+  | K3 | v0.2.0 | v0.1.x |
+  |---|---|---|
+  | 0 | −46..+39 px | same |
+  | 304 | −46..+19 px | same |
+  | 450 | −46..+6 px | −46..+2 px |
+  | 511 | −46..+1 px | −46..−5 px |
+  | 512 | −46..−1 px | +5..+46 px |
+  | 574 | −46..+9 px | −2..+46 px |
+  | 720 | −46..+31 px | −19..+46 px |
+  | 1023 | −46..+43 px | −39..+46 px |
+
+- **RTL.**
+  - Two more serial-multiplier slots (zc 342 / 366: A inc (2 − ν), (A inc² ≫ 15) ν). Dw0 / Dw2 are stored at 362 / 386,
+    still inside the vblank zone, before the table fill at 600.
+  - The fast line's start (`c_wrst`) is chosen by side.
+  - Pixel stage 1 picks max or min by the skew sign. Its latency is unchanged (C_LAT 24 everywhere).
+  - Widths checked (b_ws / b_wd / b_wr never overflow) in `.heirloom_work/rb_aureole/skew_model.py`, an integer model of
+    the seeds, beam DDAs and stages 1–3. `skew_shapes.py` prints the shape table above. No image sim.
+
+**Judgement calls Ron should know.**
+- The two ends keep their original meaning: left = the clip at 0.5 s (tips up), right = the clip at 7.5 s (tips down).
+  The right half is not simply a mirror of the left, and the centre is a plain straight triangle.
+- The right half sits lower than in v0.1.x, because its trough is now at −A instead of its peak at +A. At 820 the teeth
+  span −46..+37 px instead of −28..+46. Presets and defaults don't use the right half.
+- At the exact centre the teeth are half height (−A..0). The old centre was +0.12..+1 A, so a similar height.
+- The curvature fade happens over K3 341..683. The captured 304 sits outside it on purpose, so it stays exact.
+
+**Resolutions.** Unchanged: the wave runs in virtual px, so SD and 720p show the same tooth shapes. The old caveat
+stands: SD's teeth start at a different phase.
+
+**Build.** v0.2.0, 2026-11-21, through the queue, router1. **All six configs on seed 1.**
+
+| Config | Seed | Post-route Fmax | LC | EBR |
+|---|---|---|---|---|
+| HD Analog | 1 | 85.13 MHz | 7,318 / 7,680 | 21 / 32 |
+| SD Analog | 1 | 82.82 MHz | 7,322 | 21 |
+| HD HDMI | 1 | 78.36 MHz | 7,324 | 21 |
+| SD HDMI | 1 | 76.31 MHz | 7,326 | 21 |
+| HD Dual | 1 | 74.83 MHz (thin, +0.58) | 7,327 | 21 |
+| SD Dual | 1 | 76.37 MHz | 7,334 | 21 |
+
+- 95.3–95.5 % LC: about +100 LC over v0.1.3, above the ~94 % guideline, but it closed on seed 1 everywhere.
+- iceunpack OK ×6.
+- Standalone yosys: +78 LUT, +35 FF, +28 carry.
+
+**HD HDMI pin-skew re-seed (after the build).** `screen.sh aureole` routed hd_hdmi router1 + router2 seeds 1–60, of
+which 84 are timing-clean.
+- **HD HDMI:** the builder's router1 s1 sat at HSYNC +0.90 / data ≤ −1.25, just under the window. Installed
+  **router2 s11 (+1.76 / ≤ −0.88, 80.71 MHz)**, the most positive in the window.
+  - Spare: router2 s27 (+1.66 / ≤ −1.36, 75.13 MHz), at
+    `.heirloom_work/rb_aureole/skew/aureole_v020_spare_hd_hdmi_router2_s27.vmprog`.
+- **HD Analog:** s1's data was ≤ +0.34 (not ≤ −0.6). Installed **router1 s10 (−2.37 / ≤ −1.30, 84.57 MHz)**.
+- **HD Dual:** kept s1 (−2.43 / ≤ −1.73).
+- The replaced bitstreams are in `.heirloom_work/rb_aureole/skew/*_replaced_*.bin`.
+- **A full builder rebuild re-routes seed 1.** Re-install afterwards with
+  `.heirloom_work/skew_tools/install.sh aureole router2 11` and `... router1 10 hd_analog`.
+- Shipped vmprog: `out/rev_b/ron/heirloom/aureole.vmprog` (483,232 bytes). The v0.1.5 backup is in
+  `.heirloom_work/rb_aureole/aureole_v015.*`. NOT flashed yet.
