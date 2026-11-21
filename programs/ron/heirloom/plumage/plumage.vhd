@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Plumage v0.1.0 -- Heirloom phase 3 (video clips), from the clip WIN_20230710_00_15_14 at 1.5 s.
+-- Plumage v0.2.0 -- Heirloom phase 3 (video clips), from the clip WIN_20230710_00_15_14 at 1.5 s.
 --
 -- The still: a fan of curved feathers sweeping up and right from a root at the lower left (near-vertical at
 -- the left, ~30 deg at the right), each with a crisp dark leading edge and banded violet / purple / olive /
@@ -20,7 +20,8 @@
 --          only in the lowest `rows` rows; teeth over feathers over the ground
 --   ground = warm / cool by x inside / outside a 1600-line band that scrolls down, its top boundary lumpy,
 --          torn by per-line vertical jitter; root strip at x < 190
---   tear = per-line horizontal offsets of x, top-left region (grows with P12)
+--   tear = per-line horizontal offsets of x, top-left region (grows with P12); since v0.2.0 the ground, the
+--          root strip and the tooth phase are torn but the feathers are drawn from the untorn x (Ron)
 --
 --   K1  Feathers  number of feathers (G, x0.33 .. x3)            K2  Sweep  curvature (s x2.8 .. x0.35)
 --   K3  Width     feather width (quills .. overlapping plumes)   K4  Speed  bipolar stream / wipe rate
@@ -37,6 +38,7 @@
 -- and 13/16) and the blanking gate.  Generated avid; one latency (32) in every mode; virtual 1080-line
 -- coordinates (SD shows the centre 4:3); colours in the hardware convention (u = Cr, v = Cb).
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- 2026-11-21: v0.2.0, the tear no longer applies to the feathers (Ron)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -297,6 +299,7 @@ architecture plumage of program_top is
     signal q2_ex  : unsigned(1 downto 0) := (others => '0');
     signal q2_px, q3_px, q4_px, q5_px, q6_px : unsigned(1 downto 0) := (others => '0');
     signal q3_xt, q4_xt, q5_xt, q6_xt, q7_xt : signed(13 downto 0) := (others => '0');
+    signal q3_xu  : unsigned(11 downto 0) := (others => '0');     -- untorn x (the feathers ignore the tear)
     signal q4_dx, q5_dx : unsigned(12 downto 0) := (others => '0');
     signal q4_a1  : unsigned(14 downto 0) := (others => '0');
     signal q4_vb  : unsigned(15 downto 0) := (others => '0');
@@ -984,7 +987,6 @@ begin
         variable v_xm  : unsigned(11 downto 0);
         variable v_dxe : signed(13 downto 0);
         variable v_tof : signed(10 downto 0);
-        variable v_t   : signed(13 downto 0);
         variable v_z   : signed(21 downto 0);
         variable v_p   : unsigned(20 downto 0);
         variable v_n1  : unsigned(12 downto 0);
@@ -1018,17 +1020,18 @@ begin
                 when others => v_tof := (others => '0');
             end case;
             q3_xt <= signed(resize(q2_xm, 14)) + resize(v_tof, 14);
+            q3_xu <= q2_xm;
             q3_px <= q2_px;
-            -- 4: dx = x + 280 h (the root at -140 px), clamped; ground boundary address; feather segment and
-            -- tooth phase bases (rings 1, 2); camera luma x gain (nibble partials)
-            v_t := q3_xt + 280;
-            if v_t < 64 then q4_dx <= to_unsigned(64, 13);
-            else q4_dx <= unsigned(v_t(12 downto 0)); end if;
+            -- 4: dx = x + 280 h (the root at -140 px) from the UNTORN x (v0.2.0: the feather lanes, their
+            -- segments and the teeth rows ignore the tear; xm is 0 .. 3839, so dx is 280 .. 4119, no clamp);
+            -- ground boundary address, ground and root (stage 7) and the tooth phase from the torn x; feather
+            -- segment and tooth phase bases (rings 1, 2); camera luma x gain (nibble partials)
+            q4_dx <= resize(q3_xu, 13) + 280;
             if q3_xt < 0 then r_top_a <= (others => '0');
             elsif q3_xt >= 4096 then r_top_a <= (others => '1');
             else r_top_a <= unsigned(q3_xt(11 downto 4)); end if;
             q4_xt <= q3_xt;
-            q4_a1 <= unsigned(resize(q3_xt, 15)) + c_stra(22 downto 8);
+            q4_a1 <= resize(q3_xu, 15) + c_stra(22 downto 8);
             q4_vb <= unsigned(resize(shift_left(resize(q3_xt, 16), 6) - resize(q3_xt, 16), 16)) + c_strb;
             q4_va <= unsigned(s_lb_q) * c_vg(3 downto 0);
             q4_vbl <= unsigned(s_lb_q) * c_vg(7 downto 4);

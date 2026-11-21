@@ -98,7 +98,7 @@ The whole 10.5 s clip was re-extracted at 10 fps (`seq3/`, `warm.py`, `track.py`
 | S9 Sky | Day / Night: warm and cool swap. The frame goes mostly green/teal/navy with a warm band passing through |
 | S10 Root | Below / Above: the fan hangs from the top left and sweeps down |
 | S11 Source | Video / Osc |
-| P12 Tear | 0 = a pristine fan, clean boundaries; 380 = the still (torn top left, streaked sky boundary); 1023 = the whole picture shredded into horizontal streaks (the `00_13_38` liquid look) |
+| P12 Tear | 0 = a pristine fan, clean boundaries; 380 = the still (torn top left, streaked sky boundary); 1023 = the whole picture shredded into horizontal streaks (the `00_13_38` liquid look). Since v0.2.0 the feathers stay intact; the ground, root strip, sky boundary and teeth tear |
 
 **Presets:**
 - Still (the defaults);
@@ -231,3 +231,61 @@ Ron (renders of fern and kiln at K6 = 100 %): bend / element programs get a 25 %
 - **Router note:** router1 hung on SD Analog (seeds 1 and 2 froze at 6021 remaining arcs, the dup-pin ping-pong; the
   netlist has 6 LUTs with two equal inputs in the knob-exponent / glide logic, no CARRY I0 == I1). Router2, the
   default, routed all six. Rebuild with router2.
+
+## v0.2.0: Ron's preview notes (2026-11-21)
+
+Ron (from hardware, v0.1.2): "is it possible to make the tear knob/effect not apply to the feathers"
+
+**P12 Tear: the feathers now ignore it.** The tear is still one per-line x offset added at pixel stage 3 (`q3_xt`), with
+the same draws, gain, region and envelopes as before. The feather path now reads an untorn copy of x instead (`q3_xu`,
+the mirrored x registered alongside; one 12-bit register). The untorn x feeds:
+- dx, so KL = 930 ln(x + 140), Z and the lane coordinate u (the crisp leading edges and the banded blade shading);
+- the feather segment coordinate a (ring 1), so the tips and tapers stream whole.
+
+The feathers therefore draw intact at every Tear position, 1023 included, inside a torn picture. The torn x still
+drives everything else, unchanged:
+- the ground's warm / cool x ramp and its lumpy top boundary;
+- the root strip at the left edge;
+- the tooth phase (ring 2).
+
+The vertical band jitter never used x and is unchanged. dx's clamp is gone: x is now never negative (0..3839 h), so dx is
+280..4119.
+
+**Judgement calls**
+- **Teeth (K5) still tear.** Ron named only the feathers, and the teeth are a separate element on their own knob. Their
+  phase along each row is torn as before. Their row coordinate comes from the same KL as the feathers, which is now
+  untorn, so torn teeth slide sideways inside fixed rows; before, the row curves also wobbled a little. To make the
+  teeth intact too, feed `q4_vb` from `q3_xu` instead of `q3_xt` (one line).
+- **P12 is still bold everywhere on its travel, just not on the feathers.**
+  - The main visible tear is now the warm/cool boundary shredding into streaks. That is the vertical jitter: up to about
+    ±170 lines on the big-draw line pairs at the still (380) and about ±460 at 1023. It is at full strength over the
+    top ~290 lines, fades to 1/8 by line ~740 and stays at 1/8 below.
+  - The root strip's edge goes jagged and the boundary lumps tear.
+  - Above 380 the tear region grows to the whole frame and tears the teeth.
+  - The ground itself is a smooth x ramp in 32-px steps, so its horizontal tear reads only as faint streaks in flat
+    ground: about ±1 colour step at the still and ±3 at 1023 (sd ±15 / ±100 px at 1080).
+- **The "Liquid" preset** (P12 1023) is now intact feathers over a shredded sky and ground, no longer everything
+  liquid. The name and values are kept.
+- The HW-captured defaults and every other control are unchanged.
+
+**Resolutions.** Unchanged: the tear and the untorn x are both in virtual h units, so 720p shows the same picture as
+1080p. SD still shows the centre 4:3, as before.
+
+**Build.** Router2, the program's router (router1 hangs on SD Analog), `MAKE_TIMEOUT=900 .heirloom_work/vid/build_queue.sh plumage`:
+- **6/6 on seed 1.** HD Analog no longer needs seed 2.
+- Post-route Fmax: HD Analog 82.40, SD Analog 75.59, HD HDMI 80.40, SD HDMI 79.22, HD Dual 86.06, SD Dual 72.08 MHz.
+- 7158–7198 / 7680 LC (94 %), 23 / 32 EBR. iceunpack OK × 6. The packed config reads v0.2.0.
+- Backups of v0.1.2 (vhd, toml, vmprog): `.heirloom_work/rb_plumage/plumage_v012.*`.
+
+**HD HDMI re-seed (the HSYNC placement skew, after the v0.2.0 build).** `.heirloom_work/skew_tools/screen.sh plumage`:
+hd_hdmi router1 + router2 s1-60, 102 routed, 85 timing-clean.
+- **The builder's HD HDMI router2 s1 had a negative HSYNC** (−0.52 / data ≤ −1.48), the known-bad side.
+- **Shipped HD HDMI router2 s5: HSYNC +1.61 / data ≤ −1.57, 80.47 MHz.** This is the most positive seed in the
+  +1.0..+2.3 window.
+- **Spare: router2 s19** (+1.11 / ≤ −1.68, 85.34 MHz), at
+  `.heirloom_work/rb_plumage/skew/plumage_v020_spare_hd_hdmi_router2_s19.vmprog`.
+- **HD Analog and HD Dual keep the builder's router2 s1** (re-routed byte-identical). HD Analog is at +1.52 / ≤ −1.20
+  and HD Dual at −1.59 / ≤ −1.26; both have data ≤ −0.6.
+- **A full builder rebuild re-routes HD HDMI on seed 1**, the negative HSYNC. After any rebuild, re-run the screen
+  and `.heirloom_work/skew_tools/install.sh plumage router2 5`, or re-install the equivalent seed.
+- Record which of s5 and the s19 spare Ron finds clean.
