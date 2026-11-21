@@ -1,17 +1,16 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Yolk v0.1.0 -- Heirloom (video phase), from the clip WIN_20240111_01_01_24 at 0.5 s.
+-- Yolk v0.2.0 -- Heirloom (video phase), from the clip WIN_20240111_01_01_24 at 0.5 s.
 --
 -- The still: a row of four red eggs with black yolks across the middle (x 320, 726, 1240, 1663: mirrored about
 -- x 993), yellow between them going green on the right, under a band of white flames with magenta U-lines and
 -- over a band of white lens rings drawn in magenta (static bands: y < 264 and y >= 770), the left 90 px torn into
--- horizontal colour bars and every key edge broken into dashes.  In the clip the egg rows rise (~160 lines/s, one
+-- horizontal colour bars (dropped in v0.2.0: Ron saw it as a glitch) and every key edge broken into dashes.  In the clip the egg rows rise (~160 lines/s, one
 -- row every 6.5 s) while the white bands stay put.
 --
 -- The patch, as fitted (yolk.py has every table):
---   T      = mirrored H triangle (period 425 px), 0 on the egg columns, a half-depth notch at the centre, held at
---            its x = 90 value at the line start
+--   T      = mirrored H triangle (period 425 px), 0 on the egg columns, a half-depth notch at the centre
 --   VG, VR = the vertical waves of the G and R mixes (one 1055-line period, rolling)
 --   F_G    = T Gm + (VG - cK) gm + cK - yolk       F_R = (T Gm + (VR - c0) gm - yolk) * lean(x) + c0
 --   key    = static window (top / bottom bands) and F_G' > cK  -> the white layer (W gain = sqrt of the Rings gain)
@@ -52,7 +51,6 @@ architecture yolk of program_top is
     constant C_LAT : integer := 20;   -- = processing_delay_clks
 
     constant C_XC2  : integer := 1987;        -- mirror centre (h = half virtual px)
-    constant C_XLH  : integer := 180;         -- line-start hold (90 px)
     constant C_KH0  : integer := 19738;       -- 2^24 / 850 h: H phase per h at the still's period
     constant C_KV0  : integer := 15903;       -- 2^24 / 1055: V phase per virtual line
     constant C_UC   : integer := 6559891;     -- 0.391 * 2^24: H phase at the centre
@@ -163,7 +161,7 @@ architecture yolk of program_top is
     signal c_kh   : unsigned(15 downto 0) := to_unsigned(C_KH0, 16);   -- H phase per h
     signal c_kv   : unsigned(15 downto 0) := to_unsigned(C_KV0, 16);   -- V phase per virtual line
     signal c_gm   : unsigned(10 downto 0) := to_unsigned(256, 11);     -- Rings gain (Q8)
-    signal c_xst  : unsigned(11 downto 0) := to_unsigned(C_XLH, 12);   -- first stepped x (h)
+    signal c_xst  : unsigned(11 downto 0) := (others => '0');          -- first stepped x (h): the first pixel
     signal c_a0   : signed(28 downto 0) := (others => '0');            -- H acc at c_xst
     signal c_ks   : unsigned(17 downto 0) := (others => '0');          -- H acc step per pixel
     signal c_scr  : unsigned(23 downto 0) := (others => '0');          -- scroll phase
@@ -213,10 +211,7 @@ architecture yolk of program_top is
     signal e_ln   : std_logic := '0';
     signal e_l4   : unsigned(1 downto 0) := (others => '0');
     signal e_seed : unsigned(15 downto 0) := to_unsigned(1, 16);
-    signal e_brs  : unsigned(15 downto 0) := to_unsigned(77, 16);
     signal e_srs  : unsigned(15 downto 0) := to_unsigned(99, 16);
-    signal e_bct  : signed(13 downto 0) := (others => '0');            -- bar band: Q8 virtual lines left
-    signal e_bar  : signed(10 downto 0) := (others => '0');
     signal e_sct  : signed(14 downto 0) := (others => '0');            -- slip band: Q8 virtual lines left
     signal e_sh   : signed(10 downto 0) := (others => '0');            -- slip shift (h)
     signal e_vg, e_vr : signed(11 downto 0) := (others => '0');
@@ -228,7 +223,6 @@ architecture yolk of program_top is
     signal n_a0   : signed(28 downto 0) := (others => '0');
     signal n_dt, n_db : signed(6 downto 0) := (others => '0');
     signal n_seed : unsigned(15 downto 0) := to_unsigned(1, 16);
-    signal n_bar  : signed(10 downto 0) := (others => '0');
 
     -- beam (stage 1)
     signal b_x    : unsigned(11 downto 0) := (others => '0');
@@ -236,15 +230,12 @@ architecture yolk of program_top is
     signal b_acc  : signed(28 downto 0) := (others => '0');
     signal b_ga   : unsigned(7 downto 0) := (others => '0');            -- R lean: x / 240 h
     signal b_gk   : unsigned(3 downto 0) := (others => '0');
-    signal b_hold : std_logic := '0';
     signal b_lf   : unsigned(15 downto 0) := to_unsigned(1, 16);
     signal b_rc   : signed(8 downto 0) := (others => '0');
     signal b_n    : signed(9 downto 0) := (others => '0');
     signal l_vgm, l_vr : signed(15 downto 0) := (others => '0');
     signal l_dt, l_db : signed(6 downto 0) := (others => '0');
-    signal l_bar  : signed(10 downto 0) := (others => '0');
     signal l_inv  : std_logic := '0';
-    signal p6_h, p7_h : std_logic := '0';
 
     -- pixel path
     type t_u8 is array (natural range <>) of unsigned(7 downto 0);
@@ -254,7 +245,6 @@ architecture yolk of program_top is
     signal p2_aa  : unsigned(27 downto 0) := (others => '0');
     signal p2_n, p3_n, p4_n, p5_n : signed(9 downto 0) := (others => '0');
     signal p2_ns  : signed(6 downto 0) := (others => '0');
-    signal p2_h, p3_h, p4_h, p5_h : std_logic := '0';
     signal p3_u   : unsigned(23 downto 0) := (others => '0');
     signal p3_pl, p3_win : std_logic := '0';
     signal p3_ls0, p3_ls1 : unsigned(8 downto 0) := (others => '0');
@@ -515,7 +505,7 @@ begin
                     when 20 =>
                         if s_vneg = '1' then c_scr <= c_scr - resize(c_spd, 24);
                         else c_scr <= c_scr + resize(c_spd, 24); end if;
-                        if s_x0 > C_XLH then c_xst <= resize(s_x0, 12); else c_xst <= to_unsigned(C_XLH, 12); end if;
+                        c_xst <= resize(s_x0, 12);   -- v0.2.0: no left-edge hold zone, T runs from the first pixel
                     when 28 =>                        -- eggs: a = |k1 - 512|
                         v_s := signed(resize(s_g1(12 downto 3), 11)) - 512;
                         z_neg <= v_s(10); v_ab := abs(v_s); z_a <= unsigned(v_ab(9 downto 0));
@@ -715,9 +705,7 @@ begin
                 e_lc <= (others => '0');
                 e_ln <= '0'; e_l4 <= "00";
                 e_seed <= c_fc xor x"5a3c";
-                e_brs  <= f_xs16(c_fc + 77);
                 e_srs  <= c_ssd;
-                e_bct  <= (others => '0');
                 e_sct  <= (others => '0');
             elsif g_start = '1' then
                 e_vy <= e_vy + resize(s_ys, 19);
@@ -737,18 +725,6 @@ begin
                     if s_mir = '1' and e_vy > 138240 then e_vf <= 276480 - e_vy; else e_vf <= e_vy; end if;
                     -- noise seed: a new one every fourth line
                     if e_l4 = "00" then e_seed <= f_xs16(e_seed); end if;
-                    -- bar band (6 .. 37 virtual lines, changing on even lines only): a new offset when it runs out
-                    if e_ln = '0' then e_brs <= f_xs16(e_brs); end if;
-                    if e_ln = '1' then
-                        null;
-                    elsif e_bct <= 0 then
-                        e_bct <= signed(resize(shift_left(resize(e_brs(4 downto 0), 13), 8), 14))
-                                 + to_signed(1536, 14) - signed(resize(s_ys, 14));
-                        v_i := signed(resize(e_brs(15 downto 8), 10)) + signed(resize(e_brs(7 downto 0), 10)) - 255;
-                        e_bar <= resize(shift_left(resize(v_i, 11), 2), 11);
-                    else
-                        e_bct <= e_bct - signed(resize(s_ys & '0', 14));
-                    end if;
                     -- slip band (16 .. 79 virtual lines, changing on even lines only)
                     if e_ln = '0' then e_srs <= f_xs16(e_srs); end if;
                     if e_ln = '1' then
@@ -777,7 +753,6 @@ begin
                         else n_db <= v_w(6 downto 0); end if;
                     end if;
                     n_seed <= e_seed;
-                    n_bar  <= e_bar;
                 when 19 =>
                     v_r := m_acc(31 downto 16) + c_ps(23 downto 8);
                     r_v_a <= v_r(15 downto 7);
@@ -817,8 +792,8 @@ begin
     end process p_line;
 
     ---------------------------------------------------------------------------
-    -- Beam: x (h), the H accumulator acc = (x - XC2) KH (held left of the
-    -- hold point; |acc| is the mirrored phase), the R lean level (x / 240 h,
+    -- Beam: x (h), the H accumulator acc = (x - XC2) KH from the first pixel
+    -- (|acc| is the mirrored phase), the R lean level (x / 240 h,
     -- 16 steps), the noise runs (an xorshift per pixel, a new value every
     -- 8 .. 39 virtual px; the seed is held for 4 lines)
     ---------------------------------------------------------------------------
@@ -834,17 +809,15 @@ begin
                 b_acc <= n_a0;
                 b_ga  <= (others => '0');
                 if s_x0 = 0 then b_gk <= (others => '0'); else b_gk <= to_unsigned(2, 4); end if;
-                if s_x0 < C_XLH then b_hold <= '1'; else b_hold <= '0'; end if;
                 b_lf  <= n_seed;
                 b_rc  <= (others => '0');
                 b_n   <= (others => '0');
                 l_vgm <= n_vgm; l_vr <= n_vr;
-                l_dt <= n_dt; l_db <= n_db; l_bar <= n_bar; l_inv <= s_inv;
+                l_dt <= n_dt; l_db <= n_db; l_inv <= s_inv;
             elsif g_avid = '1' then
                 b_px <= b_px + 1;
                 b_x  <= b_x + s_xs;
                 if b_x + s_xs > c_xst then b_acc <= b_acc + signed(resize(c_ks, 29)); end if;
-                if b_x + s_xs < C_XLH then b_hold <= '1'; else b_hold <= '0'; end if;
                 v_ga := resize(b_ga, 9) + s_xs;
                 if v_ga >= 240 then
                     b_ga <= resize(v_ga - 240, 8);
@@ -897,7 +870,6 @@ begin
             p2_n  <= b_n;
             if b_n > 48 then v_ns := to_signed(48, 10); elsif b_n < -48 then v_ns := to_signed(-48, 10); else v_ns := b_n; end if;
             p2_ns <= resize(shift_right(v_ns, 2), 7);
-            p2_h  <= b_hold;
             p_gk(2) <= b_gk;
             for i in 3 to 9 loop p_gk(i) <= p_gk(i - 1); end loop;
             if s_gav_sr(0) = '1' then p_lm(0) <= unsigned(s_lb_q);
@@ -908,7 +880,7 @@ begin
             if p2_aa < C_CPL then p3_pl <= '1'; else p3_pl <= '0'; end if;
             if p2_ns < l_dt or p2_ns >= l_db then p3_win <= '1'; else p3_win <= '0'; end if;
             p3_ls0 <= resize(p_lm(0), 9) + p_lm(1); p3_ls1 <= resize(p_lm(2), 9) + p_lm(3);
-            p3_h <= p2_h; p3_n <= p2_n;
+            p3_n <= p2_n;
             -- 4: T (0 on the egg columns, 1023 between), half-depth notch at the centre; the yellow-strip band
             if p3_u(23) = '0' then v_t := p3_u(22 downto 13); else v_t := not p3_u(22 downto 13); end if;
             if p3_pl = '1' then v_t := resize(shift_right(resize(v_t, 11) + 1023, 1), 10); end if;
@@ -916,7 +888,7 @@ begin
             if v_t >= 676 and v_t < 819 then p_st(4) <= '1'; else p_st(4) <= '0'; end if;
             for i in 5 to 14 loop p_st(i) <= p_st(i - 1); end loop;
             p4_ls <= resize(p3_ls0, 10) + p3_ls1;
-            p4_h <= p3_h; p4_n <= p3_n;
+            p4_n <= p3_n;
             p_win(4) <= p3_win;
             for i in 5 to 9 loop p_win(i) <= p_win(i - 1); end loop;
             -- 5: T gm partial products; luma (camera adds: black = the still; the Osc: centred)
@@ -924,36 +896,25 @@ begin
             p5_p1b <= resize(p4_t * c_gm(10 downto 6), 15);
             if s_src = '1' then p5_lm <= signed(resize(p4_ls(9 downto 2), 9)) - 110;
             else p5_lm <= signed(resize(p4_ls(9 downto 2), 9)); end if;
-            p5_h <= p4_h; p5_n <= p4_n;
-            -- 6: product; etch partials (|luma| x gain); noise / bar terms (the hold zone: the bar offset only)
+            p5_n <= p4_n;
+            -- 6: product; etch partials (|luma| x gain); noise terms
             p6_p1 <= resize(p5_p1a, 21) + shift_left(resize(p5_p1b, 21), 6);
             v_al := abs(p5_lm);
             p6_ea <= unsigned(v_al(7 downto 0)) * c_em;
             p6_en <= p5_lm(8);
-            p6_h <= p5_h;
             v_ng := resize(p5_n, 12);
             if p_win(5) = '0' then v_ng := shift_right(v_ng, 2) + shift_right(v_ng, 4); end if;
-            if p5_h = '1' then
-                p6_bg <= resize(l_bar, 12);
-                p6_br <= resize(l_bar, 12);
-            else
-                p6_bg <= v_ng;
-                p6_br <= shift_right(resize(p5_n, 12), 2);
-            end if;
+            p6_bg <= v_ng;
+            p6_br <= shift_right(resize(p5_n, 12), 2);
             -- 7: E = +-(luma gain) >> 8; T gm >> 8 (Q10)
             v_e21 := shift_left(resize(p6_ea, 22), to_integer(c_ee));
             v_es := signed(resize(v_e21(21 downto 8), 16));
             if p6_en = '1' then v_es := -v_es; end if;
             p7_e  <= v_es(13 downto 0);
             p7_p1 <= signed(resize(p6_p1(20 downto 8), 16));
-            p7_bg <= p6_bg; p7_br <= p6_br; p7_h <= p6_h;
-            -- 8: T term + the line terms (the hold zone: the held T and the bar offset only, so its bars change on
-            -- line pairs and are 2 rows at least); E + noise / bar
-            if p7_h = '1' then
-                p8_qgm <= p7_p1; p8_qr <= p7_p1;
-            else
-                p8_qgm <= p7_p1 + l_vgm; p8_qr <= p7_p1 + l_vr;
-            end if;
+            p7_bg <= p6_bg; p7_br <= p6_br;
+            -- 8: T term + the line terms; E + noise
+            p8_qgm <= p7_p1 + l_vgm; p8_qr <= p7_p1 + l_vr;
             p8_eg <= resize(p7_e, 16) + resize(p7_bg, 16);
             p8_er <= resize(p7_e, 16) + resize(p7_br, 16);
             -- 9: the fields

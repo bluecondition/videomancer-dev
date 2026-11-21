@@ -190,3 +190,25 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 - **Change.** Slot 434: the camera's c_eg = old + old / 4, max 2095 (was 1676). E reaches 2071; the Osc already reaches 5655, so the downstream widths hold it. The Osc keeps its x6 (now 4.8x the camera). Per-field arithmetic only; the latency is unchanged.
 - **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_yolk/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
 - **Build (v0.1.2):** router1, seed 1 except SD HDMI seed 4 (`.kinetic_work/tools/k6build.sh heirloom yolk`). Post-route Fmax: HD Analog 80.17, HD HDMI 85.97, HD Dual 83.10 (worst HD 80.17), SD Analog 75.24, SD HDMI 76.56, SD Dual 79.16 MHz. Up to 6902 / 7680 LC. SD HDMI stalled router1 on seeds 1-3 (timeout); seed 4 routed. The build netlist has 0 `CARRY I0==I1` (`dupin.py`; one LUT with a doubled input, `p5_n[8]`, which is old and also in HD HDMI, which routed on seed 1). v0.1.0 also stalled once, on router2.
+
+## v0.2.0: Ron's preview notes (2026-11-20)
+
+Ron (Heirloom Preview Queue, rework on v0.1.0, from hardware): "left 5% of the screen is a glitchy block of horizontal
+lines".
+
+- **Cause: the deliberate left-edge tear, not a timing fault.** The still's left 90 px are torn into horizontal colour
+  bars by the camera, and v0.1 modelled that. For x < 90 virtual px (`b_hold`, C_XLH = 180 h; 90 / 1920 = 4.7 %, Ron's
+  "5 %"), the pixel path dropped the line terms and the noise and drew the held T (the H accumulator frozen at its
+  x = 90 value) plus `l_bar`, a random offset of up to ±1020 from an xorshift that changed every 6–37 virtual lines
+  and kept running from field to field. That is a 90-px block of random-coloured bars that changes every frame.
+  At SD the block was never drawn: the SD crop starts at x0 = 480 h, past the hold point.
+- **Fix: the hold zone is gone.** The H accumulator now starts at the first pixel (c_xst = x0, a0 = (x0 − XC2)·KH, at
+  most 1987 · 65535 = 1.3e8, inside its 28-bit slice), `b_hold` and the p2..p7 hold flags are removed, and the bar-band
+  engine (e_brs / e_bct / e_bar / n_bar / l_bar) is deleted. The left 90 px now carry the same field as the rest
+  of the frame: the egg columns continue to the edge (the left egg at x 320 grows its full left half), with the
+  line terms, the keyed white bands, the dashes and the camera. Same latency in every mode; SD is unchanged.
+  The "Left-edge bars" deviation above no longer applies.
+- **Build** v0.2.0, router1, all six seed 1 (v0.1.2 needed seed 4 on SD HDMI): HD Analog 86.27, HD HDMI 87.48,
+  HD Dual 88.29 MHz (worst HD 86.27); SD 83.25 / 79.23 / 83.69 MHz. 6639–6664 / 7680 LC (−240 vs v0.1.2), 23 / 32 EBR;
+  iceunpack OK ×6. Not simulated (the cause is explicit in the RTL), not flashed. v0.1.2's VHDL and vmprog are in
+  `.heirloom_work/rb_yolk/` (`yolk_v012.*`).
