@@ -25,7 +25,11 @@
 --   K2  Rows      V oscillator rate: butterfly rows (x0.25 .. x8)
 -- 2026-11-20 v0.2.0 (Ron's preview notes): K1 / K2 ranges doubled both ways (-2 / +3 octaves, were -1 / +1.585)
 --   K3  Hearts    heart size: small lobes in rings (0) .. the still (512) .. hearts swallowing the diamonds (1023)
---   K4  Flap      wing beat: the lenses open while the hearts shrink, and back (0 = still, as in the clip)
+--   K4  Flap      wing position (performance): folded (0: slim lenses, big hearts) .. the still (512, +-8 deadband)
+--                 .. open (1023: lenses x1.41, hearts shrink), through a sine-like curve and a 2-stage glide
+-- 2026-11-21 v0.3.0 (Ron's preview notes): Flap is a performance control.  The triangle LFO (rate = K4^2) is gone;
+--   the knob sets the wing position directly: pos = +-256 (1.5 x - 0.5 x^3), x = (|k - 512| - 8) / 504, so the
+--   wings ease into both ends with no corner; K4 runs through the shared glide twice (an S-shaped glide).
 --   K5  Rings     band weight of every ring: wide soft bands (0) .. the still .. hairlines (1023)
 --   K6  Bend      how far the camera (or the Osc, 16x and centred) bends the rings
 --   S7  Echo      Off (the still) / On: every magenta field repeats the ring sequence
@@ -159,8 +163,9 @@ architecture butterfly of program_top is
     signal s_gp : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
-    signal s_gr : unsigned(9 downto 0) := (others => '0');
-    signal s_k4 : unsigned(9 downto 0) := (others => '0');
+    signal s_gr : unsigned(12 downto 0) := (others => '0');
+    signal s_g4a : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K4 glide, first stage
+    signal s_g4  : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K4 glide, second stage (S-shaped)
     signal s_echo, s_mix, s_pal, s_twin, s_src : std_logic := '0';
 
     -- per-field constants
@@ -175,9 +180,12 @@ architecture butterfly of program_top is
     signal z_lfa  : signed(10 downto 0) := (others => '0');
     signal z_lfb  : signed(12 downto 0) := (others => '0');
     signal z_d3   : signed(10 downto 0) := (others => '0');
-    signal s_lph  : unsigned(15 downto 0) := (others => '0');       -- flap LFO phase
-    signal s_lfo  : signed(9 downto 0) := (others => '0');          -- -256 .. 255
-    signal c_lstep : unsigned(11 downto 0) := (others => '0');
+    signal s_flap : signed(9 downto 0) := (others => '0');          -- wing position -256 .. 256 (0 = the still)
+    signal s_fneg : std_logic := '0';
+    signal c_fa   : unsigned(8 downto 0) := (others => '0');        -- a' = |k4 - 512| - 8, scaled to 0 .. 511
+    signal c_f3   : unsigned(10 downto 0) := (others => '0');       -- 3 a' (<= 1533)
+    signal c_fsq  : unsigned(9 downto 0) := (others => '0');        -- a'^2 >> 8 (<= 1020)
+    signal c_fpos : unsigned(8 downto 0) := (others => '0');        -- (3 a' - a'^3 >> 18) >> 2 (0 .. 256)
     signal c_kstep : unsigned(18 downto 0) := to_unsigned(17848, 19);
     signal c_phx0 : unsigned(23 downto 0) := (others => '0');
     signal c_kys  : unsigned(20 downto 0) := to_unsigned(31987, 21);
@@ -358,7 +366,7 @@ begin
         variable v_s  : signed(14 downto 0);
         variable v_k  : std_logic_vector(31 downto 0);
         variable v_l  : signed(9 downto 0);
-        variable v_ph : unsigned(15 downto 0);
+        variable v_f  : unsigned(10 downto 0);   -- flap curve
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -388,7 +396,6 @@ begin
                 if s_hcnt > s_wmax then s_wmax <= s_hcnt; end if;
                 s_hcnt <= (others => '0');
             end if;
-            s_k4 <= unsigned(registers_in(3));
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
@@ -407,23 +414,26 @@ begin
             g_wm1 <= s_w - 1;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
 
-            -- shared glide (1/8 of the gap per field, +-2 deadband): four clocks per channel
+            -- shared glide (1/8 of the gap per field, +-2 deadband): four clocks per channel; K4 runs twice
+            -- (channel 6 follows the knob, channel 7 follows channel 6), so the wings start and stop gently
             if s_zgo = '1' then
                 z_gp <= "00"; z_gc <= "000"; z_grun <= '1';
             elsif z_grun = '1' then
                 case z_gp is
                     when "00" =>
                         case to_integer(z_gc) is
-                            when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
-                            when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
-                            when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
-                            when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
+                            when 0      => s_gm <= s_g1;  s_gr <= unsigned(registers_in(0)) & "000";
+                            when 1      => s_gm <= s_g2;  s_gr <= unsigned(registers_in(1)) & "000";
+                            when 2      => s_gm <= s_g3;  s_gr <= unsigned(registers_in(2)) & "000";
+                            when 3      => s_gm <= s_g5;  s_gr <= unsigned(registers_in(4)) & "000";
+                            when 4      => s_gm <= s_g6;  s_gr <= unsigned(registers_in(5)) & "000";
+                            when 5      => s_gm <= s_gp;  s_gr <= unsigned(registers_in(7)) & "000";
+                            when 6      => s_gm <= s_g4a; s_gr <= unsigned(registers_in(3)) & "000";
+                            when others => s_gm <= s_g4;  s_gr <= s_g4a;
                         end case;
                         z_gp <= "11";
                     when "11" =>
-                        s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
+                        s_gd <= signed(resize(s_gr, 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
                         if s_gd > 16 or s_gd < -16 then
@@ -439,10 +449,12 @@ begin
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 5      => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 6      => s_g4a <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when others => s_g4 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 5 then z_grun <= '0'; end if;
+                        if z_gc = 7 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -468,6 +480,7 @@ begin
                     when 342 => z_sel <= to_unsigned(13, 5); z_pre <= '1';
                     when 366 => z_sel <= to_unsigned(14, 5); z_pre <= '1';
                     when 390 => z_sel <= to_unsigned(15, 5); z_pre <= '1';
+                    when 414 => z_sel <= to_unsigned(16, 5); z_pre <= '1';
                     when others => null;
                 end case;
             end if;
@@ -493,11 +506,12 @@ begin
                     when 8  => z_fa <= to_unsigned(150, 36);            z_fb <= z_mt;                      -- k1q
                     when 9  => z_fa <= to_unsigned(209, 36);            z_fb <= z_mt;                      -- g2q
                     when 10 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(204, 16);     -- P12 wings
-                    when 11 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(89, 16);      -- |lfo| * 89
-                    when 12 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(819, 16);     -- |lfo| * 819
+                    when 11 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(89, 16);      -- |flap| * 89
+                    when 12 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(819, 16);     -- |flap| * 819
                     when 13 => z_fa <= resize(s_g6(12 downto 3), 36);   z_fb <= resize(s_g6(12 downto 3), 16);  -- bend^2
-                    when 14 => z_fa <= resize(s_k4, 36);                z_fb <= resize(s_k4, 16);          -- flap^2
-                    when others => z_fa <= resize(c_gq, 36);            z_fb <= to_unsigned(111, 16);      -- Osc centre
+                    when 14 => z_fa <= resize(c_fa, 36);                z_fb <= resize(c_fa, 16);          -- a'^2
+                    when 15 => z_fa <= resize(c_gq, 36);                z_fb <= to_unsigned(111, 16);      -- Osc centre
+                    when others => z_fa <= resize(c_fsq, 36);           z_fb <= resize(c_fa, 16);          -- (a'^2 >> 8) a'
                 end case;
             end if;
             if z_ld = '1' then
@@ -511,16 +525,6 @@ begin
 
             if s_zone = '1' then
                 case to_integer(s_zc) is
-                    -- flap LFO: advance by last field's step, triangle -256 .. 255
-                    when 10 =>
-                        s_lph <= s_lph + resize(c_lstep, 16);
-                    when 11 =>                                -- a quarter period ahead, so phase 0 = rest (0)
-                        v_ph := s_lph + 16384;
-                        if v_ph(15) = '0' then
-                            s_lfo <= signed(resize(v_ph(14 downto 6), 10)) - 256;
-                        else
-                            s_lfo <= 255 - signed(resize(v_ph(14 downto 6), 10));
-                        end if;
                     when 12 =>
                         -- K1: d = k - 512; down = d (two octaves, x0.25), up = d * 385 / 256 (3 octaves, x8)
                         v_d := signed(resize(s_g1(12 downto 3), 11)) - 512;
@@ -604,9 +608,9 @@ begin
                     when 290 =>
                         if z_neg = '1' then z_l0p <= -signed(resize(f_acc(17 downto 8), 13));
                         else z_l0p <= signed(resize(f_acc(17 downto 8), 13)); end if;
-                        z_neg <= s_lfo(9);
-                        if s_lfo(9) = '1' then z_a <= resize(unsigned(-s_lfo), 16);
-                        else z_a <= resize(unsigned(s_lfo), 16); end if;
+                        z_neg <= s_flap(9);                  -- last field's wing position (one field behind: glided)
+                        if s_flap(9) = '1' then z_a <= resize(unsigned(-s_flap), 16);
+                        else z_a <= resize(unsigned(s_flap), 16); end if;
                     when 314 =>
                         if z_neg = '1' then z_lfa <= -signed(resize(f_acc(16 downto 8), 11));
                         else z_lfa <= signed(resize(f_acc(16 downto 8), 11)); end if;
@@ -620,22 +624,41 @@ begin
                         else z_d3 <= v_d + 8; end if;
                     when 339 =>
                         c_l0 <= to_signed(C_LN174, 13) + z_l0p + resize(z_lfa, 13);
-                        -- off = -d3 * 5 - (p - 512) * 3 + lfo * 819 / 256
+                        -- off = -d3 * 5 - (p - 512) * 3 + flap * 819 / 256
                         v_d := signed(resize(s_gp(12 downto 3), 11)) - 512;
                         v_s := z_lfb - resize(shift_left(resize(z_d3, 15), 2) + resize(z_d3, 15), 15)
                                - resize(shift_left(resize(v_d, 15), 1) + resize(v_d, 15), 15);
                         if v_s > 4095 then c_off <= to_signed(4095, 13);
                         elsif v_s < -4095 then c_off <= to_signed(-4095, 13);
                         else c_off <= v_s(12 downto 0); end if;
+                    -- K4 Flap: d = k - 512, +-8 deadband, a = |d| - 8 (0 .. 504), a' = a + a / 64 (0 .. 511)
+                    when 340 =>
+                        v_d := signed(resize(s_g4(12 downto 3), 11)) - 512;
+                        s_fneg <= v_d(10);
+                        if v_d > -8 and v_d < 8 then c_fa <= (others => '0');
+                        elsif v_d(10) = '1' then c_fa <= resize(unsigned(-v_d - 8), 9);
+                        else c_fa <= resize(unsigned(v_d - 8), 9); end if;
+                    when 341 =>
+                        c_fa <= c_fa + shift_right(c_fa, 6);
+                    when 342 =>                               -- 3 a' (<= 1533)
+                        c_f3 <= shift_left(resize(c_fa, 11), 1) + resize(c_fa, 11);
                     when 362 =>                               -- bend gain = k6^2 >> 13 (Osc: x16, centred)
                         if s_src = '1' then
                             if f_acc(20 downto 17) /= "0000" then c_gq <= (others => '1'); else c_gq <= f_acc(16 downto 9); end if;
                         else                                  -- x1.25 (K6 top +25 %): max 127 + 31 = 158
                             c_gq <= f_acc(20 downto 13) + resize(f_acc(20 downto 15), 8);
                         end if;
-                    when 386 => c_lstep <= f_acc(20 downto 9);                 -- flap step = k4^2 >> 9
+                    when 386 => c_fsq <= f_acc(17 downto 8);                   -- a'^2 >> 8 (<= 1020)
                     when 410 =>                               -- Osc: subtract its mid level (111) so it bends both ways
                         if s_src = '1' then c_moff <= f_acc(14 downto 7); else c_moff <= (others => '0'); end if;
+                    -- wing position = +-256 (1.5 x - 0.5 x^3), x = a' / 512: sine-like, zero slope at both ends.
+                    -- Q2: (3 a' - ((a'^2 >> 8) a' >> 10)) >> 2; monotone over the whole travel
+                    when 434 =>
+                        v_f := c_f3 - f_acc(18 downto 10);    -- (a'^2 >> 8) a' <= 521220: >> 10 <= 509
+                        c_fpos <= v_f(10 downto 2);
+                    when 435 =>
+                        if s_fneg = '1' then s_flap <= -signed(resize(c_fpos, 10));
+                        else s_flap <= signed(resize(c_fpos, 10)); end if;
                     when others => null;
                 end case;
             end if;

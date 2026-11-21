@@ -97,7 +97,7 @@ Working files are in `.heirloom_work/rb_butterfly/`: `notes.md`, `axes.py`, `edg
 | K1 Columns | the H oscillator: butterflies across, ×0.5 (one giant lens) .. ×1 (2.04, the still, 512) .. ×3 (six across); the cell keeps its shape |
 | K2 Rows | the V oscillator: butterfly rows, ×0.5 (tall diamonds, one lens row) .. the still .. ×3 (flat lenses stacked six deep) |
 | K3 Hearts | the hearts' size (F2 offset, ±2.5 palette units, ±8 deadband): small lobes wrapped in extra rings (0) .. the still (512) .. hearts swallowing the diamonds, which shrink to dots (1023) |
-| K4 Flap | the wing beat (triangle LFO, square law): 0 = still, as in the clip; full = 1.9 Hz; the lenses open while the hearts shrink |
+| K4 Flap | (v0.3.0: performance) the wing position, sine-like curve, 2-stage glide: 0 = folded (lenses x0.71, hearts +0.8 units) .. 512 = the still (±8 deadband) .. 1023 = open (lenses x1.41, hearts −0.8 units); no LFO |
 | K5 Rings | band weight of every ring, lens bands and heart rings together (gain on both fields, ×0.54 .. ×2.46): wide soft bands (0) .. the still (512) .. hairlines between flooded magenta (1023) |
 | K6 Bend | how far the smoothed camera (or the Osc) bends the rings, square law: 0 .. 217 G per full luma; the default 224 (gain 6/128) bends the bands as clean curves; 600 a strong bend; 1023 shreds the rings into the picture |
 | S7 Echo | Off (the still) / On: every magenta field repeats the ring sequence (lens interiors go dark with magenta outlines) |
@@ -263,3 +263,47 @@ Ron (Heirloom Preview Queue, rework on v0.1.1): "more range on K1 and K2 on both
 - **Build** v0.2.0, router1, all six seed 1: HD Analog 95.17, HD HDMI 92.74, HD Dual 84.25 MHz (worst HD 84.25);
   SD 88.05 / 90.62 / 91.72 MHz. 7084–7107 / 7680 LC (+50), 20 / 32 EBR; iceunpack OK ×6. Not simulated, not flashed.
   v0.1.3's VHDL, TOML and vmprog are in `.heirloom_work/rb_butterfly/` (`*_v013.*`).
+
+## v0.3.0: Ron's preview notes (2026-11-21)
+
+Ron (Heirloom Preview Queue): "more range on K1 and K2 on both ends / I don't like the Flap parameter's wave form,
+make it a performance control rather than animation and give it a smoother animation". The K1 / K2 range was
+v0.2.0 and is unchanged; this pass is the Flap.
+
+- **The old waveform.** K4 set the RATE of a free-running triangle LFO (step = K4² >> 9 per field, 0.53 s per cycle
+  at full), which swung the wing position −256 .. +255 and back: linear ramps with hard reversals at both ends (the
+  wings snapped from opening to closing). Turning K4 back to 0 froze the wings wherever the phase stood, not at the
+  still.
+- **K4 Flap is now the wing position (performance control).** The LFO (phase accumulator, triangle, rate product)
+  is gone. Bipolar with a ±8 deadband at 512 = the still. With a = |K4 − 512| − 8 (0 .. 504), x = a / 512:
+  `pos = ±256 (1.5 x − 0.5 x³)`, a sine-like S-curve (max 8 / 256 off 256 sin(πx/2), zero slope at both ends,
+  monotone). The position feeds the same two terms as the old LFO, so the visual range is unchanged:
+  - K4 0: wings folded: lens width t0 × 0.71 (L0 −89 Q8), hearts +0.8 palette units (offset −819);
+  - K4 256: t0 × 0.79, hearts +0.55; K4 512: the still, exactly; K4 768: t0 × 1.26, hearts −0.55;
+  - K4 1023: wings open: t0 × 1.41 (L0 +89), hearts −0.8 (offset +819).
+- **Smooth motion.** K4 goes through the shared glide (1/8 of the gap per field, ±2 deadband) TWICE, the second stage
+  following the first. A quick flick therefore moves the wings on an S-shaped path: from rest they speed up over
+  ~5 fields, then ease in (a full 512 → 1023 flick is 95 % there after ~23 fields, 0.38 s at 60 Hz, and fully
+  settled by ~36). A single-stage glide jumped to full speed on the first field (95 % after ~12 fields). The curve and both glide stages are computed in the vblank sequencer
+  (slot 14 = a², new slot 16 = (a² >> 8) · a, zone clocks 340 .. 435); the position is used one field later.
+- **TOML.** K4 display −100 .. 100, initial_value 0 → 512 (the still; the old 0 also meant "still", so the default
+  picture is unchanged). Preset "Wingbeat" (K4 420 = a slow beat) → **"Wings Folded"** (K4 0). The other presets
+  inherit 512 = still, as they inherited "no flap" before. No HW-captured defaults existed, so none were touched.
+- **Judgement calls.** The 2-stage glide is my addition, for the "smoother animation". It costs some response time
+  (95 % after ~0.38 s against ~0.2 s single-stage). The Flap still trades lens area against heart area (lenses open while the
+  hearts shrink), which is distinct from P12 Wings (both grow). It is not a second Wings knob.
+- **Resolutions.** No geometry change: SD / 720p behave as before (SD shows the centre 4:3).
+- **Build** v0.3.0, router1, all six seed 1: HD Analog 86.45, SD Analog 82.94, HD HDMI 80.87, SD HDMI 87.94,
+  HD Dual 81.80, SD Dual 81.33 MHz. 7274–7291 / 7680 LC (94.7–94.9 %, +174 over v0.2.0, more than the logic
+  suggests; above the ~94 % guide but closed with 6 MHz margin), 20 / 32 EBR. iceunpack OK ×6. Not simulated, not
+  flashed. v0.2.0's VHDL, TOML and vmprog are in `.heirloom_work/rb_butterfly/` (`*_v020.*`).
+- **HD HDMI skew re-seed** (`.heirloom_work/skew_tools/screen.sh`, 96 timing-clean hd_hdmi placements):
+  - HD HDMI: the builder's router1 s1 sat at HSYNC **−1.12** / data ≤ −1.42 (negative = known bad). Installed
+    **router2 s32: +2.04 / ≤ −1.12, 83.04 MHz**. Spare with the runner-up router1 s12 (+1.92 / ≤ −0.65,
+    86.66 MHz): `.heirloom_work/rb_butterfly/skew/butterfly_v030_spare_hd_hdmi_router1_s12.vmprog`.
+  - HD Analog: the builder's s1 had data ≤ −0.30 (fails the ≤ −0.6 rule). Installed **router1 s10: −2.05 /
+    ≤ −1.47, 92.79 MHz** (also clean on the analog-encoder columns: −0.73 / ≤ −1.65).
+  - HD Dual: kept the builder's s1 (−1.59 / ≤ −0.87, 81.80 MHz).
+  - **A full builder rebuild re-routes seed 1 for every config**, which undoes both installs. Re-install them
+    (`.heirloom_work/skew_tools/install.sh butterfly router2 32` and `... router1 10 hd_analog`), or re-screen
+    after an RTL change. The replaced .bins are in `.heirloom_work/rb_butterfly/skew/*_replaced_*.bin`.

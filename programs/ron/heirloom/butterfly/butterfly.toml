@@ -1,12 +1,13 @@
 # Butterfly - Heirloom (video clips), built 2026-11-10 (v0.1.0) from WIN_20231008_20_41_21 t0.5; v0.1.1: smooth camera bend.
 # A magenta / blue / black kaleidoscope: lenses pinched at dark X crossings, hearts above and below each X,
 # nested blue diamonds, blue arcs and a bow-tie glow.  See butterfly.vhd, butterfly.py and SUMMARY.md.
+# v0.3.0 (2026-11-21): K4 Flap is a performance control (wing position, 512 = the still), no LFO.
 
 [program]
 processing_delay_clks = 24
 program_id = "com.czartroniks.butterfly"
 program_name = "Butterfly"
-program_version = "0.2.0"
+program_version = "0.3.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -50,11 +51,11 @@ suffix_label = ""
 parameter_id = "rotary_potentiometer_4"
 name_label = "Flap"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 0
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -120,8 +121,8 @@ suffix_label = "%"
 name = "Photo"
 
 [[preset]]
-name = "Wingbeat"
-rotary_potentiometer_4 = 420
+name = "Wings Folded"
+rotary_potentiometer_4 = 0
 
 [[preset]]
 name = "Open Wings"
