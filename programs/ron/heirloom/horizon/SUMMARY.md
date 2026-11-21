@@ -251,3 +251,10 @@ Glides (1/8 of the gap per field, +-2 deadband) on all six knobs and P12.
   yellow-rimmed edge now frays along the bear's face contour. No wrap.
 - **Build:** router1, all six on seed 1. HD Analog 91.55, HD HDMI 98.32, HD Dual 88.54 MHz (worst HD 88.54);
   7,054-7,065 LC, 18 EBR.
+
+## v0.1.2: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.1), captured with `./capture_preset.sh --defaults`:
+K1 Ribs 693, K2 Bowl 697, K3 Tide 593, K4 Speed 589, K5 Lobes 748, P12 Ribcage 331 (K6 Etch and S7-S11 unchanged).
+The vmprog was repacked from the v0.1.1 bitstreams (only the settings block differs, 174 bytes), so timing, seeds
+and LC are as in v0.1.1. Presets are unchanged.
