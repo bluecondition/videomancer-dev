@@ -1,9 +1,10 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Brushfire v0.1.0 -- Heirloom from the video clips, built from the still WIN_20230820_01_33_09 t0.5
+-- Brushfire v0.2.0 -- Heirloom from the video clips, built from the still WIN_20230820_01_33_09 t0.5
 -- (clip WIN_20230820_01_33_09, 9.5 s; the same patch in clips 01_32_42 and 01_36_37).
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- 2026-11-21 v0.2.0: P12 Blaze continuous over its whole travel (two narrowing-resize folds in the blaze path fixed)
 --
 -- The still: two crowns of flame across the top (red-cored lobes, nested white/yellow arches, long orange and red
 -- streaks), red-rimmed chevrons stacked down each tile's axis in a pink/purple/brown zone, and under it all
@@ -593,10 +594,12 @@ begin
                         z_fms <= to_unsigned(7, 4); z_fld <= '1';             -- job 7 at 163: k6^2
                     when 178 =>                                       -- blaze: |p - 360| and the slope (168 above, 182 below)
                         v_d := signed(resize(s_gp(12 downto 3), 12));
+                        -- v0.2.0: |p - 360| (0 .. 663) is SLICED to 10 bits; resize(signed, 10) kept sign + 9 bits
+                        -- and folded p >= 872 back to the photo height (the "big jump" Ron saw)
                         if v_d >= 360 then
-                            z_pa <= unsigned(resize(v_d - 360, 10)); z_pc <= to_unsigned(168, 16); z_t1(1) <= '0';
+                            v_d := v_d - 360; z_pa <= unsigned(v_d(9 downto 0)); z_pc <= to_unsigned(168, 16); z_t1(1) <= '0';
                         else
-                            z_pa <= unsigned(resize(360 - v_d, 10)); z_pc <= to_unsigned(182, 16); z_t1(1) <= '1';
+                            v_d := 360 - v_d; z_pa <= unsigned(v_d(9 downto 0)); z_pc <= to_unsigned(182, 16); z_t1(1) <= '1';
                         end if;
                     when 180 =>
                         v_g6 := resize(f_acc(19 downto 13), 8) + resize(f_acc(19 downto 15), 8);   -- x1.25 (K6 top +25 %)
@@ -612,7 +615,9 @@ begin
                         elsif v_h < -307 then z_h <= to_signed(-307, 12);
                         else z_h <= v_h(11 downto 0); end if;
                     when 200 =>
-                        if z_h < 0 then z_ha <= unsigned(resize(-z_h, 10)); else z_ha <= unsigned(resize(z_h, 10)); end if;
+                        -- |h| (0 .. 512) sliced, not resize(signed, 10): the clamp value 512 folded to 0 (S = 1, O = 0)
+                        if z_h < 0 then v_d := -z_h; else v_d := z_h; end if;
+                        z_ha <= unsigned(v_d(9 downto 0));
                         z_fms <= to_unsigned(9, 4); z_fld <= '1';             -- job 9 at 201: |h| 196
                     when 218 =>                                       -- e = -sign(h) (|h| 196 >> 8); S = 2^(e / 256)
                         if z_h < 0 then v_w := signed(resize(f_acc(19 downto 8), 22));

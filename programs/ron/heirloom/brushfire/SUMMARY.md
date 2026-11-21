@@ -215,3 +215,70 @@ K1 Tiles 541, K2 Lobes 946, K3 Streaks 552, K4 Speed 1023, K5 Bands 313, S7 Band
 (K6 Camera, S8, S10, S11 unchanged). K4 and P12 are continuous (glided), so the end values load as dialled. The
 vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 237 bytes), so timing and seeds are
 as in v0.1.2 (HD Analog, SD Analog, HD Dual seed 2). Presets are unchanged.
+
+## v0.2.0: Ron's preview notes (2026-11-21)
+
+Ron (hardware, v0.1.3): "blaze is not a smooth control, there's a big jump in the appearance"
+
+**Cause: two narrowing `resize(signed, 10)` folds in the per-field Blaze path** (the CLAUDE.md trap: resize keeps the
+sign plus the rightmost N-1 bits). The integer model `imodel.py` had the arithmetic right; the RTL did not.
+- **zc 178, |P12 - 360|.** `z_pa <= unsigned(resize(v_d - 360, 10))` kept only 9 magnitude bits, so |p - 360|
+  (0 .. 663) wrapped at 512. At **P12 = 872 (85 %)** the Blaze lift h_p = |p - 360| 168 / 256 dropped from 335
+  back to 0: the tall, nearly frame-filling flames snapped back to the photo height in one count. Above it, Blaze
+  climbed again only to h_p = 99 at 100 %. This was the big jump.
+- **zc 200, |h|.** `z_ha <= unsigned(resize(z_h, 10))` folded the clamp value h = 512 to 0, so S = 1 and O = 0,
+  the h = 0 look. Between **P12 = 755 and 871 (74-85 %)** the breath peak pushes h_b + h_p to the clamp, so the frame
+  flashed back to the h = 0 look during each breath swell. That was 3 % of the cycle at 755 and 37 % at 871
+  (at Ron's K4 = 1023, a 2.2 s breath).
+
+**Fix.** Both magnitudes are now formed at the full 12-bit width and sliced to 10 bits. The values are 0 .. 663 and
+0 .. 512, both < 1024, so the slice is exact. That is two small edits; there is no new logic and the latency is unchanged.
+- P12 now lifts the flames monotonically over its whole travel. y' of the bottom line, breath at its photo phase:
+  1937 at 0 → 1079 at 360 → 253 at 1023. The largest step is one h unit, ≤ 6 lines of y' at the bottom line near P12 = 0 (`.heirloom_work/rb_brushfire/
+  blaze_v020/sweep.py` replays the RTL arithmetic with numeric_std resize semantics: v0.1.3 jumps at 755 and 872;
+  v0.2.0 has none).
+- **Look at 0 unchanged** (the P12 < 360 branch never reached the fold). The range is unchanged, and 100 % is now
+  the designed climax: h = 512, S = 0.346, O = -218. The whole frame then sits above the rim, so the flames fill it
+  to the bottom. Before the fix, nothing above 85 % had ever been shown.
+- **Judgement call:** at the top of the travel the breath spends part of each cycle on the h = 512 clamp, holding
+  the full-fire scene. That is 22 % of the cycle at P12 = 800, 42 % at 900 and 62 % at 1023. The breath still
+  shows as a dip, and the streak flow and band drift keep moving. This is the original design (clamp at 512), now
+  reachable.
+- **Presets:** "Wildfire" (P12 = 900) had rendered at h_p = 18, close to the photo height. It now shows the tall
+  wildfire its name meant. The other presets (P12 60 / 480 / 520) are unaffected. The HW-captured defaults are kept
+  (P12 0).
+- **Resolutions:** the change is per-field arithmetic in virtual 1080-line coordinates, so 720p and 1080p match.
+  SD still shows the centre 4:3 (1.5 tiles), as before.
+
+**Build (v0.2.0, router1, `NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900 .heirloom_work/vid/build_queue.sh
+brushfire`):** iceunpack OK × 6; `out/rev_b/ron/heirloom/brushfire.vmprog` 493,798 bytes, unsigned.
+
+| Config | Seed | Fmax (MHz) | LC |
+|---|---|---|---|
+| HD Analog | **2** (seed 1 stalled router1) | 85.59 | 7,142 |
+| SD Analog | **2** (seed 1 stalled router1) | 88.79 | 7,115 |
+| HD HDMI | 1 | 83.59 | 7,139 |
+| SD HDMI | 1 | 75.42 | 7,119 |
+| HD Dual | **2** (seed 1 stalled router1) | 85.98 | 7,156 |
+| SD Dual | 1 | 84.60 | 7,136 |
+
+7,115-7,156 / 7,680 LC (92.6-93.2 %), 23 / 32 EBR. The seed pattern is the same as v0.1.2: seed 1 stalls router1 on
+HD Analog, SD Analog and HD Dual at the 900 s timeout. The HD Fmax figures equal v0.1.2's to the hundredth, but
+these bitstreams are new: the vmprog differs from v0.1.3 in 322k bytes.
+
+**HD pin-skew re-seed (after the RTL build; `.heirloom_work/skew_tools/screen.sh brushfire`, 81 / 103 HD HDMI routes
+timing-clean, 10 in the window).** The shipped vmprog now carries:
+
+| Config | Builder seed (skew HSYNC / worst data, ns) | Installed (skew, Fmax) |
+|---|---|---|
+| HD HDMI | router1 s1 (+0.32 / ≤ −1.03: the danger zone) | **router2 s10** (+1.93 / ≤ −0.90, 80.21 MHz) |
+| HD Analog | router1 s2 (+0.49 / ≤ +0.33: data margin fails) | **router1 s10** (−0.89 / ≤ −1.41, 79.19 MHz) |
+| HD Dual | router1 s2 (−0.92 / ≤ −0.47: data margin fails) | **router1 s9** (−1.83 / ≤ −1.38, 88.57 MHz) |
+
+- Spare: HD HDMI router1 s34 (+1.72 / ≤ −0.61, 86.74 MHz), with the same HD Analog / HD Dual as the main vmprog:
+  `.heirloom_work/rb_brushfire/skew/brushfire_v020_spare_hd_hdmi_router1_s34.vmprog`. The replaced builder bitstreams
+  are in `.heirloom_work/rb_brushfire/skew/*_replaced_*.bin`.
+- **A full builder rebuild re-routes seed 1/2 and undoes this.** Re-install with `.heirloom_work/skew_tools/install.sh
+  brushfire router2 10` (and `router1 10 hd_analog`, `router1 9 hd_dual`), or rebuild those configs with those seeds
+  and routers.
+- SD configs are as built (SD Analog router1 s2, SD HDMI / SD Dual router1 s1).
