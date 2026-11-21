@@ -1,19 +1,20 @@
 # Brazier - Heirloom from the video clips (phase 3), v0.1.0 (2026-11-09), from the still WIN_20230930_01_37_53 @ 0.5 s.
 # A blue / violet nested diamond with pink rims and red / green fringes over a red / black ground with three rows
-# of keyed fins (grey crescents, pink fins, magenta flames).  One LFO scrolls the fins' FM wave and makes the diamond
-# breathe (squeeze, drop, rise), as in the clip.  See brazier.vhd, brazier.py and SUMMARY.md.
+# of keyed fins (grey crescents, pink fins, magenta flames).  v0.2.0 (2026-11-21): K4 Breath is a performance control
+# that sets the phase of the clip's cycle (the fins' FM wave scroll and the diamond's squeeze / drop / rise); there is
+# no automatic LFO any more.  See brazier.vhd, brazier.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.brazier"
 program_name = "Brazier"
-program_version = "0.1.3"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Pattern", "Warp"]
 program_type = "processing"
-description = "A violet nested diamond breathing over a red ground of scrolling crescents, fins and flames."
+description = "A violet nested diamond over a red ground of crescents, fins and flames; K4 plays its squeeze, drop and rise."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -49,11 +50,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Speed"
+name_label = "Breath"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 196
+initial_value = 512
 display_float_digits = 0
 suffix_label = ""
 
@@ -133,7 +134,7 @@ toggle_switch_10 = 1
 
 [[preset]]
 name = "Liquid"
-rotary_potentiometer_4 = 820
+rotary_potentiometer_4 = 974
 linear_potentiometer_12 = 1023
 
 [[preset]]

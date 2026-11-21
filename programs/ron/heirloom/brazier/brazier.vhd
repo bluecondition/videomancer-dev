@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- 2026-11-21: v0.2.0, K4 Breath: a performance control (sets the breath / fin-wave phase; the automatic LFO is gone)
 -- Brazier v0.1.0 -- Heirloom from the video clips (phase 3), made from the still WIN_20230930_01_37_53 @ 0.5 s.
 --
 -- The still: a blue / violet nested diamond with glowing pink rims and red / green fringes, keyed over a vertical
@@ -21,7 +22,8 @@
 --   K1  Rings    ring density x1/4 .. x4 (512 = the still)
 --   K2  Fins     fin count across, x0.35 .. x2.8
 --   K3  Sweep    the fins' FM depth: upright identical fins (0) .. the still (360) .. long slashes (1023)
---   K4  Speed    bipolar: the LFO (fin wave scroll + diamond breath); 700 = the clip's 5.5 s cycle
+--   K4  Breath   bipolar phase of the clip's cycle (fin wave scroll + diamond breath + wobble phase), glided;
+--                512 (+-8) = the still, right = squeeze to the sliver, left = the rise played back (the diamond sinks)
 --   K5  Size     diamond zoom x0.3 .. x3.3
 --   K6  Etch     how far the camera (or the Osc) bends the rings and the fins
 --   S7  Twin     one diamond / two side by side
@@ -103,7 +105,7 @@ architecture brazier of program_top is
     signal r_bg_q : std_logic_vector(31 downto 0) := (others => '0');
     signal r_tt_a : unsigned(8 downto 0) := (others => '0');
     signal r_tt_q : unsigned(7 downto 0) := (others => '0');
-    signal r_br_a : unsigned(7 downto 0) := (others => '0');
+    signal r_br_a : unsigned(9 downto 0) := (others => '0');
     signal r_br_q : std_logic_vector(31 downto 0) := (others => '0');
     signal r_rp_a : unsigned(8 downto 0) := (others => '0');
     signal r_rp_q : std_logic_vector(31 downto 0) := (others => '0');
@@ -143,7 +145,7 @@ architecture brazier of program_top is
     signal s_hcnt, s_wmax : unsigned(11 downto 0) := (others => '0');
     signal s_w    : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
-    -- knobs: glided (Q3), raw speed, switches
+    -- knobs: glided (Q3), switches
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(360 * 8, 13);
@@ -153,9 +155,11 @@ architecture brazier of program_top is
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
-    signal s_k4 : unsigned(9 downto 0) := to_unsigned(700, 10);
-    signal s_vm : unsigned(8 downto 0) := (others => '0');
-    signal s_vneg : std_logic := '0';
+    signal s_g4 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal z_k4v : signed(13 downto 0) := (others => '0');      -- glided K4 - 512 (Q3)
+    signal z_k4m : unsigned(11 downto 0) := (others => '0');    -- |K4 - 512| beyond the +-8 deadband (Q3)
+    signal z_k4n : std_logic := '0';
+    signal z_k4p : unsigned(15 downto 0) := (others => '0');    -- phase magnitude, 65/8 per Q3 step
     signal s_twin, s_ember, s_slip, s_copper, s_src : std_logic := '0';
 
     -- per-field constants
@@ -177,9 +181,7 @@ architecture brazier of program_top is
     signal c_kx   : unsigned(14 downto 0) := to_unsigned(256, 15);     -- horizontal gain, Q8 (twin x2)
     signal c_kv   : unsigned(11 downto 0) := to_unsigned(256, 12);     -- vertical gain, Q8 (twin x2)
     signal c_gd   : unsigned(8 downto 0) := (others => '0');           -- etch gain, D units per luma step (x1.25)
-    signal c_vsq  : unsigned(17 downto 0) := (others => '0');
-    signal c_lst  : unsigned(15 downto 0) := (others => '0');          -- LFO step per field
-    signal c_lfo  : unsigned(15 downto 0) := (others => '0');          -- LFO phase
+    signal c_lfo  : unsigned(15 downto 0) := (others => '0');          -- breath / wave phase (K4)
     signal c_th, c_thw : unsigned(10 downto 0) := (others => '0');     -- per-line phase steps
     signal c_th0, c_thw0 : unsigned(15 downto 0) := (others => '0');
     signal c_tw   : unsigned(26 downto 0) := (others => '0');          -- twin reload KX * 1960
@@ -333,8 +335,6 @@ begin
     -- clock; the zone is quasi-static but timed at the pixel clock)
     ---------------------------------------------------------------------------
     p_ctrl : process(clk)
-        variable v_s  : signed(10 downto 0);
-        variable v_m  : unsigned(9 downto 0);
         variable v_e  : signed(10 downto 0);
     begin
         if rising_edge(clk) then
@@ -365,17 +365,6 @@ begin
                 if s_hcnt > s_wmax then s_wmax <= s_hcnt; end if;
                 s_hcnt <= (others => '0');
             end if;
-            s_k4 <= unsigned(registers_in(3));
-            v_s := signed(resize(s_k4, 11)) - 512;
-            s_vneg <= v_s(10);
-            if v_s > -9 and v_s < 9 then
-                v_m := (others => '0');
-            elsif v_s(10) = '1' then
-                v_m := unsigned(not v_s(9 downto 0)) - 7;     -- |v| - 8
-            else
-                v_m := unsigned(v_s(9 downto 0)) - 8;
-            end if;
-            s_vm <= v_m(8 downto 0);
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
@@ -406,7 +395,8 @@ begin
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
                             when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
-                            when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
+                            when 5      => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
+                            when others => s_gm <= s_g4; s_gr <= unsigned(registers_in(3));
                         end case;
                         z_gp <= "11";
                     when "11" =>
@@ -426,10 +416,11 @@ begin
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 5      => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when others => s_g4 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 5 then z_grun <= '0'; end if;
+                        if z_gc = 6 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -483,8 +474,7 @@ begin
                     when 12 => z_fa <= resize(unsigned(z_bre(5 downto 0)), 36);   z_fb <= resize(s_gp(12 downto 3), 18); -- jitter
                     when 13 => z_fa <= resize(c_kd, 36);  z_fb <= resize(c_kxe, 18) + 256;             -- KX
                     when 14 => z_fa <= resize(s_g6(12 downto 3), 36); z_fb <= resize(s_g6(12 downto 3), 18); -- etch^2
-                    when 15 => z_fa <= resize(s_vm, 36);  z_fb <= resize(s_vm, 18);                    -- speed^2
-                    when 16 => z_fa <= resize(c_vsq, 36); z_fb <= to_unsigned(201, 18);                -- LFO step
+                    when 15 | 16 => z_fa <= (others => '0'); z_fb <= (others => '0');                  -- (spare)
                     when 17 => z_fa <= resize(s_ys, 36);  z_fb <= to_unsigned(460, 18);                -- fin wave step
                     when 18 => z_fa <= resize(s_ys, 36);  z_fb <= to_unsigned(1092, 18);               -- wobble step
                     when others => z_fa <= resize(c_kx, 36); z_fb <= to_unsigned(1960, 18);            -- twin reload
@@ -501,11 +491,26 @@ begin
 
             if s_zone = '1' then
                 case to_integer(s_zc) is
-                    -- LFO (last field's step); breath table; ring density exponent
+                    -- K4 Breath (last field's glided value): the phase = +-(|K4 - 512| - 8) x 65 / 65536 cycle,
+                    -- +-8 deadband = the still (phase 0), the ends reach +-0.5 cycle (one full cycle over the travel);
+                    -- breath table; ring density exponent
+                    when 17 =>
+                        z_k4v <= signed(resize(s_g4, 14)) - 4096;
+                    when 18 =>
+                        z_k4n <= z_k4v(13);
+                        if z_k4v > -65 and z_k4v < 65 then
+                            z_k4m <= (others => '0');
+                        elsif z_k4v(13) = '1' then
+                            z_k4m <= unsigned(not z_k4v(11 downto 0)) - 63;     -- |v| - 64
+                        else
+                            z_k4m <= unsigned(z_k4v(11 downto 0)) - 64;
+                        end if;
+                    when 19 =>
+                        z_k4p <= shift_left(resize(z_k4m, 16), 3) + resize(z_k4m(11 downto 3), 16);   -- <= 32760
                     when 20 =>
-                        if s_vneg = '1' then c_lfo <= c_lfo - c_lst; else c_lfo <= c_lfo + c_lst; end if;
+                        if z_k4n = '1' then c_lfo <= 0 - z_k4p; else c_lfo <= z_k4p; end if;
                     when 21 =>
-                        r_br_a <= c_lfo(15 downto 8);
+                        r_br_a <= c_lfo(15 downto 6);
                         v_e := signed(resize(s_g1(12 downto 3), 11)) - 512;
                         r_ex_a <= unsigned(v_e(7 downto 0)); z_sh <= v_e(9 downto 8);
                         c_th0  <= to_unsigned(65536 - 38861, 16) - c_lfo;
@@ -565,8 +570,6 @@ begin
                             when others => c_kxs <= resize(c_kx, 17) sll 1;
                         end case;
                     when 388 => c_gd  <= resize(f_acc(19 downto 12), 9) + f_acc(19 downto 14);  -- x1.25
-                    when 412 => c_vsq <= f_acc(17 downto 0);
-                    when 436 => c_lst <= f_acc(30 downto 15);
                     when 460 => c_th  <= f_acc(20 downto 10);
                     when 484 => c_thw <= f_acc(20 downto 10);
                     when 508 => c_tw  <= f_acc(26 downto 0);

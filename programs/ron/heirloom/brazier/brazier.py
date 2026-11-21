@@ -2,13 +2,13 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-BRAZIER v0.1.0 - build hook.  Writes brazier_pkg.vhd next to this file (pure python: the builder runs it with
+BRAZIER v0.2.0 - build hook.  Writes brazier_pkg.vhd next to this file (pure python: the builder runs it with
 the system python3; imodel.py in .heirloom_work/rb_brazier imports the same tables).
 
 Fitted to the still WIN_20230930_01_37_53 @ 0.5 s (see .heirloom_work/rb_brazier/notes.md):
 
   fins     phi = F(y) (x + 134) + 0.7786 cycles,  F(y) = (1/226.66) (1 - 0.1408 cos(2 pi (y - 338 - 570 L) / 570))
-           (x, y virtual px; L = the LFO phase, one cycle per 5.5 s in the clip: the FM wave scrolls down)
+           (x, y virtual px; L = the breath phase set by K4, one cycle = 5.5 s of the clip: the FM wave scrolls down)
            lit where frac(phi) > T(y) (+ 0.25 on every other fin: the sub-octave makes big / small fins);
            colour by 1 - frac(phi) (the rim is the reset); T(y) = the three bands (crescents / fins / flames)
   diamond  D = kx |x - cx(y)| + V(y),  V = 0.953 (cy - y) above, 522 (1 - exp(-(y - cy) / 400)) below
@@ -23,7 +23,8 @@ Package contents:
                         round(522 (1 - exp(-(4 j + 2) / 400))), j = i - 256 (t = 4 j virtual lines)
   C_BZ_BG    256 x 32   {Y, U, V, band}: ground colour and fin band for virtual line y = (64 i + 32) / 15
   C_BZ_TT    512 x 8    fin threshold T * 256 (255 = no fins) for y = (32 i + 16) / 15
-  C_BZ_BRE   256 x 32   breath, one LFO cycle: {kx - 1 (Q8, 10b), (cy - 515) / 2 (8b), wobble px (8b), jitter Q3 (6b)}
+  C_BZ_BRE  1024 x 32   breath, one cycle of the clip (K4 Breath sets the phase; 1024 entries so a slow turn of K4
+                        moves the diamond in small steps): {kx - 1 (Q8, 10b), (cy - 515) / 2 (8b), wobble px (8b), jitter Q3 (6b)}
   C_BZ_RPAL  512 x 32   {Y, U, V, 00} ring colours: zone * 64 + c (c = colour index, 6 bits)
   C_BZ_FPAL  256 x 32   {Y, U, V, 00} fin colours: band * 64 + q (q = 1 - frac(phi), 6 bits)
 Colours in the hardware convention (U register = Cr, V register = Cb); luma pre-scaled 16/13 for the shell's 13/16
@@ -114,8 +115,8 @@ def breath(phi):
 
 def bre_rom():
     out = []
-    for i in range(256):
-        kx, cy, wb, jb = breath(i / 256.0)
+    for i in range(1024):
+        kx, cy, wb, jb = breath(i / 1024.0)
         kxm = min(1023, int(round((kx - 1) * 256)))
         cyo = min(255, int(round((cy - 515) / 2.0)))
         out.append((kxm << 22) | (cyo << 14) | (min(255, int(round(wb))) << 6) | min(63, int(round(jb * 8))))
@@ -215,7 +216,7 @@ def main():
              vhd_table("C_BZ_SV", "std_logic_vector", 512, 16, sv_rom()),
              vhd_table("C_BZ_BG", "std_logic_vector", 256, 32, bg_rom()),
              vhd_table("C_BZ_TT", "unsigned", 512, 8, tt_rom()),
-             vhd_table("C_BZ_BRE", "std_logic_vector", 256, 32, bre_rom()),
+             vhd_table("C_BZ_BRE", "std_logic_vector", 1024, 32, bre_rom()),
              vhd_table("C_BZ_RPAL", "std_logic_vector", 512, 32, rpal_rom()),
              vhd_table("C_BZ_FPAL", "std_logic_vector", 256, 32, fpal_rom()),
              "end package brazier_pkg;", ""]

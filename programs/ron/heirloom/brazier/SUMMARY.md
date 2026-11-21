@@ -110,7 +110,7 @@ Working files: `.heirloom_work/rb_brazier/` (`notes.md`; `pal16_*` = palfit k = 
 | K1 Rings | the diamond's ring density, ×1/4 .. ×4 (exponential, 512 = the still). 0 = one huge soft gradient diamond; 1023 = about 12 nested rings inside the same outline |
 | K2 Fins | fin count across all three rows, ×0.35 .. ×2.8 (512 = the still). 0 = a few wide crescents and flames; 1023 = a dense comb of thin fins and slashes |
 | K3 Sweep | the fins' FM depth (the vertical cosine), 0 .. 2.8× the still (360). 0 = identical upright fins and crescents; 1023 = long horizontal slashes and hooks |
-| K4 Speed | bipolar LFO rate, ±8 deadband (stops, holding the phase), square law. 700 = the clip's 5.5 s cycle; 1023 = a 0.7 s cycle; left of centre runs it backward (the diamond rises then squeezes, the wave scrolls up) |
+| K4 Breath | (v0.2.0; was Speed) a performance control: sets the phase of the clip's cycle directly, glided. 512 ±8 = the still; right = the squeeze into the sliver (1023 = half a cycle: the sliver starting to drop); left = the rise played backward (the diamond sinks, widening); the fins' FM wave scrolls down (right) / up (left) by up to half its 570-line wavelength. No automatic motion |
 | K5 Size | diamond zoom, 0.3× .. 3.3× (512 = the still). 0 = a small diamond among the fins; 1023 = the diamond fills the frame |
 | K6 Etch | how far the camera (or the Osc) pushes the diamond field (0 .. 64 px per luma step, square law; 300 ≈ 5 px per step, 80 px at full luma) and the fin phase |
 | S7 Twin | one diamond / two half-size diamonds side by side |
@@ -247,3 +247,119 @@ Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh
 K1 Rings 733, K2 Fins 631, K3 Sweep 748, K4 Speed 196, K5 Size 855, K6 Etch 540 (S7-S11 and P12 Melt unchanged).
 The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 194 bytes), so timing and seeds
 are as in v0.1.2 (HD Analog seed 2). Presets are unchanged.
+
+## v0.2.0: Ron's preview notes (2026-11-21)
+
+Ron (hardware, v0.1.3): *"make k4 do the same thing but as a performance control rather than controlling speed of
+animation"*
+
+**K4 Speed → K4 Breath (a performance control).** One LFO phase L used to drive three things, and K4 now sets that
+phase directly, so all three became manual. There is no automatic motion left in the program from K4.
+- **The diamond's breath.** The 256-entry table of kx − 1, centre drop, wobble and jitter, scaled by Melt.
+- **The fins' FM wave scroll.** θ = (y − 338)/570 − L.
+- **The wobble phase.** sin(y/240 + 2L).
+
+**The mapping.**
+- K4 goes through the shared glide as a seventh channel (1/8 of the gap per field, Q3, ±2-count settle). Pot noise
+  can't jitter it, and the phase moves in steps of 8/65536 of a cycle while it glides.
+- The ±8 deadband at 512 is the still (phase 0, the photo).
+- Beyond the deadband the phase is ±(|K4 − 512| − 8) × 65/65536 of a cycle: right = forward, left = backward.
+- The ends reach ±0.5 cycle (one full cycle over the travel), so K4 = 0 and K4 = 1023 show the same frame.
+- The old LFO step (speed², slots 15 / 16, the raw K4 read) is removed. Those two multiplier slots are spare.
+
+**What the knob shows at Melt 512.** Centre heights are in virtual lines (515 = the still); right of centre is the
+clip played forward, left of centre is the clip's rise played backward.
+
+| K4 | Phase | Picture |
+|---|---|---|
+| 0 | −0.5 | the same frame as 1023 |
+| 45 | −0.455 | kx 2.6, centre 950 |
+| 141 | −0.36 | kx 1.7, centre 1000 (the lowest point) |
+| 232 | −0.27 | centre 980 |
+| 323 | −0.18 | centre 885 |
+| 413 | −0.09 | the diamond has sunk to centre 760 |
+| 512 ± 8 | 0 | the still |
+| 701 | +0.18 | kx 1.12, starting to narrow |
+| 883 | +0.36 | kx 1.9, wobble 50 px |
+| 974 | +0.45 | kx 2.8: the wavy sliver |
+| 1023 | +0.497 | kx 3.2: the sliver starting to drop (centre about 780) |
+
+- **The fins.** The FM wave scrolls by up to ±285 lines, half its 570-line wavelength: down to the right, up to the
+  left. The fins hook, stretch into slashes and flatten from the right, as in the clip.
+- **Melt.** P12 still scales the breath (0 = no squeeze or drop, 1023 = twice the offsets). At Melt 0, K4 still
+  scrolls the fins' wave.
+- **Dead corner.** K4 shows nothing only when Melt = 0 and Sweep = 0 together. Speed had the same corner.
+
+**Breath table 256 → 1024 entries** (`brazier.py`; `r_br_a` is now 10 bits, `c_lfo(15 downto 6)`).
+- With 256 entries a slow turn of K4 moved the diamond in jumps: up to 19 lines per entry, an entry every 4 counts,
+  through the drop.
+- With 1024 entries one entry is about one knob count: at most 4.7 lines per count at Melt 512, 2.7 lines on the
+  left half.
+- Cost: the table went from 2 EBR to 8 (1024 × 4 each, no output mux), so the program now uses 24 / 32 EBR. LC is
+  unchanged.
+- `.heirloom_work/rb_brazier/imodel.py` was updated to the new index.
+
+**Defaults and presets.**
+- **K4 default 196 → 512** (the photo position). The captured 196 was a backward speed and is meaningless as a
+  position: as a phase it would sit at −0.31 cycle, with the diamond sunk to about 985.
+- The other HW-captured defaults are kept (K1 733, K2 631, K3 748, K5 855, K6 540, P12 512, switches).
+- The K4 display range stays −100 .. 100.
+- **Liquid:** K4 820 → 974 (the sliver, phase 0.45) with Melt 1023, so it still shows the liquid sliver.
+- **Still Diamond** keeps K4 512, which now means the still phase rather than a stopped LFO. The other presets don't
+  set K4.
+- TOML description updated (109 bytes).
+
+**Judgement calls.**
+- **One cycle over the travel**, not several. The breath is one cycle long, so a single period shows every breath
+  frame at the finest resolution.
+- **Both directions kept.** Turning K4 left plays the rise backward and turning it right plays the squeeze; both
+  meet at the drop.
+- **K4 lags one field.** The phase uses last field's glided K4 (the glide's K4 channel runs after zc 20).
+
+**Not changed.** These motions never depended on K4:
+- the Osc lattice drift (Osc mode only);
+- the per-field redraw of the jitter, tears and slips (xorshift).
+
+**Resolutions.** The phase is resolution-independent, so SD, 720p and 1080p show the same picture as before. The
+v0.1 caveats stand: SD shows the centre 4:3, and interlaced inputs are line-doubled. The old 50 Hz caveat (a 6.6 s
+cycle) no longer applies.
+
+**Build (2026-11-21).** router1, all six configs on **seed 1**:
+`NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900 .heirloom_work/vid/build_queue.sh brazier`
+
+| Config | Fmax (MHz) | LC |
+|---|---|---|
+| HD Analog | 85.06 | 6749 |
+| HD HDMI | 75.81 | 6758 |
+| HD Dual | 76.23 | 6762 |
+| SD Analog | 81.15 | 6751 |
+| SD HDMI | 78.43 | 6744 |
+| SD Dual | 74.70 | 6764 |
+
+- **Resources.** 6744-6764 / 7680 LC (87.8-88.1 %), 24 / 32 EBR.
+- **Checks.** iceunpack OK on all six; dupin shows 0 `CARRY I0==I1`. The packed config carries "Breath".
+- **Seeds.** In the builder run, HD Analog no longer needed seed 2 (v0.1.2): seed 1 closed. The three HD bitstreams
+  were then replaced by the skew re-seed below.
+- **Backups.** The v0.1.3 vhd, toml and vmprog are in `.heirloom_work/rb_brazier/*_v013.*`.
+
+**HD output skew re-seed (v0.2.0, 2026-11-21; HW pending).**
+`.heirloom_work/skew_tools/screen.sh brazier` routed 110 hd_hdmi placements (router1 + router2 s1-60, 73 of them
+timing-clean), plus 15 hd_analog and 12 hd_dual. The installed bitstreams are in `build/programs/ron/brazier/rev_b/`
+and the repacked vmprog is `out/rev_b/ron/heirloom/brazier.vmprog`.
+
+| Config | Builder seed (HSYNC / data) | Installed seed (HSYNC / data) | Fmax (MHz) |
+|---|---|---|---|
+| HD HDMI | router1 s1: **−0.62** / ≤ −2.07 (a negative HSYNC, known bad) | **router2 s7: +1.49 / ≤ −1.27** | 75.06 |
+| HD Analog | router1 s1: +1.54 / ≤ **+0.72** | router1 s12: −0.61 / ≤ −0.92 | 82.84 |
+| HD Dual | router1 s1: −0.90 / ≤ **−0.15** | router1 s2: −1.00 / ≤ −1.52 | 78.39 |
+
+- **HD HDMI.** router2 s7 is the most positive placement in the +1.0..+2.3 window with every data bit ≤ −0.6. Its
+  75.06 MHz is a fixed routed result, but the margin is thin.
+- **HD Analog / HD Dual.** The builder seed's data reached past −0.6, so I took the placement with the largest data
+  margin.
+- **Spare.** HD HDMI router1 s43 (+1.00 / ≤ −0.83, 75.86 MHz):
+  `.heirloom_work/rb_brazier/skew/brazier_v020_spare_hd_hdmi_router1_s43.vmprog`.
+- **Replaced builder bins.** Kept as `.heirloom_work/rb_brazier/skew/*_replaced_*.bin`.
+- **Seeds ≠ 1** (HD HDMI router2 s7, HD Analog router1 s12, HD Dual router1 s2). A full builder rebuild re-routes
+  seed 1 and loses this fix: re-install with `.heirloom_work/skew_tools/install.sh brazier <router> <seed> <config>`,
+  or rebuild with those seeds.
