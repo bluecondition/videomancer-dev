@@ -240,3 +240,10 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 - **Change (v0.1.2):** the per-field etch gain `c_gd` (etch² >> 12, 0 .. 255) is now `g + (g >> 2)` (0 .. 318, 9 bits), set in the sequencer state that already latched it. The pixel product `q5_ed` widened 12 -> 13 bits; D + etch still fits its 14-bit sum (max 12976) before the existing saturation, and the fin-phase add wraps as a phase as before. K6 default 1023 (TOML).
 - **Render check:** `.heirloom_work/rb_brazier/k6b/k6b_cmp.png` (old vs new at K6 100 %, bear, 720p dec 4: the top-left crop, crescents bent further, no wrap).
 - **Build:** router1, HD Analog seed 2 (seed 1 stalled the router, 600 s timeout), all others seed 1. HD worst 80.80 MHz (HD Analog 86.87, HD HDMI 82.45, HD Dual 80.80), LC 6765.
+
+## v0.1.3: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Rings 733, K2 Fins 631, K3 Sweep 748, K4 Speed 196, K5 Size 855, K6 Etch 540 (S7-S11 and P12 Melt unchanged).
+The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 194 bytes), so timing and seeds
+are as in v0.1.2 (HD Analog seed 2). Presets are unchanged.

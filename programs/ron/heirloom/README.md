@@ -196,7 +196,7 @@ versions from v0.1.0.
 | 31 | 20230910_00_11_50 t7.0 | quill | blue/white feather plumes on black | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 7018–7057 LC, 16 EBR); not flashed |
 | 32 | 20230914_01_59_34 t4.0 | marble | cream/orange/red marble swirl arcs with blue dots | v0.1.2 2026-11-21: HW-captured defaults (Ron); v0.1.1 K6 camera pass (router1; HD Dual seed 2, others seed 1; 6,917-6,936 LC, 15 EBR); flashed (v0.1.1) |
 | 33 | 20230919_00_32_29 t3.0 | neon | magenta/white glowing S-curve neon tubes on teal | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,744-6,768 LC, 21 EBR); not flashed |
-| 34 | 20230930_01_37_53 t0.5 | brazier | blue/purple nested diamond with pink flames on a red/black ground | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6724–6754 LC, 18 EBR); not flashed |
+| 34 | 20230930_01_37_53 t0.5 | brazier | blue/purple nested diamond with pink flames on a red/black ground | v0.1.3 2026-11-21: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1; HD Analog seed 2, others seed 1; LC 6,765, 18 EBR); flashed (v0.1.2) |
 | 35 | 20231002_01_20_50 t0.5 | lantern | magenta/yellow/black nested petal contours around a pink disc | v0.1.0 built 2026-11-09 (router2; SD Dual seed 2; 5114–5133 LC, 18 EBR); not flashed |
 | 36 | 20231009_00_32_55 t0.5 | cumulus | blue/yellow/magenta/cyan scalloped cloud waves with drips | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 6990–7005 LC, 16 EBR); not flashed |
 | 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | v0.1.1 built 2026-11-09 (router1; HD HDMI seed 2, others seed 1; 6,946-6,959 LC, 24 EBR); not flashed |
