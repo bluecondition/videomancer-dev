@@ -6,7 +6,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.arcade"
 program_name = "Arcade"
-program_version = "0.1.1"
+program_version = "0.1.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -22,7 +22,7 @@ name_label = "Globes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 545
 display_float_digits = 0
 suffix_label = "%"
 
@@ -32,7 +32,7 @@ name_label = "Arches"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 245
 display_float_digits = 0
 suffix_label = "%"
 
@@ -52,7 +52,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 700
+initial_value = 276
 display_float_digits = 0
 suffix_label = ""
 
@@ -62,7 +62,7 @@ name_label = "Texture"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 821
 display_float_digits = 0
 suffix_label = "%"
 
@@ -112,7 +112,7 @@ name_label = "Globe Size"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 515
 display_float_digits = 0
 suffix_label = "%"
 

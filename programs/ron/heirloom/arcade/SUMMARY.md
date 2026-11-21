@@ -158,3 +158,10 @@ Measured on all 282 frames (9.46 s, 29.9 fps):
   scratch copies). The picture is the same, with the textures etched further. No wrap.
 - **Build:** router1, SD Analog on seed 2 (seed 1 timed out), the rest on seed 1. HD Analog 104.01, HD HDMI 103.36,
   HD Dual 107.57 MHz (worst HD 103.36); 6,880-6,912 LC, 19 EBR.
+
+## v0.1.2: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.1), captured with `./capture_preset.sh --defaults`:
+K1 Globes 545, K2 Arches 245, K4 Speed 276, K5 Texture 821, P12 Globe Size 515 (K3 Chevrons, K6 Etch and S7-S11
+unchanged). The vmprog was repacked from the v0.1.1 bitstreams (only the settings block differs, 192 bytes), so
+timing and seeds are as in v0.1.1 (SD Analog seed 2). Presets are unchanged.
