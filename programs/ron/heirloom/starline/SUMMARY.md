@@ -221,3 +221,26 @@ Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh
 K1 Arcs 747, K2 Waist 480, K3 Points 565, K4 Sweep 680, K5 Bands 539, P12 Neon 175 (K6 Etch and S7-S11 unchanged).
 The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 186 bytes), so timing, seeds and
 LC are as in v0.1.2. Presets are unchanged.
+
+## v0.2.0: Ron's preview notes (2026-11-20)
+
+Ron (Heirloom Preview Queue, rework on v0.1.0): "Make K4 a performance knob rather than animation".
+
+- **K4 Sweep before:** the colour LFO's rate, exponential (62 s period at 0 .. the clip's 8.7 s at 512 .. 1.2 s at
+  1023). The LFO phase went through a smoothstep cosine to x_v = 87 .. 3739 px, the hue ramp's sideways offset
+  (u = (x − x_v)/2200), so the colours, the reset line and the bead zone slid back and forth on their own.
+- **K4 Sweep now:** that offset, played by hand. x_v = the clip's 618 h (the reset line at x ≈ 309 px, the still)
+  + 560 kd / 64 h, kd = K4 − 512 with the usual ±8 deadband: ±4400 h = **±2200 px, one full hue-ramp period each way
+  at the clip's Bands** (more at narrow Bands, ~0.5 period at K5 = 0). Right slides the colours right. The offset only
+  enters u0 = c_us (x_st − x_v) mod 2^24, so it wraps like a phase: both ends show the clip's colours again, a full
+  colour cycle away. The span is 2 periods over the whole travel (the LFO swept 1.66).
+- K4 joins the shared glide (channel 5, P12 moves to 6), so a fast turn slides the colours smoothly and pot noise
+  can't jitter them. Display −100 .. 100, default 512 (the captured 680 was a speed, meaningless as a position; the
+  other captured defaults are kept).
+- Removed: the LFO phase and rate (c_p, c_rate), the rate exp2 lookup, the f² / smoothstep products (slots 9-12) and
+  their states. Slot 13 now multiplies |kd| × 560; z_dx is computed 15-bit signed (3182 .. 12470), so negative offsets
+  are fine.
+- Presets: Rainbow Bars dropped its K4 700 (a speed); no other preset used K4.
+- **Build** v0.2.0, router1, all six seed 1: HD Analog 89.87, HD HDMI 91.71, HD Dual 82.74 MHz (worst HD 82.74);
+  SD 91.43 / 82.75 / 88.90 MHz. 6970–6992 / 7680 LC (~140 fewer than v0.1.2), 23 / 32 EBR; iceunpack OK ×6.
+  v0.1.3's VHDL, TOML and vmprog are in `.heirloom_work/rb_starline/` (`*_v013.*`). Not simulated, not flashed.

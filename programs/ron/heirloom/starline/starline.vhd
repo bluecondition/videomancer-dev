@@ -9,7 +9,8 @@
 -- (1062, 913), and a band of rays across the top dipping to (1071, 374).  The tubes are pink-white on the left,
 -- yellow and green in the middle, pink again at the right point; a magenta wash fills the left third, a green
 -- glow sits above the band's dip, beads (sample-and-hold) chain the tubes on the right, a thin reset line
--- stands at x = 312.  In the clip the star never moves: the colours sweep sideways on a slow LFO (8.7 s).
+-- stands at x = 312.  In the clip the star never moves: the colours sweep sideways on a slow LFO (8.7 s); here K4
+-- plays that sweep by hand (v0.2.0).
 --
 -- The patch, as fitted (starline.py has the tables, notes.md the measurements):
 --   T      = |x - 1071| (rounded within 128 px of the centre) + Etch * luma
@@ -17,12 +18,12 @@
 --          B = 395 + q (y - 605)^2 above the kink row (the arcs), B = b_k, c = 5 (y - y_k) below it (the V),
 --          a parabolic fillet over +-4 rows at the points
 --   band   tubes where log2 a(y) - log2 T = j / 2, a = 8.7 (374 - y): rays from the dip
---   colour LUT(u, k): u = (x - x_v) / 2200 the line-locked hue ramp (x_v on the LFO), k = wash + tubes / glow
+--   colour LUT(u, k): u = (x - x_v) / 2200 the line-locked hue ramp (x_v on K4), k = wash + tubes / glow
 --
 --   K1  Arcs     the arcs' curvature: near-straight sides (0) .. the clip (512) .. tight hooks (1023)
 --   K2  Waist    the arcs' apex distance: arcs meet in a lens (0) .. the clip (449) .. pushed to the edges
 --   K3  Points   the row of the star points (and where the V starts): high (0) .. the clip (500) .. low
---   K4  Sweep    the colour LFO rate: 60 s (0) .. the clip's 8.7 s (512) .. 1.2 s (1023)
+--   K4  Sweep    the colours' sideways position, played: x_v - 2200 px (0) .. the clip (512) .. + 2200 px (1023)
 --   K5  Bands    the hue ramp period: 2 lines' worth (0) .. one line, the clip (512) .. 140 px stripes (1023)
 --   K6  Etch     how far the camera (or the Osc) bends the tubes
 --   S7  Mirror   the star mirrored about its point row: arcs below too, a four-armed star
@@ -119,6 +120,19 @@ architecture starline of program_top is
             when 5 | 6 | 14     => return to_unsigned(3, 3);
             when others         => return to_unsigned(2, 3);
         end case;
+    end function;
+    -- bipolar knob with a +-8 deadband around 512: -503 .. 503
+    function f_db(k : unsigned(9 downto 0)) return signed is
+        variable d : signed(10 downto 0);
+    begin
+        d := signed(resize(k, 11)) - 512;
+        if d > -9 and d < 9 then
+            return to_signed(0, 11);
+        elsif d > 0 then
+            return d - 8;
+        else
+            return d + 8;
+        end if;
     end function;
     function f_tri8(v : unsigned(8 downto 0)) return unsigned is
     begin
@@ -222,7 +236,8 @@ architecture starline of program_top is
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
-    signal s_k4 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_g4 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal d_k4 : signed(10 downto 0) := (others => '0');
     signal s_mir, s_bead, s_woff, s_emb, s_src : std_logic := '0';
 
     -- per-field constants
@@ -240,9 +255,7 @@ architecture starline of program_top is
     signal c_us   : unsigned(16 downto 0) := to_unsigned(3813, 17);      -- hue phase per h (Q24)
     signal c_usx  : unsigned(18 downto 0) := to_unsigned(7626, 19);      -- per pixel
     signal c_vt1, c_vt2 : unsigned(7 downto 0) := (others => '0');       -- reset-line half widths (phase >> 12)
-    signal c_rate : unsigned(15 downto 0) := to_unsigned(126, 16);
-    signal c_p    : unsigned(15 downto 0) := to_unsigned(60621, 16);     -- LFO phase (Q16)
-    signal c_xv   : unsigned(12 downto 0) := to_unsigned(618, 13);
+    signal c_xv   : signed(13 downto 0) := to_signed(618, 14);          -- the hue ramp's offset (h): the clip 618 +- 4400
     signal c_u0   : unsigned(23 downto 0) := (others => '0');
     signal c_eg   : unsigned(8 downto 0) := to_unsigned(43, 9);   -- etch gain (0 .. 318: x1.25)
     signal c_xst  : unsigned(11 downto 0) := to_unsigned(8, 12);         -- beam start x (h)
@@ -270,11 +283,6 @@ architecture starline of program_top is
     signal z_dk2 : unsigned(17 downto 0) := (others => '0');
     signal z_na  : unsigned(7 downto 0) := to_unsigned(48, 8);
     signal z_nx  : unsigned(7 downto 0) := (others => '0');
-    signal z_v4  : unsigned(9 downto 0) := (others => '0');
-    signal z_v4n : std_logic := '0';
-    signal z_fq  : unsigned(15 downto 0) := (others => '0');
-    signal z_s2  : unsigned(15 downto 0) := (others => '0');
-    signal z_s   : unsigned(15 downto 0) := (others => '0');
     signal z_dx  : unsigned(13 downto 0) := (others => '0');
     signal z_xsel, z_inj : std_logic := '0';
     signal z_exa : unsigned(7 downto 0) := (others => '0');
@@ -453,6 +461,7 @@ begin
         variable v_t  : unsigned(20 downto 0);
         variable v_u  : unsigned(12 downto 0);
         variable v_f  : unsigned(18 downto 0);
+        variable v_x  : signed(14 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -483,7 +492,6 @@ begin
                 if s_hcnt > s_wmax then s_wmax <= s_hcnt; end if;
                 s_hcnt <= (others => '0');
             end if;
-            s_k4 <= unsigned(registers_in(3));
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
@@ -513,6 +521,7 @@ begin
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
                             when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 5      => s_gm <= s_g4; s_gr <= unsigned(registers_in(3));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -533,10 +542,11 @@ begin
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 5      => s_g4 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
                         z_gp <= "00";
-                        if z_gc = 5 then z_grun <= '0'; end if;
+                        if z_gc = 6 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -555,10 +565,6 @@ begin
                     when 174 => z_sel <= to_unsigned(6, 5);  z_pre <= '1';
                     when 198 => z_sel <= to_unsigned(7, 5);  z_pre <= '1';
                     when 222 => z_sel <= to_unsigned(8, 5);  z_pre <= '1';
-                    when 246 => z_sel <= to_unsigned(9, 5);  z_pre <= '1';
-                    when 270 => z_sel <= to_unsigned(10, 5); z_pre <= '1';
-                    when 294 => z_sel <= to_unsigned(11, 5); z_pre <= '1';
-                    when 318 => z_sel <= to_unsigned(12, 5); z_pre <= '1';
                     when 342 => z_sel <= to_unsigned(13, 5); z_pre <= '1';
                     when 366 => z_sel <= to_unsigned(14, 5); z_pre <= '1';
                     when 390 => z_sel <= to_unsigned(15, 5); z_pre <= '1';
@@ -581,11 +587,7 @@ begin
                     when 6  => z_fa <= resize(s_gp(12 downto 3), 18);  z_fb <= to_unsigned(176, 16);      -- tubes
                     when 7  => z_fa <= resize(z_nx, 18);               z_fb <= to_unsigned(36, 16);       -- glow
                     when 8  => z_fa <= to_unsigned(3813, 18);           z_fb <= z_m;                      -- US
-                    when 9  => z_fa <= resize(z_v4, 18);               z_fb <= to_unsigned(362, 16);      -- sweep exp
-                    when 10 => z_fa <= to_unsigned(126, 18);            z_fb <= z_m;                      -- rate
-                    when 11 => z_fa <= resize(z_fq, 18);               z_fb <= z_fq;                      -- f^2
-                    when 12 => z_fa <= to_unsigned(196608, 18) - shift_left(resize(z_fq, 18), 1); z_fb <= z_s2; -- f^2 (3 - 2f)
-                    when 13 => z_fa <= resize(z_s, 18);                z_fb <= to_unsigned(7304, 16);     -- x_v
+                    when 13 => z_fa <= resize(unsigned(abs(d_k4)), 18); z_fb <= to_unsigned(560, 16);     -- x_v offset
                     when 14 => z_fa <= resize(c_us, 18);               z_fb <= resize(z_dx, 16);          -- u0
                     when 15 => z_fa <= resize(s_g6(12 downto 3), 18);  z_fb <= resize(s_g6(12 downto 3), 16); -- etch^2
                     when 16 =>                                                                             -- q |dk|
@@ -659,29 +661,20 @@ begin
                     when 218 =>
                         if f_acc(13 downto 10) >= 5 or f_acc(17 downto 14) /= 0 then c_gw <= to_unsigned(2, 3);
                         else c_gw <= to_unsigned(7, 3) - resize(f_acc(12 downto 10), 3); end if;
-                    when 219 =>
-                        if s_k4 >= 512 then z_v4 <= s_k4 - 512; z_v4n <= '0';
-                        else z_v4 <= 512 - s_k4; z_v4n <= '1'; end if;
+                    when 219 => d_k4 <= f_db(s_g4(12 downto 3));
                     when 243 => c_us <= z_shv(16 downto 0);
-                    when 266 =>
-                        if z_v4n = '1' then v_e := -signed(resize(f_acc(18 downto 8), 11));
-                        else v_e := signed(resize(f_acc(18 downto 8), 11)); end if;
-                        z_exa <= unsigned(v_e(7 downto 0)); z_sh <= v_e(10 downto 8); z_xsel <= '1';
-                    when 267 => z_xsel <= '1';
-                    when 269 => z_m <= unsigned(r_exa_q);
-                    when 291 =>
-                        if z_shv(15 downto 0) = 0 then c_rate <= to_unsigned(1, 16); else c_rate <= z_shv(15 downto 0); end if;
-                        if c_p(15) = '1' then z_fq <= c_p(14 downto 0) & '0'; else z_fq <= (not c_p(14 downto 0)) & '0'; end if;
-                    when 314 => z_s2 <= f_acc(31 downto 16);
-                    when 338 => z_s  <= f_acc(31 downto 16);
-                    when 362 => c_xv <= to_unsigned(7478, 13) - f_acc(28 downto 16);
+                    -- K4 Sweep, played: x_v = the clip's 618 h + 560 kd / 64 (+-4400 h = +-2200 px, one hue-ramp period
+                    -- each way at the clip's Bands); only u0 = c_us (x_st - x_v) mod 2^24 sees it, so any offset wraps
+                    when 362 =>
+                        if d_k4(10) = '0' then c_xv <= to_signed(618, 14) + signed(resize(f_acc(18 downto 6), 14));
+                        else c_xv <= to_signed(618, 14) - signed(resize(f_acc(18 downto 6), 14)); end if;
                     when 363 =>
-                        z_dx <= resize(c_xst, 14) + 8192 - resize(c_xv, 14);
+                        v_x := resize(signed('0' & c_xst), 15) + 8192 - resize(c_xv, 15);   -- 3182 .. 12470
+                        z_dx <= unsigned(v_x(13 downto 0));
                     when 386 =>
                         c_u0 <= f_acc(23 downto 0) - shift_left(resize(c_us, 24), 13);
                     when 410 => c_eg <= resize(f_acc(19 downto 12), 9) + f_acc(19 downto 14);   -- x1.25
                     when 411 =>
-                        c_p <= c_p + c_rate;
                         c_vt1 <= c_us(16 downto 9) srl 1;
                         c_vt2 <= c_us(16 downto 9);
                     when 458 => c_usx <= f_acc(18 downto 0);

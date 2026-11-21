@@ -1,12 +1,12 @@
 # Starline - Heirloom (video phase), built 2026-11-09 (v0.1.0) from the clip WIN_20231218_21_31_11 at 3.0 s.
 # A neon star of nested tubes: two points, bowed arcs, a V and a band of rays, magenta-white to green, with the
-# colours sweeping sideways on a slow LFO.  See starline.vhd, starline.py, SUMMARY.md.
+# colours slid sideways by K4 (v0.2.0; the clip sweeps them on a slow LFO).  See starline.vhd, starline.py, SUMMARY.md.
 
 [program]
 processing_delay_clks = 40
 program_id = "com.czartroniks.starline"
 program_name = "Starline"
-program_version = "0.1.3"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -50,11 +50,11 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Sweep"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 680
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -136,7 +136,6 @@ rotary_potentiometer_1 = 900
 [[preset]]
 name = "Rainbow Bars"
 rotary_potentiometer_5 = 900
-rotary_potentiometer_4 = 700
 
 [[preset]]
 name = "Mosaic"
