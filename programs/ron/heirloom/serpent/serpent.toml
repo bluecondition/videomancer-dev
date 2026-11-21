@@ -7,7 +7,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.serpent"
 program_name = "Serpent"
-program_version = "0.1.2"
+program_version = "0.1.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -23,7 +23,7 @@ name_label = "Turns"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 725
 display_float_digits = 0
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 345
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Columns"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 734
 display_float_digits = 0
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 747
+initial_value = 240
 display_float_digits = 0
 suffix_label = ""
 
@@ -63,7 +63,7 @@ name_label = "Holes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 452
 display_float_digits = 0
 suffix_label = "%"
 
@@ -113,7 +113,7 @@ name_label = "Coil"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 341
+initial_value = 681
 display_float_digits = 0
 suffix_label = "%"
 

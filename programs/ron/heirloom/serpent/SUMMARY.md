@@ -197,3 +197,10 @@ Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs 
 - **Change.** The etch gain constant 97 became 121, so c_et is x 1.25 at every K6 position (top 387 -> 483, still 9 bits; the etch sum fits its 17 bits). The comparison was rendered at 720p decimation 1, since decimation 4 shows only the black top-left corner.
 - Look: `.heirloom_work/rb_serpent/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
 - **Build.** v0.1.2, router1. **HD Analog passed only on seed 2** (seed 1 missed); the other five configs on seed 1. HD worst 74.38 MHz, thin (HD Analog 74.38, HD HDMI 78.60, HD Dual 81.46); SD 73.49–83.76 MHz; 7089–7100 / 7680 LC (92 %), 18 EBR. iceunpack OK x6. (v0.1.0 was already thin: HD Dual 74.46.)
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Turns 725, K2 Bands 345, K3 Columns 734, K4 Speed 240, K5 Holes 452, P12 Coil 681 (K6 Etch and S7-S11
+unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 202 bytes), so
+timing and seeds are as in v0.1.2 (HD Analog seed 2, 74.38 MHz thin). Presets are unchanged.
