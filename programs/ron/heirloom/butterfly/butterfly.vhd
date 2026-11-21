@@ -25,11 +25,13 @@
 --   K2  Rows      V oscillator rate: butterfly rows (x0.25 .. x8)
 -- 2026-11-20 v0.2.0 (Ron's preview notes): K1 / K2 ranges doubled both ways (-2 / +3 octaves, were -1 / +1.585)
 --   K3  Hearts    heart size: small lobes in rings (0) .. the still (512) .. hearts swallowing the diamonds (1023)
---   K4  Flap      wing position (performance): folded (0: slim lenses, big hearts) .. the still (512, +-8 deadband)
---                 .. open (1023: lenses x1.41, hearts shrink), through a sine-like curve and a 2-stage glide
+--   K4  Flap      wing position (performance): folded (0: lenses x0.5, hearts +1.6) .. the still (512, +-8 deadband)
+--                 .. open (1023: lenses x2, hearts -1.6), through a sine-like curve and a 2-stage glide
 -- 2026-11-21 v0.3.0 (Ron's preview notes): Flap is a performance control.  The triangle LFO (rate = K4^2) is gone;
 --   the knob sets the wing position directly: pos = +-256 (1.5 x - 0.5 x^3), x = (|k - 512| - 8) / 504, so the
 --   wings ease into both ends with no corner; K4 runs through the shared glide twice (an S-shaped glide).
+-- 2026-11-21 v0.4.0 (Ron, after flashing v0.3.0): Flap range doubled each way: L0 +-178 Q8 (lenses x0.50 .. x2.00,
+--   was +-89 = x0.71 .. x1.41) and the hearts offset +-1638 (+-1.6 palette units, was +-819).
 --   K5  Rings     band weight of every ring: wide soft bands (0) .. the still .. hairlines (1023)
 --   K6  Bend      how far the camera (or the Osc, 16x and centred) bends the rings
 --   S7  Echo      Off (the still) / On: every magenta field repeats the ring sequence
@@ -506,8 +508,8 @@ begin
                     when 8  => z_fa <= to_unsigned(150, 36);            z_fb <= z_mt;                      -- k1q
                     when 9  => z_fa <= to_unsigned(209, 36);            z_fb <= z_mt;                      -- g2q
                     when 10 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(204, 16);     -- P12 wings
-                    when 11 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(89, 16);      -- |flap| * 89
-                    when 12 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(819, 16);     -- |flap| * 819
+                    when 11 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(178, 16);     -- |flap| * 178 (<= 45568)
+                    when 12 => z_fa <= resize(z_a, 36);                 z_fb <= to_unsigned(1638, 16);    -- |flap| * 1638 (<= 419328)
                     when 13 => z_fa <= resize(s_g6(12 downto 3), 36);   z_fb <= resize(s_g6(12 downto 3), 16);  -- bend^2
                     when 14 => z_fa <= resize(c_fa, 36);                z_fb <= resize(c_fa, 16);          -- a'^2
                     when 15 => z_fa <= resize(c_gq, 36);                z_fb <= to_unsigned(111, 16);      -- Osc centre
@@ -624,7 +626,7 @@ begin
                         else z_d3 <= v_d + 8; end if;
                     when 339 =>
                         c_l0 <= to_signed(C_LN174, 13) + z_l0p + resize(z_lfa, 13);
-                        -- off = -d3 * 5 - (p - 512) * 3 + flap * 819 / 256
+                        -- off = -d3 * 5 - (p - 512) * 3 + flap * 1638 / 256 (v_s <= +-5694, clamped to +-4095)
                         v_d := signed(resize(s_gp(12 downto 3), 11)) - 512;
                         v_s := z_lfb - resize(shift_left(resize(z_d3, 15), 2) + resize(z_d3, 15), 15)
                                - resize(shift_left(resize(v_d, 15), 1) + resize(v_d, 15), 15);

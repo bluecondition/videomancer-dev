@@ -2,12 +2,13 @@
 # A magenta / blue / black kaleidoscope: lenses pinched at dark X crossings, hearts above and below each X,
 # nested blue diamonds, blue arcs and a bow-tie glow.  See butterfly.vhd, butterfly.py and SUMMARY.md.
 # v0.3.0 (2026-11-21): K4 Flap is a performance control (wing position, 512 = the still), no LFO.
+# v0.4.0 (2026-11-21): Flap range doubled each way (lenses x0.5 .. x2, hearts +-1.6 units).
 
 [program]
 processing_delay_clks = 24
 program_id = "com.czartroniks.butterfly"
 program_name = "Butterfly"
-program_version = "0.3.0"
+program_version = "0.4.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

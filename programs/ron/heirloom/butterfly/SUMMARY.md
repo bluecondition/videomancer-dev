@@ -97,7 +97,7 @@ Working files are in `.heirloom_work/rb_butterfly/`: `notes.md`, `axes.py`, `edg
 | K1 Columns | the H oscillator: butterflies across, ×0.5 (one giant lens) .. ×1 (2.04, the still, 512) .. ×3 (six across); the cell keeps its shape |
 | K2 Rows | the V oscillator: butterfly rows, ×0.5 (tall diamonds, one lens row) .. the still .. ×3 (flat lenses stacked six deep) |
 | K3 Hearts | the hearts' size (F2 offset, ±2.5 palette units, ±8 deadband): small lobes wrapped in extra rings (0) .. the still (512) .. hearts swallowing the diamonds, which shrink to dots (1023) |
-| K4 Flap | (v0.3.0: performance) the wing position, sine-like curve, 2-stage glide: 0 = folded (lenses x0.71, hearts +0.8 units) .. 512 = the still (±8 deadband) .. 1023 = open (lenses x1.41, hearts −0.8 units); no LFO |
+| K4 Flap | (v0.3.0: performance; v0.4.0: range doubled) the wing position, sine-like curve, 2-stage glide: 0 = folded (lenses x0.50, hearts +1.6 units) .. 512 = the still (±8 deadband) .. 1023 = open (lenses x2.0, hearts −1.6 units); no LFO |
 | K5 Rings | band weight of every ring, lens bands and heart rings together (gain on both fields, ×0.54 .. ×2.46): wide soft bands (0) .. the still (512) .. hairlines between flooded magenta (1023) |
 | K6 Bend | how far the smoothed camera (or the Osc) bends the rings, square law: 0 .. 217 G per full luma; the default 224 (gain 6/128) bends the bands as clean curves; 600 a strong bend; 1023 shreds the rings into the picture |
 | S7 Echo | Off (the still) / On: every magenta field repeats the ring sequence (lens interiors go dark with magenta outlines) |
@@ -300,10 +300,47 @@ v0.2.0 and is unchanged; this pass is the Flap.
 - **HD HDMI skew re-seed** (`.heirloom_work/skew_tools/screen.sh`, 96 timing-clean hd_hdmi placements):
   - HD HDMI: the builder's router1 s1 sat at HSYNC **−1.12** / data ≤ −1.42 (negative = known bad). Installed
     **router2 s32: +2.04 / ≤ −1.12, 83.04 MHz**. Spare with the runner-up router1 s12 (+1.92 / ≤ −0.65,
-    86.66 MHz): `.heirloom_work/rb_butterfly/skew/butterfly_v030_spare_hd_hdmi_router1_s12.vmprog`.
+    86.66 MHz): `.heirloom_work/rb_butterfly/skew_v030/butterfly_v030_spare_hd_hdmi_router1_s12.vmprog`.
   - HD Analog: the builder's s1 had data ≤ −0.30 (fails the ≤ −0.6 rule). Installed **router1 s10: −2.05 /
     ≤ −1.47, 92.79 MHz** (also clean on the analog-encoder columns: −0.73 / ≤ −1.65).
   - HD Dual: kept the builder's s1 (−1.59 / ≤ −0.87, 81.80 MHz).
   - **A full builder rebuild re-routes seed 1 for every config**, which undoes both installs. Re-install them
     (`.heirloom_work/skew_tools/install.sh butterfly router2 32` and `... router1 10 hd_analog`), or re-screen
-    after an RTL change. The replaced .bins are in `.heirloom_work/rb_butterfly/skew/*_replaced_*.bin`.
+    after an RTL change. The replaced .bins are in `.heirloom_work/rb_butterfly/skew_v030/*_replaced_*.bin`.
+
+## v0.4.0: Ron's notes after flashing v0.3.0 (2026-11-21)
+
+Ron flashed v0.3.0 (commit ba81a6a) and liked the direction: "more range needed on flap, like maybe 100% in both
+directions".
+
+- **K4 Flap range doubled each way.** The wing position (the same S-curve ±256, two-stage glide and 512 = the still
+  with a ±8 deadband) now scales the two wing terms twice as hard: the lens L0 term |pos| × 178 >> 8 (was × 89) and
+  the hearts offset |pos| × 1638 >> 8 (was × 819).
+  - K4 0, folded: lenses **× 0.50** (L0 −178 Q8; was × 0.71), hearts **+1.6** palette units (offset −1638; was +0.8);
+  - K4 256: × 0.63, +1.1; K4 512: the still, exactly; K4 768: × 1.60, −1.1;
+  - K4 1023, open: lenses **× 2.00** (L0 +178; was × 1.41), hearts **−1.6** (offset +1638).
+- **Widths checked.** The slot-11 product ≤ 256 × 178 = 45,568 (the 9-bit slice holds 178). The slot-12 product
+  ≤ 256 × 1638 = 419,328 (the 12-bit slice holds 1638). c_l0 = 1321 ± 408 (P12) ± 178 = 735 .. 1907 (13-bit signed).
+  ln v − L0 ∈ −2256 .. 690, and q5_l = that + (−ln sin ≤ 1836) ∈ −2256 .. 2526, inside its 13-bit ±4095. The F1
+  products ≤ 2526 × 511 = 1.29 M, inside 23 bits. The hearts sum v_s ≤ ±5694 (15-bit) is clamped to ±4095 as before.
+  When K3, P12 and K4 all sit at the same extreme, the hearts offset saturates at the clamp, so the last few % of
+  travel can stop changing the hearts there (the lens term still moves).
+- **Extremes.** With P12 Wings also at an end, t0 now reaches ~18 px (K4 0 + P12 0: hairline slivers) and ~1720 px
+  (K4 1023 + P12 1023: the lenses flood the frame, wider than any cell). That is the intended "100 % in both
+  directions"; at the defaults (P12 50 %) the ends are lenses × 0.5 and × 2.
+- Presets unchanged. "Wings Folded" (K4 0) is now twice as folded. TOML: version only.
+- **Resolutions.** No geometry change; SD / 720p as before (SD shows the centre 4:3).
+- **Build** v0.4.0, router1, all six seed 1: HD Analog 79.35, SD Analog 81.89, HD HDMI 87.83, SD HDMI 86.66,
+  HD Dual 78.43, SD Dual 81.01 MHz. 7286–7309 / 7680 LC (94.9–95.2 %, within ±20 of v0.3.0: only two multiplier
+  constants changed), 20 / 32 EBR. iceunpack OK ×6. No trim was needed. Not simulated, not flashed. v0.3.0's VHDL,
+  TOML and vmprog are in `.heirloom_work/rb_butterfly/` (`*_v030.*`); v0.3.0's skew screen moved to `skew_v030/`.
+- **HD skew re-seed on the new netlist** (99 timing-clean hd_hdmi placements, 9 in the window):
+  - HD HDMI: the builder's router1 s1 sat at HSYNC **−0.15** / data ≤ −1.15 (negative = unsafe). Installed
+    **router1 s55: +1.64 / ≤ −0.82, 85.27 MHz** (the most positive in the window). Spare with router2 s1 (+1.57 /
+    ≤ −0.92, 77.83 MHz): `.heirloom_work/rb_butterfly/skew/butterfly_v040_spare_hd_hdmi_router2_s1.vmprog`.
+    The runner-up on the list, router2 s55, is the same placement as s55, at a borderline −0.60, so I passed it over.
+  - HD Analog: kept the builder's s1 (−0.85 / ≤ −0.63, 79.35 MHz; just inside the ≤ −0.6 rule).
+  - HD Dual: the builder's s1 had data ≤ −0.39 (fails). Installed **router1 s9: −2.23 / ≤ −1.48, 83.13 MHz**.
+  - **A full builder rebuild re-routes seed 1 for every config** and undoes both installs. Re-install with
+    `.heirloom_work/skew_tools/install.sh butterfly router1 55` and `... router1 9 hd_dual`, or re-screen after an
+    RTL change. The replaced .bins are in `.heirloom_work/rb_butterfly/skew/*_replaced_*.bin`.
