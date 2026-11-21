@@ -209,7 +209,7 @@ versions from v0.1.0.
 | 44 | 20231205_23_09_56 t0.5 | bunsen | orange/blue flame on blue; blue with yellow flame blobs | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,917-6,945 LC, 23 EBR); not flashed |
 | 45 | 20231227_22_52_47 t3.5 | kachina | red/magenta/blue/yellow mirrored totem mask | v0.1.1 built 2026-11-09 (router1; all six seed 1; 6,831-6,849 LC, 24 EBR); not flashed |
 | 46 | 20231229_00_46_59 t6.0 | effigy | yellow idol in red/black flames, mirrored | v0.1.3 2026-11-21: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1, 6/6 seed 1; 7,105-7,125 LC, 23 EBR); flashed (v0.1.2) |
-| 47 | 20240102_00_30_49 t1.0 | cateye | pink/yellow chevron eye | v0.1.1 built 2026-11-09 (router1; all six seed 1; 7,147-7,177 LC, 21 EBR); not flashed |
+| 47 | 20240102_00_30_49 t1.0 | cateye | pink/yellow chevron eye | v0.1.4 2026-11-21: HW-captured defaults (Ron); v0.1.3 K6 default 100 % (router1, 6/6 seed 1; worst HD 84.27 MHz; 21 EBR); flashed (v0.1.3) |
 | 48 | 20240104_00_30_04 t3.0 | grotto | blue/white/black cavern eye with cyan edges | v0.1.0 built 2026-11-09 (router2; HD Dual seed 2, others seed 1; 6,870-6,884 LC, 23 EBR); not flashed |
 | 49 | 20240105_20_46_57 t0.5 | bubbles | bubble lenses in cyan/green/red wavy bands | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,995-7,014 LC, 17 EBR); not flashed |
 | 50 | 20240216_23_50_17 t0.5 | velvet | magenta/white/yellow vertical drapes with a reflection | v0.1.1 built 2026-11-09 (router1; all six seed 1; 7,135-7,143 LC, 20 EBR); not flashed |

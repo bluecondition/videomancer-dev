@@ -188,3 +188,10 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
   scratch copies). The picture is the same, with the walls and rings bent further around the bear. No wrap.
 - **Build:** router1, all six on seed 1. HD Analog 87.45, HD HDMI 84.27, HD Dual 85.43 MHz (worst HD 84.27);
   7,145-7,192 LC, 21 EBR.
+
+## v0.1.4: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Chevron 620, K2 Eye 808, K3 Rings 683, K4 Speed 212, K5 Stripes 454, P12 Heat 232 (K6 Bend and S7-S11 unchanged).
+The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 206 bytes), so timing, seeds and
+LC are as in v0.1.3. Presets are unchanged.
