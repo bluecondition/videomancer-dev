@@ -207,3 +207,10 @@ The per-field camera gain is now (k6 >> 4) + (k6 >> 6), 0..78 (was k6 >> 4, 0..6
 Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_bubbles/k6b/k6b_cmp.png`.
 
 Build: router1, all seed 1, worst HD Fmax 91.91 MHz, 7035 LC (max of 6). Fmax per config: HD Analog 106.06, SD Analog 104.61, HD HDMI 100.11, SD HDMI 99.91, HD Dual 91.91, SD Dual 96.38 MHz.
+
+## v0.1.3: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Bubbles 676, K2 Halo 138, K3 Columns 560, K4 Rise 1008 (K5 Rainbow, K6 Camera, S7-S11 and P12 Wave unchanged).
+The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 175 bytes), so timing, seeds and
+LC are as in v0.1.2. Presets are unchanged.
