@@ -166,3 +166,10 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
   - G + bend ≤ 232 k stays inside the 18-bit sum. Latency unchanged.
 - **Render.** `.heirloom_work/rb_lantern/k6b/k6b_cmp.png` (bear, 720p60 / 2, K6 100 %, glide bypassed in the scratch copies). The same lantern, with more contours wrapped round the picture.
 - **Build** v0.1.2, router1, all six seed 1. HD Analog 107.20, HD HDMI 105.74, HD Dual 104.16 MHz (worst HD 104.16). 5138–5166 / 7680 LC. Not flashed.
+
+## v0.1.3: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Rings 787, K2 Point 248, K3 Height 573, K4 Drift 328, K5 Lantern 528, S7 Twin On, S8 Ink On, S9 Gel On,
+P12 Lattice 229 (K6 Bend, S10, S11 unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings
+block differs, 244 bytes), so timing, seeds and LC are as in v0.1.2. Presets are unchanged.
