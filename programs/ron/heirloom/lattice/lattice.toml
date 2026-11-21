@@ -6,7 +6,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.lattice"
 program_name = "Lattice"
-program_version = "0.1.2"
+program_version = "0.1.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -22,7 +22,7 @@ name_label = "Big"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 936
 display_float_digits = 0
 suffix_label = "%"
 
@@ -32,7 +32,7 @@ name_label = "Small"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 815
 display_float_digits = 0
 suffix_label = "%"
 
@@ -42,7 +42,7 @@ name_label = "Columns"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 714
 display_float_digits = 0
 suffix_label = "%"
 
@@ -52,7 +52,7 @@ name_label = "Drift"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 620
+initial_value = 754
 display_float_digits = 0
 suffix_label = ""
 
@@ -62,7 +62,7 @@ name_label = "Rings"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 562
 display_float_digits = 0
 suffix_label = "%"
 
@@ -80,7 +80,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Shape"
 value_labels = ["Diamond", "Bulb"]
-initial_value_label = "Diamond"
+initial_value_label = "Bulb"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -112,7 +112,7 @@ name_label = "Blades"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 380
+initial_value = 463
 display_float_digits = 0
 suffix_label = "%"
 

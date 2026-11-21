@@ -195,3 +195,10 @@ Glides (1/8 per field, ±2 deadband; ±4 on K6) on K1, K2, K3, K5, K6 and P12. P
 ## K6 top +25 % and default 100 % (2026-11-15)
 
 Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Big 936, K2 Small 815, K3 Columns 714, K4 Drift 754, K5 Rings 562, S7 Shape On, P12 Blades 463 (K6 Camera,
+S8-S11 unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 187 bytes),
+so timing, seeds and LC are as in v0.1.2. Presets are unchanged.
