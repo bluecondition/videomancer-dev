@@ -201,3 +201,10 @@ Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **B
 - The per-field displacement depth is now c_dep + c_dep / 4 (sequencer slot result at zc 386, saturated at 8191; the largest value reached is ~6,500 at K1 = K6 = 100 %), so every K6 position is ×1.25: 0 .. ~375 px per full luma (was 0 .. 300). The phase add in the pixel path wraps by whole cycles, as before. Pixel path and latency unchanged.
 - The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.1.2).
 - Build (router1, 2026-11-15): all six seed 1; HD worst 80.61 MHz (HD Analog 82.77, HD HDMI 80.61, HD Dual 84.28); 7,049 / 7,680 LC max.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Bands 847, K2 Curtains 858, K3 Lean 791, K4 Tint 473, K5 Peaks 468, P12 Storm 340 (K6 Picture and S7-S11
+unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 198 bytes), so
+timing, seeds and LC are as in v0.1.2. Presets are unchanged.
