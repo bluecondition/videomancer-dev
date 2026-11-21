@@ -6,7 +6,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.ironwork"
 program_name = "Ironwork"
-program_version = "0.1.3"
+program_version = "0.1.4"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -22,7 +22,7 @@ name_label = "Tiles"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 839
 display_float_digits = 0
 suffix_label = "%"
 
@@ -32,7 +32,7 @@ name_label = "Rows"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 396
 display_float_digits = 0
 suffix_label = "%"
 
@@ -42,7 +42,7 @@ name_label = "Lens"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 486
 display_float_digits = 0
 suffix_label = "%"
 
@@ -52,7 +52,7 @@ name_label = "Cycle"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 700
+initial_value = 491
 display_float_digits = 0
 suffix_label = ""
 
@@ -62,7 +62,7 @@ name_label = "Rings"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 595
 display_float_digits = 0
 suffix_label = "%"
 
@@ -80,13 +80,13 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Tear"
 value_labels = ["On", "Off"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Palette"
 value_labels = ["Ironwork", "Verdigris"]
-initial_value_label = "Ironwork"
+initial_value_label = "Verdigris"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -98,7 +98,7 @@ initial_value_label = "Lace"
 parameter_id = "toggle_switch_10"
 name_label = "Key"
 value_labels = ["Lace", "Negative"]
-initial_value_label = "Lace"
+initial_value_label = "Negative"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -112,7 +112,7 @@ name_label = "Lace"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 813
 display_float_digits = 0
 suffix_label = "%"
 

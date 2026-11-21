@@ -165,3 +165,10 @@ Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top 
 - Classification: **BEND.** K6 Etch adds camera (or Osc) luma x etch^2 to the ring phase and the stripe phase: the lenses and lace bend into contours.
 - Change: The etch gain is 1.25 x etch^2 / 256, c_eg = eg + eg >> 2 (0 .. 317, widened to 9 bits), computed in the sequencer store; the two 4 x 9 partial products are 13 bits. Downstream only the phase bits are used, so nothing can wrap. Full Etch: 3.4 -> 4.2 rings per full luma.
 - Build: v0.1.3 built 2026-11-15 through the queue, router1, all six configs seed 1. Worst HD 80.15 MHz (HD Analog 90.76, HD HDMI 80.15, HD Dual 86.40); 6819-6848 LC. Output `out/rev_b/ron/heirloom/ironwork.vmprog`. NOT flashed.
+
+## v0.1.4: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh --defaults`:
+K1 Tiles 839, K2 Rows 396, K3 Lens 486, K4 Cycle 491, K5 Rings 595, S7 Tear On, S8 Palette On, S10 Key On,
+P12 Lace 813 (K6 Etch, S9, S11 unchanged). The vmprog was repacked from the v0.1.3 bitstreams (only the settings
+block differs, 240 bytes), so timing, seeds and LC are as in v0.1.3. Presets are unchanged.
