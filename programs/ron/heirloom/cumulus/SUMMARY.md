@@ -162,3 +162,10 @@ Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **B
 - The per-field Etch gain (etch² >> 10, sequencer slot 11) is now g + g / 4: c_ge widened 10 → 11 bits (0 .. 1,277, was 0 .. 1,022), so every K6 position is ×1.25. The luma × gain pixel product and its pipe (stages 4–8) gained one bit (19 bits, 255 × 1,277 < 2^19) and the chord / Psi terms one bit each (p9_eb 12, p9_ez 10 bits), so nothing wraps; Psi stays a cyclic 11-bit coordinate, as designed. Latency unchanged.
 - The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.1.2).
 - Build (router1, 2026-11-15): all six seed 1; HD worst 95.57 MHz (HD Analog 95.57, HD HDMI 98.45, HD Dual 103.33); 7,032 / 7,680 LC max.
+
+## v0.1.3: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Tiles 947, K2 Lean 996, K3 Scallop 978, K4 Speed 679, K5 Spikes 471, S9 Invert On, S10 Slip On, P12 Billow 325
+(K6 Etch, S7, S8, S11 unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block
+differs, 247 bytes), so timing, seeds and LC are as in v0.1.2. Presets are unchanged.
