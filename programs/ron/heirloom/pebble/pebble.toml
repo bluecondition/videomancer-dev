@@ -7,7 +7,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.pebble"
 program_name = "Pebble"
-program_version = "0.1.2"
+program_version = "0.1.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -23,7 +23,7 @@ name_label = "Ripples"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 567
 display_float_digits = 0
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Bend"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 671
+initial_value = 823
 display_float_digits = 0
 suffix_label = ""
 
@@ -43,7 +43,7 @@ name_label = "Rows"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 657
 display_float_digits = 0
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 682
+initial_value = 782
 display_float_digits = 0
 suffix_label = ""
 
@@ -63,7 +63,7 @@ name_label = "Inlay"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 586
 display_float_digits = 0
 suffix_label = "%"
 
@@ -113,7 +113,7 @@ name_label = "Veil"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 314
+initial_value = 861
 display_float_digits = 0
 suffix_label = "%"
 

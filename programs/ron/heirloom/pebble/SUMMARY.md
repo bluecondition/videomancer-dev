@@ -259,3 +259,10 @@ P12 = 100 %, in the gaps between the figures and in the figures' row stepping (`
 - **Change.** Zone slot 41: G = 1.25 k / 4, 9 bits, 0 .. 318 (was 0 .. 255). 100 % is now x5 the v0.1.0 gain (was x4). s' is 11 bits (0 .. 1267); the palette's 3.5 s' uses s'(10 .. 1); the crown drip reaches 356 lines. The Osc shares the gain. Per-field arithmetic only; the latency is unchanged.
 - **Look.** Old against new at K6 = 100 % (bear, 720p / 4, K6 glide bypassed in the scratch copies): `.heirloom_work/rb_pebble/k6b/k6b_cmp.png`. The same picture with a stronger camera bend; no wrap or garbage.
 - **Build (v0.1.2):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom pebble`). Post-route Fmax: HD Analog 98.79, HD HDMI 98.73, HD Dual 97.51 (worst HD 97.51), SD Analog 89.29, SD HDMI 95.88, SD Dual 100.89 MHz. Up to 6912 / 7680 LC.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Ripples 567, K2 Bend 823, K3 Rows 657, K4 Speed 782, K5 Inlay 586, P12 Veil 861 (K6 Camera and S7-S11
+unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 193 bytes), so
+timing, seeds and LC are as in v0.1.2. Presets are unchanged.

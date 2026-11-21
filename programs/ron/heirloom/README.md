@@ -187,7 +187,7 @@ versions from v0.1.0.
 | 22 | 20230712_00_46_37 t2.5 | scales | cyan/orange/pink crescent fish scales | v0.1.3 2026-11-20: HW-captured defaults (Ron); v0.1.2 K6 = camera swap (router1; HD HDMI seed 2, others seed 1; worst HD 78.11 MHz; up to 6,947 LC, 20 EBR); flashed (v0.1.2) |
 | 23 | 20230717_23_51_09 t7.5 | ironwork | magenta/green/black lace contour ironwork | v0.1.4 2026-11-20: HW-captured defaults (Ron); v0.1.3 K6 default 100 % (router1, 6/6 seed 1; 6,819-6,848 LC, 22 EBR); flashed (v0.1.3) |
 | 24 | 20230722_01_18_41 t5.5 | carpet | red/white/orange kaleidoscopic carpet | v0.1.3 2026-11-20: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1, 6/6 seed 1; 6,791-6,814 LC, 14 EBR); flashed (v0.1.2) |
-| 25 | 20230731_01_19_22 t0.5 | pebble | red/orange concentric dotted ripple rings | v0.1.0 built 2026-11-04 (router2 6/6 seed 1; 6696–6766 LC, 21 EBR); not flashed |
+| 25 | 20230731_01_19_22 t0.5 | pebble | red/orange concentric dotted ripple rings | v0.1.3 2026-11-20: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1, 6/6 seed 1; up to 6,912 LC, 21 EBR); flashed (v0.1.2) |
 | 26 | 20230816_00_32_31 t5.0 | temple | orange/yellow/blue symmetric sunset temple with blue flames | v0.1.0 built 2026-11-04 (ROUTER1; HD Dual seed 2; 6410–6443 LC, 23 EBR); not flashed |
 | 27 | 20230820_01_33_09 t0.5 | brushfire | orange/green/white burning-grass streaks | v0.1.0 built 2026-11-09 (ROUTER1; HD Dual seed 2; 7087–7113 LC, 23 EBR); not flashed |
 | 28 | 20230825_00_00_20 t6.5 | arcade | orange/blue ring arches on blue stripes | v0.1.0 built 2026-11-09 (router2; SD Dual seed 2; 6866–6891 LC, 19 EBR); not flashed |
