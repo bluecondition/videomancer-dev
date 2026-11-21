@@ -252,3 +252,11 @@ Only the camera part changed: the camera luma is scaled x1.25 once (stage 5, lum
 Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_saltire/k6b/k6b_cmp.png`.
 
 Build: router1, seeds other than 1: HD Analog seed 2, worst HD Fmax 80.12 MHz, 7203 LC (max of 6). Fmax per config: HD Analog 85.69, SD Analog 76.97, HD HDMI 81.31, SD HDMI 74.06, HD Dual 80.12, SD Dual 77.76 MHz.
+
+## v0.1.2: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.1), captured with `./capture_preset.sh --defaults`:
+K1 Stripes 1023, K2 Wave 415, K3 Cross 487, K4 Speed 709, K5 Spread 456, S7 Fold On, P12 Flames 592 (K6 Blobs,
+S8-S11 unchanged). K1 is continuous (glided, through the per-field multiplier), so 1023 loads as dialled. The vmprog
+was repacked from the v0.1.1 bitstreams (only the settings block differs, 225 bytes), so timing and seeds are as in
+v0.1.1 (HD Analog seed 2). Presets are unchanged.
