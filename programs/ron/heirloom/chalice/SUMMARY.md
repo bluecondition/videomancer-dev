@@ -177,3 +177,10 @@ Ron, after renders of fern and kiln at K6 = 100 %: the camera effect at the top 
 - Classification: **BEND.** K6 Camera adds camera (or Osc) luma x gain to the field phase phi: the rings bend around the picture.
 - Change: The camera gain code is 1.25 x the glided knob, c_cg = (s_g6 + s_g6 >> 2) >> 3, and the pixel multiply uses 6 bits of it (0 .. 39, was 5 bits, 0 .. 31): an 8 x 6 product, p7_ca 14 bits, p8_cam widened to 10 bits so it cannot wrap. Full Camera: 1.8 -> 2.3 rings per full luma.
 - Build: v0.1.2 built 2026-11-15 through the queue, router1 (v0.1.0 was router2), all six configs seed 1. Worst HD 92.19 MHz (HD Analog 96.39, HD HDMI 92.19, HD Dual 96.53); 6968-6995 LC. Output `out/rev_b/ron/heirloom/chalice.vmprog`. NOT flashed.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Ramp 33, K2 Bowl 595, K3 Foot 669, K4 Rings 807, K5 Breathe 937, P12 Chalice 176 (K6 Camera and S7-S11
+unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 196 bytes), so
+timing, seeds and LC are as in v0.1.2. Presets are unchanged.

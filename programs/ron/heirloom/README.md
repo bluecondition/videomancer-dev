@@ -171,7 +171,7 @@ versions from v0.1.0.
 | 6 | 20230216_01_27_34 t2.5 | grommets | purple/blue ring lattice with black holes | v0.1.2 2026-11-20: HW-captured defaults (Ron); v0.1.1 K6 camera pass (router1, 6/6 seed 1; LC 6,674, 23 EBR); flashed (v0.1.1) |
 | 7 | 20230221_00_58_22 t0.5 | placard | hard-edged yellow/magenta/cyan/black graphic with stripe hatching in a frame | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 7150–7158 LC, 15 EBR); not flashed |
 | 8 | 20230301_23_17_23 t0.5 | undulate | rainbow sine ripple field | v0.1.4 2026-11-20: HW-captured defaults (Ron); v0.1.3 K6 default 100 % (router1; SD HDMI seed 3, others seed 1; 7,064-7,071 LC, 21 EBR); flashed (v0.1.3) |
-| 9 | 20230305_00_05_43 t0.5 | chalice | mirrored chalice figure with rainbow contours on black | v0.1.0 built 2026-11-04 (router2 6/6 seed 1; 6923–6952 LC, 17 EBR); not flashed |
+| 9 | 20230305_00_05_43 t0.5 | chalice | mirrored chalice figure with rainbow contours on black | v0.1.3 2026-11-20: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1, 6/6 seed 1; 6,968-6,995 LC, 17 EBR); flashed (v0.1.2) |
 | 10 | 20230314_23_42_54 t7.5 | aureole | soft glowing white/cyan/orange bloom figure | v0.1.1 built 2026-11-04 (ROUTER1 6/6 seed 1; 7202–7220 LC, 94 %, 21 EBR); not flashed |
 | 11 | 20230401_00_20_03 t0.5 | lattice | magenta/green/blue diamond trellis with blue diamonds | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 6552–6566 LC, 15 EBR); not flashed |
 | 12 | 20230404_23_59_18 t9.5 | zebra | black/white zebra stripe swirl with red/blue fringes | v0.1.0 built 2026-11-04 (router2; HD Analog seed 3, SD Dual seed 2; HD margins thin; 6917–6940 LC, 19 EBR); not flashed |
