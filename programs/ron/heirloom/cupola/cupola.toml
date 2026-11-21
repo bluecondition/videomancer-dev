@@ -6,7 +6,7 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.cupola"
 program_name = "Cupola"
-program_version = "0.2.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -22,7 +22,7 @@ name_label = "Pillars"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 778
 display_float_digits = 0
 suffix_label = "%"
 
@@ -32,7 +32,7 @@ name_label = "Cupolas"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 688
 display_float_digits = 0
 suffix_label = "%"
 
@@ -42,7 +42,7 @@ name_label = "Rows"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 853
 display_float_digits = 0
 suffix_label = "%"
 
@@ -52,7 +52,7 @@ name_label = "Roll"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 701
+initial_value = 644
 display_float_digits = 0
 suffix_label = ""
 
@@ -62,7 +62,7 @@ name_label = "Dome"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 860
 display_float_digits = 0
 suffix_label = "%"
 
@@ -112,7 +112,7 @@ name_label = "Cupola"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 507
+initial_value = 330
 display_float_digits = 0
 suffix_label = "%"
 

@@ -278,3 +278,10 @@ table in whole entries (~2 virtual lines, more when K3 stretches the rows), so s
   SD 82.18 / 84.96 / 84.71 MHz. 6893–6915 / 7680 LC (90 %, +~210 for the lerp, the finer mantissas, the K4 glide
   channel and the wider etch product), 22 / 32 EBR; iceunpack OK ×6. Not simulated, not flashed.
   v0.1.3's VHDL, TOML and vmprog are in `.heirloom_work/rb_cupola/` (`cupola_v013.*`).
+
+## v0.2.1: HW-captured defaults (2026-11-20)
+
+Ron flashed v0.2.0 (the smoothed controls), dialled the look in and captured it with `./capture_preset.sh --defaults`:
+K1 Pillars 778, K2 Cupolas 688, K3 Rows 853, K4 Roll 644, K5 Dome 860, P12 Cupola 330 (K6 Etch and S7-S11
+unchanged). The vmprog was repacked from the v0.2.0 bitstreams (only the settings block differs, 201 bytes), so
+timing and seeds are as in v0.2.0. Presets are unchanged.
