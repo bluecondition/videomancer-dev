@@ -250,3 +250,11 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
   scratch copies). The picture is the same, with more yellow idol swelling into bright areas. No wrap.
 - **Build:** router1, all six on seed 1. HD Analog 84.40, HD HDMI 86.18, HD Dual 85.08 MHz (worst HD 84.40);
   7,105-7,125 LC, 23 EBR.
+
+## v0.1.3: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Idol 0, K2 Stretch 445, K3 Speed 212, K4 Contours 530, K5 Bands 422, P12 Burn 532 (K6 Etch and S7-S11
+unchanged). K1 is continuous (shared glide), so 0 loads as dialled. The vmprog was repacked from the v0.1.2
+bitstreams (only the settings block differs, 143 bytes), so timing, seeds and LC are as in v0.1.2. Presets are
+unchanged.
