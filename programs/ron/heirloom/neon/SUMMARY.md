@@ -106,7 +106,7 @@ Working files are in `.heirloom_work/rb_neon/` (`notes.md`, `track.py`, `fitP.py
 | K3 Drift | bipolar (+-8 deadband, square law): the S-curve rolls down (+) or up (-); 700 = the clip's 316 lines/s; full = ~1.2 cycles/s |
 | K4 Waves | the vertical sine's frequency: 0.15 .. 5 cycles per frame (exponential, 512 = the clip's 0.48): one gentle arc .. a tight serpentine |
 | K5 Facets | the interior pattern's scale (stripes, cusp rows and eyes together): x0.4 (one broad stripe per band) .. x3.2 (dense stripes and many eyes) |
-| K6 Etch | how far the camera (or the Osc) bends the tubes and the interior contours: square law, 0 .. 0.47 band and 477 q at full luma; 400 = 0.036 band and 72 q |
+| K6 Etch | how far the camera (or the Osc) bends the tubes and the interior contours: square law, 0 .. 0.47 band and 477 q at full luma; 400 = 0.036 band and 72 q. Since v0.2.0 the camera slides the interior stripes sideways (the Osc still swells them) |
 | S7 Wave | the vertical sine: Sine (the clip) / Square: the bands become straight and break into stepped segments |
 | S8 Mirror | the bands mirrored about the centre: Off (the clip) / On: ")(" bands bulging both ways |
 | S9 Glow | the red-brown halo: Halo (the clip) / Bare: crisp tubes straight on teal |
@@ -249,3 +249,99 @@ Ron, after looking at fern and kiln renders with K6 at 100 %: in programs where 
 - **Change.** Per field (step 410), the camera's etch gain is c_g6 = g + g/4 (×1.25 at every knob position; max 1022 -> 1277). c_g6 widened to 11 bits and the two pixel nibble products to 15 bits; the 19-bit etch product peaks at ~305 k. The band phase is modular by design, and the S term is clamped at the palette address. Full luma now gives 0.59 band and 596 q instead of 0.47 and 477. The Osc keeps the old g (its 2× path and its mean-centring use it), so Osc mode is unchanged.
 - Look: `.heirloom_work/rb_neon/k6b/k6b_cmp.png` (bear, 720p, K6 100 %). Same picture, with the tube edges pushed further into the face.
 - Build: router1, all six configs seed 1; HD worst 91.84 MHz (HD Analog 91.84, HD HDMI 94.57, HD Dual 92.64); 6,787 LC.
+
+## v0.2.0: Ron's preview notes (2026-11-21)
+
+Ron (hardware, v0.1.2): "can't get the center of the wave to show bright neon purple and pink like the render"
+
+**Cause: the camera etch, not the colours.**
+- These all match the render:
+  - the palette;
+  - the U/V convention (U = Cr, V = Cb, the hardware convention; the preview stills are converted with u = Cr, so they
+    show hardware hues);
+  - the luma (magenta core ~414, violet ~290, the white edge lines at the 777 cap);
+  - the output filter.
+- The render had a black input, so the camera added nothing. On hardware a camera is always connected.
+- In Video mode, K6 Etch added the camera luma to the interior field S, in one direction only (S + luma x gain).
+  - A higher S is further from the magenta core (S < -16) and the white edge line (S = 0), toward the flat violet end
+    of the palette (112, 8, 245).
+  - K6 now defaults to 100 % with the +25 % top: a gain of 1277 against 156 in the v0.1.0 preview, 8x.
+  - So any camera pixel above near-black (Y > ~92) pushed S past the magenta. A mid-tone picture lifted S by 150-400 q.
+  - The band interiors were flat blue-violet, with no pink and no white lines. Only K6 near 0 gave the render back.
+- The existing v0.1.2 bear render at K6 100 % (`.heirloom_work/rb_neon/k6b/k6b_new.png`) shows exactly that.
+
+**Change (Video mode only).** The camera etch now slides the interior pattern sideways instead of washing it out.
+- The interior position P (q units, before the fold to the axes) gets + luma x gain.
+  - It is the same q per luma step the old etch used: full white at K6 100 % = 596 q, about 450 virtual px at the
+    default Facets.
+  - It wraps over the pattern's 2048 q period, so there is no seam.
+- The stripes keep their magenta core, pink flanks and white edges at every K6. Bright areas pull the pattern toward
+  the centre axis, mirrored on both sides.
+- In Video the S etch term is now zero.
+- The etch value is the newest one in the multiplier chain, so the interior sees the camera 3 px to the left of the
+  tubes (invisible).
+- K6 Etch now means: how far the camera bends the tubes and slides the interior stripes. Every position still changes
+  the picture.
+
+**Unchanged.**
+- The band-phase etch: the tubes still bend and fray at the same strength.
+- Every other control, and the palette.
+- The output conditioning (the HD HDMI bar fix): chroma [1 2 2 2 2 2 2 2 1]/16, luma [1 2 1], luma 13/16.
+- The blanking gate, one latency (C_LAT 20), the generated avid and the chroma resync.
+- **Osc mode.** It keeps the mean-centred S etch, which already swells the stripes into magenta lenses.
+- Video with a black input, or K6 = 0 with any input, is bit-identical to v0.1.2, i.e. to the render.
+
+**Check** (GHDL at 720p, K6 at 100 % with the glide pre-settled, hardware hues, in `.heirloom_work/rb_neon/v020/`):
+`cmp_selfie.png`, `cmp_bear.png`.
+
+| Picture | Magenta share of the purple interior |
+|---|---|
+| selfie, v0.1.2 | 3 % |
+| selfie, v0.2.0 | 22 % |
+| render (black input) | 22 % |
+| photo | 28 % |
+| bear, v0.1.2 | 2 % |
+| bear, v0.2.0 | 9 % (the fur texture tears the stripes) |
+
+**Judgement calls.**
+- **The render's palette is kept.** I did not repaint the violet pinker: with the stripes intact, the interior has the
+  render's balance of violet, pink and white. If Ron wants more pink overall, the next lever is the palette's far
+  violet (112, 8, 245) or wider stripes.
+- **The chroma filter is not narrowed.** The stripes' magenta cores are 10-28 px wide at 1080p, wider than the
+  filter's ~8 px.
+- **K6's glide still starts at 400 on power-up.** It reaches the TOML's 1023 within about a second.
+
+**Resolutions.** As before. The slide is in q units, so it is the same in virtual px at 1080p, 720p and SD. SD still
+shows the centre 4:3.
+
+**Build v0.2.0 (2026-11-21).** router1; all six configs on seed 1; iceunpack OK x6. 6,761-6,786 / 7,680 LC (88 %),
+21 / 32 EBR.
+
+| Config | Fmax (MHz) |
+|---|---|
+| HD Analog | 90.19 |
+| SD Analog | 92.40 |
+| HD HDMI | 94.73 |
+| SD HDMI | 92.82 |
+| HD Dual | 88.77 |
+| SD Dual | 96.14 |
+
+Backups of v0.1.2 (vhd, toml, vmprog) are in `.heirloom_work/rb_neon/neon_v012.*`.
+
+**HD HDMI re-seed (the HSYNC skew fix, 2026-11-21).** `.heirloom_work/skew_tools/screen.sh neon` routed hd_hdmi with
+router1 and router2 on seeds 1-60 (101 timing-clean) and hd_analog / hd_dual with router1 (16 / 12 seeds).
+
+| Config | Builder seed (HSYNC / data) | Shipped now (HSYNC / data, Fmax) |
+|---|---|---|
+| HD HDMI | router1 s1: +1.22 / ≤ −0.53 (data margin too small) | **router2 s8: +1.97 / ≤ −0.94, 84.58 MHz** (the most positive in the window) |
+| HD Analog | router1 s1: +1.40 / ≤ +0.76 (positive data) | **router1 s7: −0.95 / ≤ −0.73, 94.17 MHz** |
+| HD Dual | router1 s1: −1.37 / ≤ −1.34 | kept |
+
+- The replaced bitstreams are in `.heirloom_work/rb_neon/skew/*_replaced_*.bin`.
+- **Spare:** `.heirloom_work/rb_neon/skew/neon_v020_spare_hd_hdmi_router2_s43.vmprog` (HD HDMI router2 s43, +1.81 /
+  ≤ −0.95). I took s43 over the strict runner-up, router2 s3 (+1.88 / ≤ −0.62), because s3's data margin is right at
+  the limit.
+- **Non-1 seeds:** HD HDMI router2 s8 and HD Analog router1 s7. The other four configs are on router1 s1.
+- **A full builder rebuild re-routes seed 1** and loses this fix. Re-install with
+  `.heirloom_work/skew_tools/install.sh neon router2 8` and `.heirloom_work/skew_tools/install.sh neon router1 7 hd_analog`,
+  or rebuild with those seeds.

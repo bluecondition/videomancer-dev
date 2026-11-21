@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Neon v0.1.0 -- Heirloom (video phase), from the clip WIN_20230919_00_32_29 at 3.0 s.
+-- Neon v0.2.0 -- Heirloom (video phase), from the clip WIN_20230919_00_32_29 at 3.0 s.
 --
 -- The still: three neon bands sweep down the frame on a teal ground, bent into S-curves that lean further the
 -- further right they are.  Each band is a white tube in a red-brown glow, a red gap and a lavender tube, then a
@@ -36,6 +36,11 @@
 -- the centre 4:3).  Generated avid; output conditioning (Y, U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes,
 -- luma 13/16) before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- v0.2.0 2026-11-21 (Ron, HW: the interior never showed the render's neon purple and pink): in Video the camera
+-- etch no longer adds to the interior field S (one-sided, it pushed every camera pixel toward the violet end of
+-- the palette: at K6 100 % any mid-tone picture gave flat blue-violet, no magenta, no white lines).  It now
+-- displaces the interior pattern sideways (P + etch, same q per luma step), so the stripes keep their magenta
+-- core and white edges at any K6.  Osc mode keeps the old (mean-centred) S etch.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -842,16 +847,21 @@ begin
         variable v_m   : signed(11 downto 0);
         variable v_ry, v_ru, v_rv : unsigned(9 downto 0);
         variable v_h   : unsigned(10 downto 0);
+        variable v_pd  : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
             -- 2: |band phase| (Mirror; ones' complement, 24 bits) and |interior phase| (bits 26..16)
             if s_mir = '1' and b_us(28) = '1' then p2_ua <= not b_us(23 downto 0); else p2_ua <= b_us(23 downto 0); end if;
             if b_ps(28) = '1' then p2_pa <= not b_ps(26 downto 16); else p2_pa <= b_ps(26 downto 16); end if;
-            -- 3: band phase fraction (Q16); interior position in the half period; luma
+            -- 3: band phase fraction (Q16); interior position in the half period, displaced by the camera
+            -- etch in Video (v0.2.0: the camera moves the stripes instead of eroding them; the etch term is
+            -- the newest one in the chain, i.e. the camera 3 px to the left; wraps over the 2048 q period);
+            -- luma
             v_t24 := l_uc + p2_ua;
             p3_u16 <= v_t24(23 downto 8);
-            p3_r   <= p2_pa(9 downto 0);
-            p3_k0  <= p2_pa(10);
+            if s_src = '0' then v_pd := p2_pa + resize(p5_pe(18 downto 9), 11); else v_pd := p2_pa; end if;
+            p3_r   <= v_pd(9 downto 0);
+            p3_k0  <= v_pd(10);
             p3_lm  <= unsigned(s_lb_q);
             -- 4: etch partials (luma nibbles x gain); v = u - centre; fold to the nearest axis
             p4_ea <= p3_lm(3 downto 0) * c_g6;
@@ -894,7 +904,7 @@ begin
             else
                 p6_pen <= (others => '0');
             end if;
-            p6_es <= resize(p5_pe(18 downto 9), 11);
+            if s_src = '1' then p6_es <= resize(p5_pe(18 downto 9), 11); else p6_es <= (others => '0'); end if;  -- Osc only
             -- 7: interior width (Gap); eye with its gating; dark-core ramp
             if p6_v(15) = '1' then
                 p7_vp <= resize(signed(p6_v), 17) + resize(c_gap(23 downto 8), 17);
