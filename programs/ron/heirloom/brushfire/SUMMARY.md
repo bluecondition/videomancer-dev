@@ -207,3 +207,11 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 - The per-field gain c_gF = k6^2 x 1.25 >> 15, formed as (k6^2 >> 13 + k6^2 >> 15) >> 2 after the k6^2 job. It is now 6 bits, 0 .. 39 (was 0 .. 31). The pixel-path camera product widens from 9 x 6 to 9 x 7 bits. The largest Osc term is 21,060, inside the 16-bit p5_cp. The F term is at most 1316, inside its 12 bits. The band phase is modular.
 - Check: `.heirloom_work/rb_brushfire/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 = 100 %, glide bypassed in the scratch copies). It shows the same picture with more bend, and no wrap.
 - Build: v0.1.2, router1; seed 2 on HD Analog, SD Analog and HD Dual (seed 1 stalled router1 at the 600 s timeout under machine load; dupin: no CARRY I0==I1), seed 1 elsewhere; worst HD 83.59 MHz (HD Analog 85.59, HD HDMI 83.59, HD Dual 85.98); 7,156 / 7,680 LC. `.kinetic_work/k6_builds.txt`: heirloom brushfire OK router1 worst-HD 83.59 LC 7156.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Tiles 541, K2 Lobes 946, K3 Streaks 552, K4 Speed 1023, K5 Bands 313, S7 Bands On, S9 Flip On, P12 Blaze 0
+(K6 Camera, S8, S10, S11 unchanged). K4 and P12 are continuous (glided), so the end values load as dialled. The
+vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 237 bytes), so timing and seeds are
+as in v0.1.2 (HD Analog, SD Analog, HD Dual seed 2). Presets are unchanged.
