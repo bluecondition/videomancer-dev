@@ -219,10 +219,17 @@ Presets are unchanged.
   HSYNC within 0.05 ns of the best. It was installed by hand into build/.../rev_b/bitstreams/ and repacked
   (`vmprog_pack.py --no-sign`). The other five bitstreams are v0.1.3's seed-1 builds. HD Analog s1 (HDMI −1.87 / ≤ −0.81)
   and HD Dual s1 (−2.80 / ≤ −2.11) meet the rules used for those configs.
-- **Spare** for an A/B if lines remain: `.heirloom_work/rb_harlequin/skew/harlequin_v015_spare_hdhdmi_router2_s15.vmprog`,
+- **Spare** for an A/B if lines remain: `.heirloom_work/rb_harlequin/skew/harlequin_v016_spare_hdhdmi_router2_s15.vmprog`,
   the same except HD HDMI = router2 s15 (+0.98 / ≤ −0.66).
 - **Backups:** the old hd_hdmi.bin is kept as `skew/hd_hdmi_shipped_r1s1.bin`, the v0.1.4 vmprog as
   `rb_harlequin/harlequin_v014.vmprog`.
 - **Defaults:** v0.1.4's HW-captured defaults are kept. Presets are unchanged.
 - **Rebuilding:** a full `build_programs.sh` rebuild would re-route HD HDMI on seed 1 and bring the lines back. Rebuild
   with `SEED=43` (router1) for hd_hdmi, or re-install the bitstream.
+
+## v0.1.6: HW-captured defaults, second take (2026-11-20)
+
+Ron flashed v0.1.5 (the HD HDMI re-seed) and captured a new look with `./capture_preset.sh --defaults`:
+K1 Diamonds 592, K2 Stripes 646, K3 Waist 631, K4 Bend 284, K5 Glass 461, K6 Etch 1023, P12 V-Hold 0 (S9 Core stays
+On; S7, S8, S10, S11 unchanged). Repacked from v0.1.5's bitstreams (HD HDMI router1 s43 verified in place); the spare
+was repacked with the same defaults (`skew/harlequin_v016_spare_hdhdmi_router2_s15.vmprog`, replacing the v0.1.5 one).
