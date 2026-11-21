@@ -141,3 +141,11 @@ Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs 
 - **Change.** The etch-squared term z_a6 is x 1.25 at state 218 (now 13 bits, max 5110), so the etch gain c_e is x 1.25 at every K6 position. c_e went from 8 to 9 bits (top 255 -> 319 at the highest Folds); the pixel nibble products are 4 x 9 and the etch sum 17 bits.
 - Look: `.heirloom_work/rb_carpet/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
 - **Build.** v0.1.2, router1, all six configs on seed 1. HD worst 93.36 MHz (HD Analog 97.01, HD HDMI 93.36, HD Dual 101.53); SD 91.25–100.70 MHz; 6791–6814 / 7680 LC (89 %), 14 EBR.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Diamonds 449, K2 Zigzag 662, K3 Tiles 1023, K4 Speed 486, K5 Jitter 461, S7 Rows On, S8 Weave On, P12 Folds 499
+(K6 Etch, S9-S11 unchanged). K3 is continuous (glided, bipolar exponent), so 1023 loads as dialled. The vmprog was
+repacked from the v0.1.2 bitstreams (only the settings block differs, 221 bytes), so timing, seeds and LC are as in
+v0.1.2. Presets are unchanged.
