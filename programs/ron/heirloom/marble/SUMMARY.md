@@ -221,3 +221,10 @@ Ron: K6 now loads at 100 % (initial_value 1023), and in bend / element programs 
 - **Change.** The camera gain c_cg is now 1.25 k6 / 128, 0 .. 9 (was k6 / 128, 0 .. 7), so the top is 9/7 = x 1.29, the nearest step. The camera term p5_cs is 11 bits; the downstream sums were checked (melt total <= 826, figure term <= 117).
 - Look: `.heirloom_work/rb_marble/k6b/k6b_cmp.png` (GHDL, old against new code, both at K6 100 %, bear source): the same picture with a somewhat stronger camera effect, no wrap or artifacts.
 - **Build.** v0.1.1, router1. **HD Dual passed on seed 2** (router1 stalled seed 1 at the 600 s timeout, as noted above for router1 on this program); the other five configs on seed 1. HD worst 93.37 MHz (HD Analog 95.05, HD HDMI 94.54, HD Dual 93.37); SD 85.24–90.70 MHz; 6917–6936 / 7680 LC (90 %), 15 EBR.
+
+## v0.1.2: HW-captured defaults (2026-11-21)
+
+Ron dialled the look in on hardware (v0.1.1), captured with `./capture_preset.sh --defaults`:
+K1 Bands 736, K2 Arcs 640, K3 Lattice 487, K4 Speed 825, K5 Rings 338, K6 Figures 613, S8 Inlay On, S9 Lattice On,
+P12 Marble 263 (S7, S10, S11 unchanged). The vmprog was repacked from the v0.1.1 bitstreams (only the settings block
+differs, 247 bytes), so timing and seeds are as in v0.1.1 (HD Dual seed 2). Presets are unchanged.

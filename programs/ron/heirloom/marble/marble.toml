@@ -7,7 +7,7 @@
 processing_delay_clks = 36
 program_id = "com.czartroniks.marble"
 program_name = "Marble"
-program_version = "0.1.1"
+program_version = "0.1.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -23,7 +23,7 @@ name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 736
 display_float_digits = 0
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Arcs"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 640
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Lattice"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 487
 display_float_digits = 0
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 698
+initial_value = 825
 display_float_digits = 0
 suffix_label = ""
 
@@ -63,7 +63,7 @@ name_label = "Rings"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 338
 display_float_digits = 0
 suffix_label = "%"
 
@@ -73,7 +73,7 @@ name_label = "Figures"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 613
 display_float_digits = 0
 suffix_label = "%"
 
@@ -87,13 +87,13 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_8"
 name_label = "Inlay"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Lattice"
 value_labels = ["Positive", "Negative"]
-initial_value_label = "Positive"
+initial_value_label = "Negative"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -113,7 +113,7 @@ name_label = "Marble"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 321
+initial_value = 263
 display_float_digits = 0
 suffix_label = "%"
 
