@@ -177,7 +177,7 @@ versions from v0.1.0.
 | 12 | 20230404_23_59_18 t9.5 | zebra | black/white zebra stripe swirl with red/blue fringes | v0.1.3 2026-11-20: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1, 6/6 seed 1; 6,918-6,935 LC, 19 EBR); flashed (v0.1.2) |
 | 13 | 20230428_23_30_39 t0.5 | vinyl | fine blue/red vinyl-groove moire rings | v0.1.0 built 2026-11-04 (router2 6/6 seed 1; 7140–7177 LC, 93 %, 18 EBR); not flashed |
 | 14 | 20230501_01_34_42 t0.5 | lentil | bright pink curved lens bands around blue diamonds | v0.1.3 2026-11-20: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1, 6/6 seed 1; worst HD 87.61 MHz; 17 EBR); flashed (v0.1.2) |
-| 15 | 20230509_23_58_21 t0.5 | wildfire | green/yellow/blue rainbow flame contours | v0.1.1 built 2026-11-09 (ROUTER1 6/6 seed 1; 7035–7072 LC, 23 EBR); not flashed |
+| 15 | 20230509_23_58_21 t0.5 | wildfire | green/yellow/blue rainbow flame contours | v0.1.4 2026-11-21: HD HDMI + HD Analog re-seeded for the cyan lines (HD HDMI router1 s46 +1.91 ns, was s1 at +0.65; HD Analog s9 +1.85), spare HD HDMI s9; v0.1.3 HW-captured defaults; flashed (v0.1.3) |
 | 16 | 20230518_23_23_28 t0.5 | crucible | orange/blue flame cross on magenta with mirrored blue shapes | v0.1.1 built 2026-11-04 (ROUTER1 6/6 seed 1; 6994–7010 LC, 21 EBR); not flashed |
 | 17 | 20230529_01_27_21 t0.5 | serpent | red/green/yellow serpent S-ribbon on black | v0.1.3 2026-11-20: HW-captured defaults (Ron); v0.1.2 K6 default 100 % (router1; HD Analog seed 2, thin 74.38 MHz; others seed 1; 7,089-7,100 LC, 18 EBR); flashed (v0.1.2) |
 | 18 | 20230618_20_23_10 t0.5 | hourglass | rainbow hourglass lens pair on black | v0.1.0 built 2026-11-04 (router2; HD HDMI seed 2; 5648–5661 LC, 74 %, 21 EBR); not flashed |

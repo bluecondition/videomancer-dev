@@ -166,3 +166,16 @@ Ron: a slightly stronger camera effect at the top of K6, default K6 = 100 %. **B
 - The per-field Etch gain is now g + g / 4 (c_etq widened 6 → 7 bits: 0 .. 78, was 0 .. 63), so every K6 position is ×1.25: 0 .. ~4.9 cycles per full luma (was 3.9). The etch partials gained a bit (11 bits) and the sum p4_e is 15 bits (255 × 78 < 2^15); only its low 12 bits (the phase, cyclic by design) are added, as before. Latency unchanged.
 - The TOML default (K6 initial 1023) and version were set by the orchestrator (v0.1.3).
 - Build (router1, 2026-11-15): **HD Analog and SD Analog seed 2** (seed 1 stalled router1, as SD Analog did once on v0.1.0; dupin: no CARRY I0 == I1), the rest seed 1; HD worst 89.60 MHz (HD Analog 89.60, HD HDMI 93.62, HD Dual 95.98); 7,096 / 7,680 LC max.
+
+## v0.1.4: HD HDMI / HD Analog re-seed for the cyan lines (2026-11-21)
+
+Ron (HW, preview page): "horizontal cyan lines that span the entire screen". The shipped HD HDMI bitstream (router1
+s1, re-routed byte-identical) put the ADV7513 HSYNC at **+0.65 ns** (data ≤ −1.47): inside the ±0.7 ns danger zone,
+below the +1.0..+2.3 window (cyan lines over the red/orange flames = per-line U/V swaps). Screen
+(`.heirloom_work/skew_tools/screen.sh wildfire`, results in `.heirloom_work/rb_wildfire/skew/`): 64 timing-clean
+HD HDMI placements, 11 in the window. **Installed HD HDMI = router1 s46 (+1.91 / ≤ −0.79, 91.17 MHz)** and, because
+the HD Analog config's HDMI output sat at +0.49 too, **HD Analog = router1 s9 (+1.85 / ≤ −0.62, 85.01 MHz)**. HD Dual
+keeps s1 (−2.11 / ≤ −1.03). Spare with HD HDMI router1 s9 (+1.70 / ≤ −1.09):
+`.heirloom_work/rb_wildfire/skew/wildfire_v014_spare_hd_hdmi_router1_s9.vmprog`. The v0.1.3 HW-captured defaults are
+unchanged. A full builder rebuild re-routes seed 1: re-run `install.sh wildfire router1 46` and
+`install.sh wildfire router1 9 hd_analog` after one.
