@@ -1,6 +1,7 @@
 # Crucible — an orange flame cross on magenta, a breathing black figure, a column of blue lenses
 
-**v0.1.1 built 2026-11-04, NOT flashed.** Heirloom from the video clips (phase 3), made from the still
+**v0.2.0 built 2026-11-21 (Ron's preview notes: glitch fixes + a P12 climax; see the last section). v0.1.x was flashed.**
+**v0.1.1 built 2026-11-04.** Heirloom from the video clips (phase 3), made from the still
 `photos/vid/WIN_20230518_23_23_28_t0p5.png` (clip WIN_20230518_23_23_28 at 0.5 s; 8.7 s clip, 30 fps).
 Violet ground with hot-pink/red flame wedges pointing at the centre column, an orange/yellow X band across
 the middle flanked by red, a black head-and-shoulders figure above it and an inverted black diamond below,
@@ -214,3 +215,96 @@ The per-field gain is now (k6^2 >> 15) + (k6^2 >> 17), 0..38 (was k6^2 >> 15, 0.
 Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_crucible/k6b/k6b_cmp.png`.
 
 Build: router1, all seed 1, worst HD Fmax 77.18 MHz, 7039 LC (max of 6). Fmax per config: HD Analog 78.88, SD Analog 77.47, HD HDMI 77.18, SD HDMI 81.08, HD Dual 78.24, SD Dual 80.85 MHz.
+
+## v0.2.0: Ron's preview notes (2026-11-21)
+
+Ron, from hardware: "appearance seems ok but glitchy and not fun, try again".
+
+### What was glitchy
+- **Not the HD HDMI placement.** The screen of the shipped v0.1.3 netlist found the shipped HD HDMI bitstream (router1 seed 1) at HSYNC +1.18 ns / data <= -0.66 ns, inside the good window. (The NEW netlist's seed 1 is bad, so v0.2.0 ships a re-seeded HD HDMI: see the build line.)
+- **The per-line randomness re-randomised every field.** The tear / jitter / yellow-streak source was a 16-bit LFSR stepped once per line and never reset. The Tear Off "striation" (1 line in 8 shifted by 1 to 4.5 vpx) therefore landed on different lines every field, so every vertical and diagonal edge buzzed at 60 Hz: the figure, the lens column, the flame wedges and the X. The yellow-index streaks (+-1 palette step) flickered the same way. Tear On re-tore a third of the frame to new places every field.
+- **Camera pixel noise into hard keys.** At the K6 = 100 % default the camera adds 4.75 Q8 F units per 8-bit luma code. The H ramp rises only 0.375 Q8 per pixel, so +-1 code of source noise moved a key edge by about +-12 px, pixel by pixel. Every flame edge sparkled on a live source. Clean-still sims can't show this.
+- Minor: the 2 x 2 Bayer phase of the violet bands toggled per line from power-up and was never reset. A source with an odd active-line count per field would flip the dither every field (30 Hz checker); 1080p has an even count, so this is insurance. The tear-burst counter also carried across the field boundary.
+- Checked and clean:
+  - The line engine finishes in 217 clocks and its results load at the next line start, so it can't race the beam.
+  - All per-field constants change in vblank. The switches are field-latched and all seven knobs glide. There are no stepped knobs or zone hysteresis.
+  - The box rings carry `no_rw_check` and the running-sum resync.
+  - The line buffer never collides. The generated avid's parity vote has no deadband latch.
+
+### What changed
+1. **Rolling-frame randomness (glitch fix, S10 both ways).** A 1024 x 16 random ROM (fixed seed, generated in crucible.py, 4 EBR) replaces the LFSR.
+   - It is indexed by the line's position in the rolling stripe frame: (virtual line - roll lines) >> 4, 1024-line period.
+   - A per-field accumulator `c_rl` adds the roll in Q4 virtual lines, s^2 x 3/4 / 1024 per field, the same law as the stripe phase. It tracks the stripes to within ~0.6 %, about 1 line/s of slip at the default speed.
+   - Tear Off: the striation now sits on the flame bands and travels down with them, the same 1 line in 8 at 1 to 4.5 vpx. A still frame looks as before; in motion nothing fizzes.
+   - Tear On: the tear bursts (8 to 39 lines, 40 to 198 vpx) also ride the bands. The frame stays torn a third or more, but the tears roll with the fire instead of jumping every field.
+   - With K2 at the centre (still), the tears freeze.
+   - Burst state and the Bayer phase reset at every field start.
+2. **Camera smoothing (glitch fix, K6).** The camera luma passes a 1/8-per-pixel horizontal IIR before the K6 gain. Noise drops by about 3.9x, so edge jitter falls from about +-12 px to +-3 px. The delay is about 7 px, invisible.
+   - The camera still heats the flames exactly as much as before: same gain and law, K6 default 100 %.
+3. **P12 Heat above the photo is a designed climax (fun).** From 0 to 546 nothing changes: cold, then the photo, bit-identical structure. Above 546 two things grow linearly.
+   - **The flame swing.** The V oscillator W is scaled by g = 1 + (P12 - 546) / 256 in all four thresholds:
+     - x1.60 at 700, x2.38 at 900, x2.86 at 100 %.
+     - The old top was a flat flood: red everywhere outside, yellow everywhere in the zone. The motion vanished there.
+     - Now the crests burn red / yellow as hard as before, and the troughs stay cold violet / black. The stripes keep rolling as alternating fire and cold bands right up to 100 %.
+     - The heat offset is unchanged: still 0.75 P12 - 410.
+   - **The bend.** The V oscillator also offsets the H ramp's line position by W (g - 1) / 4: +-20 vpx at 700, +-44 at 900, +-59 vpx at 100 %.
+     - The figure, the lens column and the wedges snake sideways in an S-wave, one swing per stripe period, travelling down with the bands. In the analog patch this would be the V oscillator cross-patched into the H ramp.
+     - It adds to the S10 tear offset.
+   - 100 % = a roaring, snaking fire.
+4. **Timing / fit (no visible change).**
+   - The lens-breathing cone (`23 |sn| >> 8` in one sequencer clock) was the HD HDMI critical path at 94.6 % LC: the first v0.2.0 build missed seeds 1 and 2 at about 71.6 MHz.
+   - It is now split over three clocks as `3 |sn| >> 5`: lens breathing +-9.4 % (was +-9.0 %).
+   - The line buffer carries `no_rw_check`; the read trails the write by >= 3 entries. yosys transparency emulation is now 0 (was 1).
+   - The line engine was renumbered so the threshold and lens-DDA states run after the swing product (217 clocks, still fits SD's 858).
+
+### Per control
+- K1 to K6, S7 to S9, S11: unchanged in meaning and range.
+- K6 is now smoothed (above).
+- S10: both states now travel with the bands (above).
+- P12: 0 to 546 unchanged; above 546, swing x1 to x2.86 and bend 0 to +-59 vpx (above).
+- The HW-captured / TOML defaults are untouched; no control changed meaning.
+- **Presets.**
+  - "Molten" (P12 980) becomes a roaring, snaking fire (swing x2.70, bend +-54 vpx) rather than the flat flood; the name still fits.
+  - "Diamond" (P12 620) gets a slight swing x1.29 and +-9 vpx of bend.
+  - The rest sit at the photo's heat and are unchanged.
+
+### Judgement calls
+- Tear On no longer re-randomises every field. It is still a big, obvious tear, but now a rolling one; with K2 still, it freezes.
+- The striation is now fixed to the bands rather than to the screen. Static screen-fixed jitter rows would read like the known HDMI "hsync lines".
+- The P12 climax keeps the old heat offset and adds swing and bend, so the top is "roaring" rather than "flooded".
+- Lens breathing went from 23/256 to 3/32 (+-9.0 to +-9.4 %) for timing.
+
+### Resolutions
+- The rolling frame, the swing and the bend are in virtual coordinates, so SD, 720p and 1080p show the same picture.
+- The camera IIR works in output pixels (8 / 12 / 16 vpx of smoothing at 1080 / 720 / SD), so the camera's heat is a touch softer at SD. That is invisible at the flames' scale.
+- As before, SD shows the centre 4:3, and 50 Hz modes roll 17 % slower.
+
+### Build
+- **v0.2.0 built 2026-11-21 through the shared queue with ROUTER1, all six configs on seed 1** (log `.heirloom_work/rb_crucible/build_v0.2.0.log`). Ron flashed this build (out/ vmprog dated 02:50).
+  - Post-route Fmax: HD Analog 87.51, SD Analog 90.76, HD HDMI 86.63, SD HDMI 81.71, HD Dual 80.80, SD Dual 80.78 MHz (SD Fmin 27).
+  - 7,182–7,215 / 7,680 LC (93.5–93.9 %), 25 / 32 EBR (+4 for the random ROM).
+  - iceunpack OK x6; dupin.py 0 duplicated pins; yosys transparency emulation 0.
+  - Was v0.1.3: worst HD 77.18 MHz, 7,039 LC, 21 EBR.
+- The first v0.2.0 build (before the breathing-cone split) reached 7,267 LC. HD Analog passed at 75.03 MHz, but HD HDMI missed seeds 1 and 2 at about 71.6 MHz, so I stopped it. Log: `build_v0.2.0_try1.log`.
+- **HD HDMI placement (skew), NOT re-installed.**
+  - The shipped v0.1.3 HD HDMI (router1 s1) was fine: +1.18 / <= -0.66 ns.
+  - The v0.2.0 builder's HD HDMI (router1 s1, the flashed one) sits at HSYNC **-0.71** / data <= -0.31 ns. That is the known red/blue horizontal-line territory.
+  - Screen of the v0.2.0 netlist: cut off by a session end after 89 HD HDMI routes. 50 were timing-clean and 4 fell in the window. HD Analog / HD Dual were not screened.
+  - Ron had already flashed the seed-1 build and closed the rework, so out/ was left as flashed. A copy is in `.heirloom_work/rb_crucible/crucible_v020_flashed_hdhdmi_s1.vmprog`.
+  - Ready re-seeds, identical except the HD HDMI bitstream:
+    - `.heirloom_work/rb_crucible/skew/crucible_v020_spare_hd_hdmi_router1_s2.vmprog`: **router1 s2, +2.02 / <= -0.89 ns, 83.52 MHz**, the pick.
+    - `...router1_s38.vmprog`: router1 s38, +1.18 / <= -1.26, 89.68 MHz.
+    - Flash s2 if HD HDMI shows thin red/blue lines.
+  - To make it the deliverable: `.heirloom_work/skew_tools/install.sh crucible router1 2`.
+  - A full builder rebuild re-routes seed 1, so the fix must then be re-installed (or rebuilt with that seed).
+- Rebuild: `NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900 .heirloom_work/vid/build_queue.sh crucible`.
+
+## v0.2.1: HD HDMI re-seed made the deliverable (2026-11-21)
+
+Ron flashed v0.2.0 and no longer marks crucible as rework. Its HD HDMI bitstream (builder router1 s1) sat at HSYNC
+**−0.71 ns** (data up to −0.31), the known-bad side, so the re-seeded placement is now installed in the build and the
+deliverable: **HD HDMI = router1 s2 (+2.02 / ≤ −0.89, 83.52 MHz)** (`.heirloom_work/skew_tools/install.sh crucible
+router1 2`). Same RTL and TOML (version only). The flashed v0.2.0 vmprog is kept at
+`.heirloom_work/rb_crucible/crucible_v020_flashed_hdhdmi_s1.vmprog`; the router1 s38 spare (+1.18 / ≤ −1.26) stays in
+`skew/`. HD Analog / HD Dual were not screened (the screen was cut off) and keep the builder's seed 1. A full builder
+rebuild re-routes HD HDMI on seed 1: re-run the install afterwards.

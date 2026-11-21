@@ -1,4 +1,4 @@
-# Crucible - Heirloom from the video clips (phase 3), v0.1.1, built 2026-11-04 from the still
+# Crucible - Heirloom from the video clips (phase 3), v0.2.0 (2026-11-21; v0.1.1 built 2026-11-04) from the still
 # WIN_20230518_23_23_28 t0.5.  An orange/yellow flame cross on magenta: rolling flame stripes (a V oscillator
 # plus the H triangle, keyed), a black figure that breathes between head and diamond, a column of blue lenses.
 # See crucible.vhd, crucible.py, SUMMARY.md.
@@ -7,7 +7,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.crucible"
 program_name = "Crucible"
-program_version = "0.1.3"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

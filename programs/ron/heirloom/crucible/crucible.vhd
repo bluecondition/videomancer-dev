@@ -3,6 +3,20 @@
 --
 -- 2026-11-15: K6 camera top +25 % (Ron)
 --
+-- v0.2.0 (2026-11-21, Ron's hardware note "appearance seems ok but glitchy and not fun"):
+--   * the per-line jitter / tear / yellow-streak randomness came from a free-running LFSR, so 1 line in 8
+--     jumped 1..4.5 px to a NEW random place every field (all edges fizzed at 60 Hz) and Tear On re-tore a
+--     third of the frame every field.  It now comes from a 1024 x 16 random ROM indexed by the line's
+--     position in the ROLLING stripe frame (virtual line - roll lines): the striation and the tears are
+--     fixed to the flame bands and travel down with them.  Burst state and the Bayer phase reset per field.
+--   * the camera luma passes a 1/8 horizontal IIR before it heats F (pixel noise x the K6 gain jittered
+--     every key edge by up to +-12 px).
+--   * P12 above the photo (546) is now a climax: the flame oscillator's swing grows x1 -> x2.86 (the
+--     stripes keep rolling as hard fire / cold bands instead of flooding flat) and the V oscillator bends
+--     the picture sideways (the H ramp offset by W (g - 1) / 4: up to +-59 vpx, travelling with the bands).
+--     At and below 546 the picture is bit-identical in structure to v0.1.x.
+--   * the line buffer carries no_rw_check (read trails write by >= 3 entries).
+--
 -- Crucible v0.1.1 -- Heirloom from the video clips, built from the still WIN_20230518_23_23_28 t0.5
 -- v0.1.1: S7 Twin On = two separate lens columns at +-420 virtual px from the axis (one each side of the
 -- figure); S10 Tear On = frequent large sync-tear bursts (1 start in 8 lines, 8..39 lines, 40..198 vpx).
@@ -38,7 +52,8 @@
 --   S9  Palette   Flame (the photo) / Ice (Cr and Cb swapped: a blue cross on teal and orange)
 --   S10 Tear      Off (the photo's faint line jitter) / On (sync tear: bursts of 8..39 lines shifted 40..198 vpx)
 --   S11 Source    Video / Osc
---   P12 HEAT      the flame level: 0 = cold (violet, black figure, lenses), 546 = the photo, 100 % = molten
+--   P12 HEAT      the flame level: 0 = cold (violet, black figure, lenses), 546 = the photo; above it the
+--                 flame swing grows x2.86 and the stripes bend the picture (+-59 vpx): 100 % = roaring fire
 --
 -- Engine: vblank-zone sequencer (shared glide, exp2 / cos ROM knob curves, one serial multiplier for the
 -- per-field products), a per-line engine kicked at each line start computing the NEXT line (the roll
@@ -93,6 +108,7 @@ architecture crucible of program_top is
     -- line buffer: (luma >> 2) - 16, clipped at 0
     type t_lb is array (0 to 2047) of std_logic_vector(7 downto 0);
     signal lb : t_lb := (others => x"00");
+    attribute no_rw_check of lb : signal is true;     -- read (b_pc) trails write (s_wcol) by >= 3 entries
     signal s_lb_wa, s_lb_ra : unsigned(10 downto 0) := (others => '0');
     signal s_lb_wd : std_logic_vector(7 downto 0) := x"00";
     signal s_lb_we : std_logic := '0';
@@ -110,6 +126,8 @@ architecture crucible of program_top is
     signal r_zn_q : std_logic_vector(11 downto 0) := (others => '0');
     signal r_ln_a : unsigned(8 downto 0) := (others => '0');
     signal r_ln_q : std_logic_vector(7 downto 0) := (others => '0');
+    signal r_rn_a : unsigned(9 downto 0) := (others => '0');
+    signal r_rn_q : std_logic_vector(15 downto 0) := (others => '0');
     signal r_pa_a : unsigned(9 downto 0) := to_unsigned(448, 10);
     signal r_py_q, r_pu_q, r_pv_q : std_logic_vector(7 downto 0) := (others => '0');
 
@@ -175,6 +193,7 @@ architecture crucible of program_top is
     signal c_b8   : unsigned(7 downto 0) := (others => '0');          -- morph LFO 0 .. 255
     signal c_b    : unsigned(8 downto 0) := (others => '0');          -- morph after the K4 bias 0 .. 256
     signal c_cb, c_sn : signed(9 downto 0) := (others => '0');
+    signal c_m3   : unsigned(9 downto 0) := (others => '0');          -- 3 |sn| (breathing)
     signal c_ls8  : unsigned(8 downto 0) := to_unsigned(256, 9);      -- lens row scale (breathing), Q8
     signal c_zs8, c_izs8 : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal c_th8  : signed(9 downto 0) := to_signed(166, 10);         -- lens threshold, Q8
@@ -183,6 +202,11 @@ architecture crucible of program_top is
     signal c_xb0  : unsigned(11 downto 0) := to_unsigned(16, 12);
     signal c_dd   : unsigned(5 downto 0) := to_unsigned(8, 6);        -- 2 xs^2
     signal c_xsq  : unsigned(4 downto 0) := to_unsigned(4, 5);        -- xs^2
+    signal c_rls  : unsigned(7 downto 0) := (others => '0');          -- |roll step| per field, Q4 virtual lines
+    signal c_rlx  : unsigned(13 downto 0) := (others => '0');         -- signed roll step (two's complement)
+    signal c_rl   : unsigned(13 downto 0) := (others => '0');         -- roll offset, Q4 virtual lines (wraps at 1024)
+    signal c_hd   : unsigned(8 downto 0) := (others => '0');          -- P12 above the photo (0 .. 477)
+    signal c_wg   : unsigned(8 downto 0) := to_unsigned(128, 9);      -- flame swing gain, Q7 (1.0 .. 2.86)
 
     -- field serial multiplier
     signal f_a   : unsigned(27 downto 0) := (others => '0');
@@ -212,7 +236,10 @@ architecture crucible of program_top is
     signal e_lc   : unsigned(7 downto 0) := to_unsigned(255, 8);
     signal e_zk   : std_logic := '0';
     signal e_vy   : unsigned(18 downto 0) := (others => '0');
-    signal e_lfsr : unsigned(15 downto 0) := x"ACE1";
+    signal e_rn   : std_logic_vector(15 downto 0) := (others => '0');  -- the line's random word (rolling frame)
+    signal e_wg   : signed(10 downto 0) := (others => '0');           -- W x swing gain (Q8)
+    signal e_bend : signed(9 downto 0) := (others => '0');            -- the stripes' sideways bend (h)
+    signal e_oxh  : signed(10 downto 0) := (others => '0');
     signal e_bc   : unsigned(5 downto 0) := (others => '0');          -- tear burst lines left
     signal e_bo   : signed(9 downto 0) := (others => '0');            -- tear burst offset (h)
     signal e_bm   : unsigned(8 downto 0) := (others => '0');          -- tear burst magnitude (h)
@@ -276,6 +303,7 @@ architecture crucible of program_top is
     signal p3_pp : std_logic := '0';
     signal p4_kf : unsigned(9 downto 0) := (others => '0');
     signal p4_lm : unsigned(7 downto 0) := (others => '0');
+    signal s_lacc : unsigned(10 downto 0) := (others => '0');         -- camera luma IIR (x8), 1/8 per pixel
     signal p4_inz, p4_inb, p4_inl, p4_rim : std_logic := '0';
     signal p4_dep : unsigned(5 downto 0) := (others => '0');
     signal p4_mid : unsigned(4 downto 0) := (others => '0');
@@ -330,6 +358,7 @@ begin
             r_cs_q <= C_CR_COS(to_integer(r_cs_a));
             r_zn_q <= C_CR_ZONE(to_integer(r_zn_a));
             r_ln_q <= C_CR_LENS(to_integer(r_ln_a));
+            r_rn_q <= C_CR_RND(to_integer(r_rn_a));
         end if;
     end process p_rom;
 
@@ -370,7 +399,7 @@ begin
         variable v_k  : unsigned(9 downto 0);
         variable v_t13 : unsigned(12 downto 0);
         variable v_e13 : signed(12 downto 0);
-        variable v_mg : unsigned(13 downto 0);
+        variable v_s11 : signed(10 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -515,6 +544,18 @@ begin
                     when 42 =>                                        -- heat (Q8): 0.75 p - 410
                         v_t13 := shift_left(resize(s_gp(12 downto 3), 13), 1) + resize(s_gp(12 downto 3), 13);
                         c_h8 <= resize(signed(shift_right(v_t13, 2)) - 410, 11);
+                    when 43 =>                                        -- P12 above the photo position (0 .. 477)
+                        v_s11 := signed(resize(s_gp(12 downto 3), 11)) - 546;
+                        if v_s11(10) = '1' then c_hd <= (others => '0'); else c_hd <= unsigned(v_s11(8 downto 0)); end if;
+                    when 44 =>                                        -- swing gain 1 + hd / 256 (Q7, 128 .. 366: x1 .. x2.86)
+                        c_wg <= 128 + resize(c_hd(8 downto 1), 9);
+                    when 95 =>                                        -- roll lines per field (Q4) = s^2 (3/4) / 1024
+                        c_rls <= c_s2(17 downto 10) - shift_right(c_s2(17 downto 10), 2);
+                    when 96 =>
+                        if c_vneg = '1' then c_rlx <= unsigned(-signed(resize(c_rls, 14)));
+                        else c_rlx <= resize(c_rls, 14); end if;
+                    when 140 =>                                       -- the rolling frame, with c_rp (zc 139)
+                        c_rl <= c_rl + c_rlx;
                     when others => null;
                 end case;
             end if;
@@ -598,11 +639,14 @@ begin
                     when 151 => c_b8 <= resize(unsigned(shift_right(255 - c_cb, 1)), 8);
                     when 153 => c_sn <= signed(r_cs_q);
                     when 154 =>
-                        -- 256 +- (23 |sn|) >> 8 (sign-magnitude: no shared operand bits in the adder)
-                        if c_sn < 0 then v_mg := resize(unsigned(-c_sn), 14); else v_mg := resize(unsigned(c_sn), 14); end if;
-                        v_mg := shift_left(v_mg, 4) + shift_left(v_mg, 2) + shift_left(v_mg, 1) + v_mg;
-                        if c_sn < 0 then c_ls8 <= 256 - resize(v_mg(13 downto 8), 9);
-                        else c_ls8 <= 256 + resize(v_mg(13 downto 8), 9); end if;
+                        -- 256 +- (3 |sn|) >> 5, one operation per clock (v0.2.0: was 23 |sn| >> 8 in one
+                        -- clock, the HD HDMI critical path at 94 % LC)
+                        if c_sn < 0 then c_m3 <= unsigned(-c_sn); else c_m3 <= unsigned(c_sn); end if;
+                    when 155 =>
+                        c_m3 <= shift_left(c_m3, 1) + c_m3;
+                    when 156 =>
+                        if c_sn < 0 then c_ls8 <= 256 - resize(c_m3(9 downto 5), 9);
+                        else c_ls8 <= 256 + resize(c_m3(9 downto 5), 9); end if;
                     when others => null;
                 end case;
             end if;
@@ -693,7 +737,7 @@ begin
     -- Line engine: kicked at each line start (and once in the zone for line
     -- 0), computes the NEXT line.  One serial product at a time (16
     -- iterations, result stable from load + 17); one small operation per
-    -- clock otherwise.  ~200 clocks: fits SD's 858-clock line.
+    -- clock otherwise.  ~217 clocks: fits SD's 858-clock line.
     ---------------------------------------------------------------------------
     p_line : process(clk)
         variable v_vf  : signed(12 downto 0);
@@ -709,6 +753,8 @@ begin
         variable v_p   : unsigned(15 downto 0);
         variable v_mm  : signed(10 downto 0);
         variable v_ux, v_uy : unsigned(12 downto 0);
+        variable v_k14 : unsigned(13 downto 0);
+        variable v_wd  : signed(11 downto 0);
     begin
         if rising_edge(clk) then
             e_zk <= '0';
@@ -717,10 +763,10 @@ begin
             if e_zk = '1' then
                 e_vy <= (others => '0');
                 e_lc <= (others => '0');
+                e_bc <= (others => '0');             -- no tear burst spills over from the last field
             elsif g_start = '1' then
                 e_vy <= e_vy + resize(s_ys, 19);
                 e_lc <= (others => '0');
-                e_lfsr <= e_lfsr(14 downto 0) & (e_lfsr(15) xor e_lfsr(13) xor e_lfsr(12) xor e_lfsr(10));
             elsif e_lc /= 255 then
                 e_lc <= e_lc + 1;
             end if;
@@ -742,6 +788,10 @@ begin
                     -- W phase: e_vy * invP (Q8 lines x Q16 cycles / line)
                     m_a <= resize(e_vy, 36); m_b <= resize(c_invp, 16); m_acc <= (others => '0');
                 when 3 =>
+                    -- the line's place in the rolling stripe frame (virtual line - roll lines, 1024-line
+                    -- period) indexes the random ROM: the jitter / tears / streaks travel with the bands
+                    v_k14 := e_vy(17 downto 4) - c_rl;
+                    r_rn_a <= v_k14(13 downto 4);
                     e_d  <= signed(resize(e_vf, 12)) - 490;
                     e_d2 <= signed(resize(e_vf, 12)) - 535;
                     e_dl <= signed(resize(e_vf, 12)) - 520;
@@ -752,10 +802,24 @@ begin
                     v_a := abs(e_d2); e_ad2 <= unsigned(v_a(10 downto 0));
                     v_a := abs(e_dl); e_adl <= unsigned(v_a(10 downto 0));
                     v_a := abs(e_dv); e_adv <= unsigned(v_a(10 downto 0));
-                    e_bm <= 80 + shift_left(resize(e_lfsr(14 downto 9), 9), 2) + resize(e_lfsr(14 downto 9), 9);
                 when 5 =>
-                    -- tear / jitter offset (h) for this line, from the line's LFSR
-                    v_r := e_lfsr;
+                    e_rn <= r_rn_q;                           -- fabric copy of the random word
+                when 6 =>
+                    e_bm <= 80 + shift_left(resize(unsigned(e_rn(14 downto 9)), 9), 2) + resize(unsigned(e_rn(14 downto 9)), 9);
+                    -- violet band / pink index by |y - 540|
+                    if e_adv > 100 then v_u := resize(e_adv - 100, 12); else v_u := (others => '0'); end if;
+                    if v_u(11 downto 6) > 7 then n_band <= "111"; else n_band <= v_u(8 downto 6); end if;
+                    n_frac <= v_u(5 downto 4);
+                when 7 =>
+                    if e_adv > 280 then
+                        v_u := resize(e_adv - 280, 12);
+                        v_u := shift_right(v_u, 2) + shift_right(v_u, 4);
+                        if v_u > 63 then n_pidx <= (others => '1'); else n_pidx <= v_u(5 downto 0); end if;
+                    else
+                        n_pidx <= (others => '0');
+                    end if;
+                    -- tear / jitter offset (h) for this line, from the line's random word
+                    v_r := unsigned(e_rn);
                     if s_tear = '1' then
                         -- bursts: 1 start in 8 lines, 8..39 lines long, shifted +-(80 + 5 r) h = 40..198 vpx
                         if e_bc /= 0 then
@@ -780,44 +844,6 @@ begin
                             e_ox <= (others => '0');
                         end if;
                     end if;
-                when 6 =>
-                    e_xb  <= signed(resize(c_xb0, 13)) + resize(e_ox, 13);
-                    -- violet band / pink index by |y - 540|
-                    if e_adv > 100 then v_u := resize(e_adv - 100, 12); else v_u := (others => '0'); end if;
-                    if v_u(11 downto 6) > 7 then n_band <= "111"; else n_band <= v_u(8 downto 6); end if;
-                    n_frac <= v_u(5 downto 4);
-                when 7 =>
-                    if s_twin = '1' then                      -- two columns at 992 -+ 420 vpx
-                        e_dx1 <= e_xb - 1144;
-                        e_dx2 <= e_xb - 2824;
-                    else                                      -- the photo's column (x 875) and its mirror
-                        e_dx1 <= e_xb - 1750;
-                        e_dx2 <= e_xb - 2218;
-                    end if;
-                    if e_adv > 280 then
-                        v_u := resize(e_adv - 280, 12);
-                        v_u := shift_right(v_u, 2) + shift_right(v_u, 4);
-                        if v_u > 63 then n_pidx <= (others => '1'); else n_pidx <= v_u(5 downto 0); end if;
-                    else
-                        n_pidx <= (others => '0');
-                    end if;
-                when 8 =>
-                    -- |dx| * xs (the lens DDA step base), from the magnitude (no shared operand bits)
-                    v_ux := unsigned(abs(e_dx1)); e_ng1 <= e_dx1(12);
-                    v_uy := unsigned(abs(e_dx2)); e_ng2 <= e_dx2(12);
-                    case to_integer(s_xs) is
-                        when 4      => e_mx1 <= shift_left(resize(v_ux, 15), 2); e_mx2 <= shift_left(resize(v_uy, 15), 2);
-                        when 3      => e_mx1 <= shift_left(resize(v_ux, 15), 1) + resize(v_ux, 15);
-                                       e_mx2 <= shift_left(resize(v_uy, 15), 1) + resize(v_uy, 15);
-                        when others => e_mx1 <= shift_left(resize(v_ux, 15), 1); e_mx2 <= shift_left(resize(v_uy, 15), 1);
-                    end case;
-                when 9 =>
-                    -- D0 = 2 dx xs + xs^2
-                    if e_ng1 = '1' then n_d1 <= signed(resize(c_xsq, 19)) - signed(resize(shift_left(resize(e_mx1, 18), 1), 19));
-                    else n_d1 <= signed(resize(shift_left(resize(e_mx1, 18), 1), 19)) + signed(resize(c_xsq, 19)); end if;
-                    if e_ng2 = '1' then n_d2 <= signed(resize(c_xsq, 19)) - signed(resize(shift_left(resize(e_mx2, 18), 1), 19));
-                    else n_d2 <= signed(resize(shift_left(resize(e_mx2, 18), 1), 19)) + signed(resize(c_xsq, 19)); end if;
-                    n_xb <= e_xb;
                 when 19 =>
                     v_p := c_ph0 + m_acc(23 downto 8);
                     e_csa <= v_p(15 downto 8);
@@ -849,15 +875,6 @@ begin
                     if e_adz > 50 then v_u := resize(e_adz - 50, 12); else v_u := (others => '0'); end if;
                     if v_u(10 downto 9) /= "00" then v_i := to_unsigned(255, 9); else v_i := '0' & v_u(8 downto 1); end if;
                     if e_top = '1' then r_zn_a <= '0' & v_i; else r_zn_a <= to_unsigned(256, 10) + v_i; end if;
-                    -- thresholds (Q8 F units)
-                    v_th := 205 - resize(e_w8, 14) - resize(c_h8, 14) + signed(resize(e_mty, 14));
-                    n_ty <= resize(v_th, 13);
-                    n_tb <= resize(v_th - 102, 13);
-                    n_tyi <= resize(v_th + signed(resize(e_lfsr(11 downto 8), 14)) - 8, 13);
-                    v_th := 64 - resize(e_w8, 14) - resize(c_h8, 14) + signed(resize(e_mtl, 14));
-                    n_tl <= resize(v_th, 13);
-                    v_th := 105 - resize(e_w8, 14) - resize(c_h8, 14) + signed(resize(e_tr, 14));
-                    n_tr <= resize(v_th, 13);
                 when 43 =>
                     e_h1b <= unsigned(r_zn_q);
                 when 54 =>
@@ -918,11 +935,59 @@ begin
                     m_a <= resize(unsigned(v_mm), 36); m_b <= to_unsigned(824, 16); m_acc <= (others => '0');
                 when 158 =>
                     n_lt <= m_acc(19 downto 0);
-                    m_a <= resize(unsigned(abs(e_dx1)), 36); m_b <= unsigned(resize(abs(e_dx1), 16)); m_acc <= (others => '0');
+                    -- the flame swing: |W| x gain (Q7; exactly W at and below the photo's heat)
+                    m_a <= resize(unsigned(abs(e_w8)), 36); m_b <= resize(c_wg, 16); m_acc <= (others => '0');
                 when 175 =>
+                    if e_w8(9) = '1' then e_wg <= -signed(resize(m_acc(16 downto 7), 11));
+                    else e_wg <= signed(resize(m_acc(16 downto 7), 11)); end if;
+                when 176 =>
+                    -- the bend: W (g - 1) / 4 in h (0 at and below the photo's heat, up to +-118 h = +-59 vpx)
+                    v_wd := resize(e_wg, 12) - resize(e_w8, 12);
+                    e_bend <= resize(shift_right(v_wd, 2), 10);
+                    -- thresholds (Q8 F units), the swing in place of W
+                    v_th := 205 - resize(e_wg, 14) - resize(c_h8, 14) + signed(resize(e_mty, 14));
+                    n_ty <= resize(v_th, 13);
+                    n_tb <= resize(v_th - 102, 13);
+                    n_tyi <= resize(v_th + signed(resize(unsigned(e_rn(11 downto 8)), 14)) - 8, 13);
+                    v_th := 64 - resize(e_wg, 14) - resize(c_h8, 14) + signed(resize(e_mtl, 14));
+                    n_tl <= resize(v_th, 13);
+                    v_th := 105 - resize(e_wg, 14) - resize(c_h8, 14) + signed(resize(e_tr, 14));
+                    n_tr <= resize(v_th, 13);
+                when 177 =>
+                    e_oxh <= resize(e_ox, 11) + resize(e_bend, 11);
+                when 178 =>
+                    e_xb  <= signed(resize(c_xb0, 13)) + resize(e_oxh, 13);
+                when 179 =>
+                    if s_twin = '1' then                      -- two columns at 992 -+ 420 vpx
+                        e_dx1 <= e_xb - 1144;
+                        e_dx2 <= e_xb - 2824;
+                    else                                      -- the photo's column (x 875) and its mirror
+                        e_dx1 <= e_xb - 1750;
+                        e_dx2 <= e_xb - 2218;
+                    end if;
+                when 180 =>
+                    -- |dx| * xs (the lens DDA step base), from the magnitude (no shared operand bits)
+                    v_ux := unsigned(abs(e_dx1)); e_ng1 <= e_dx1(12);
+                    v_uy := unsigned(abs(e_dx2)); e_ng2 <= e_dx2(12);
+                    case to_integer(s_xs) is
+                        when 4      => e_mx1 <= shift_left(resize(v_ux, 15), 2); e_mx2 <= shift_left(resize(v_uy, 15), 2);
+                        when 3      => e_mx1 <= shift_left(resize(v_ux, 15), 1) + resize(v_ux, 15);
+                                       e_mx2 <= shift_left(resize(v_uy, 15), 1) + resize(v_uy, 15);
+                        when others => e_mx1 <= shift_left(resize(v_ux, 15), 1); e_mx2 <= shift_left(resize(v_uy, 15), 1);
+                    end case;
+                when 181 =>
+                    -- D0 = 2 dx xs + xs^2
+                    if e_ng1 = '1' then n_d1 <= signed(resize(c_xsq, 19)) - signed(resize(shift_left(resize(e_mx1, 18), 1), 19));
+                    else n_d1 <= signed(resize(shift_left(resize(e_mx1, 18), 1), 19)) + signed(resize(c_xsq, 19)); end if;
+                    if e_ng2 = '1' then n_d2 <= signed(resize(c_xsq, 19)) - signed(resize(shift_left(resize(e_mx2, 18), 1), 19));
+                    else n_d2 <= signed(resize(shift_left(resize(e_mx2, 18), 1), 19)) + signed(resize(c_xsq, 19)); end if;
+                    n_xb <= e_xb;
+                when 182 =>
+                    m_a <= resize(unsigned(abs(e_dx1)), 36); m_b <= unsigned(resize(abs(e_dx1), 16)); m_acc <= (others => '0');
+                when 199 =>
                     n_a1 <= m_acc(24 downto 0);
                     m_a <= resize(unsigned(abs(e_dx2)), 36); m_b <= unsigned(resize(abs(e_dx2), 16)); m_acc <= (others => '0');
-                when 192 =>
+                when 216 =>
                     n_a2 <= m_acc(24 downto 0);
                 when others => null;
             end case;
@@ -947,6 +1012,8 @@ begin
                 l_lt <= n_lt;
                 l_eye <= n_eye; l_erim <= n_erim; l_small <= n_small;
                 l_band <= n_band; l_frac <= n_frac; l_pidx <= n_pidx;
+            elsif e_zk = '1' then
+                b_lp <= '0';                                  -- the same dither phase every field
             elsif g_avid = '1' then
                 b_x  <= b_x + signed(resize(s_xs, 13));
                 b_a1 <= unsigned(signed(b_a1) + resize(b_d1, 25));
@@ -985,6 +1052,8 @@ begin
             -- 4: flags and indices; the camera luma (fabric copy of the line-buffer read)
             p4_kf <= p3_kf;
             p4_lm <= unsigned(s_lb_q);
+            -- camera luma IIR, 1/8 per pixel (x8 state): the pixel noise no longer jitters the key edges
+            s_lacc <= s_lacc - shift_right(s_lacc, 3) + resize(p4_lm, 11);
             p4_inz <= p3_e(13);
             p4_inb <= p3_eb(13);
             if p3_da > 0 then p4_inl <= '1'; else p4_inl <= '0'; end if;
@@ -998,7 +1067,7 @@ begin
             if l_frac > v_bay and l_band /= 7 then p4_band <= l_band + 1; else p4_band <= l_band; end if;
             -- 5: camera product (luma x gain)
             p5_kf <= p4_kf;
-            p5_ct <= p4_lm * c_g;
+            p5_ct <= s_lacc(10 downto 3) * c_g;
             p_fl(5) <= p4_inz & p4_inb & p4_inl & p4_rim & std_logic_vector(p4_dep) & std_logic_vector(p4_mid) & std_logic_vector(p4_band);
             -- 6: F = H term + camera
             p6_f <= signed(resize(p5_kf, 13)) + signed(resize(shift_right(p5_ct, 3), 13));
