@@ -218,3 +218,10 @@ vs new: `.heirloom_work/rb_lentil/k6b/k6b_cmp.png` (same picture, the stripes cr
 artifacts).
 **Build:** router1, seed 1 on all six; HD Analog 92.20, HD HDMI 92.28, HD Dual 87.61 MHz (worst HD 87.61); SD 90.33 /
 90.28 / 89.88 MHz; 6912-6938 / 7680 LC (90.3 %), 17/32 EBR. `out/rev_b/ron/heirloom/lentil.vmprog`. NOT flashed.
+
+## v0.1.3: HW-captured defaults (2026-11-20)
+
+Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh --defaults`:
+K1 Stripes 642, K2 Fan 602, K3 Lenses 729, K4 Breath 470, K5 Pinch 518, S8 Fill On, P12 Band 660 (K6 Bend, S7,
+S9-S11 unchanged). The vmprog was repacked from the v0.1.2 bitstreams (only the settings block differs, 196 bytes),
+so timing, seeds and LC are as in v0.1.2. Presets are unchanged.
