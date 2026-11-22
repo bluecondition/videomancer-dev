@@ -555,7 +555,7 @@ begin
                         else c_bh0 <= resize(shift_left(v_g, 2), 10) + 176; end if;
                     when 21 =>
                         if z_lf < 96 then v_b := signed(resize(z_lf, 10));
-                        elsif z_lf < 288 then v_b := 192 - signed(resize(z_lf, 10));
+                        elsif z_lf < 288 then v_b := to_signed(192, 10) - signed(resize(z_lf, 10));
                         else v_b := signed(resize(z_lf, 10)) - 384; end if;
                         z_br <= resize(v_b, 8);
                         if v_b < 0 then v_bp := (others => '0'); else v_bp := unsigned(v_b(6 downto 0)); end if;
@@ -762,15 +762,15 @@ begin
                                     else n_sl <= l_acc(11 downto 0); end if;
                                 when 5 =>
                                     if e_n720 = '1' then n_lw <= 447 + signed(resize(shift_right(l_acc, 8), 11));
-                                    else n_lw <= 447 - signed(resize(shift_right(l_acc, 8), 11)); end if;
+                                    else n_lw <= to_signed(447, 11) - signed(resize(shift_right(l_acc, 8), 11)); end if;
                                 when 6 =>
                                     if e_n330 = '1' then n_vth <= resize(shift_right(l_acc, 8), 9);
                                     else n_vth <= (others => '0'); end if;
                                 when 7 =>
-                                    if e_n330 = '1' then n_ur <= 424 - signed(resize(shift_right(l_acc, 8), 11));
+                                    if e_n330 = '1' then n_ur <= to_signed(424, 11) - signed(resize(shift_right(l_acc, 8), 11));
                                     else n_ur <= 424 + signed(resize(shift_right(l_acc, 8), 11)); end if;
                                 when others =>
-                                    v_s := 262 - signed(resize(shift_right(l_acc, 8), 12));
+                                    v_s := to_signed(262, 12) - signed(resize(shift_right(l_acc, 8), 12));
                                     if v_s < 0 then n_gl <= (others => '0');
                                     elsif v_s > 175 then n_gl <= to_unsigned(175, 8);
                                     else n_gl <= unsigned(v_s(7 downto 0)); end if;
@@ -922,7 +922,7 @@ begin
             p10_q8 <= p9_qa - resize(p9_qb, 10);
             p10_F <= p9_F;
             if p9_F > 573 then p10_a1 <= '1'; else p10_a1 <= '0'; end if;
-            if p_top(9) = '1' then v_f := resize(p9_F, 14) + 1024; else v_f := 1024 - resize(p9_F, 14); end if;
+            if p_top(9) = '1' then v_f := resize(p9_F, 14) + 1024; else v_f := to_signed(1024, 14) - resize(p9_F, 14); end if;
             if v_f < 0 then r_pb_a <= (others => '0');
             elsif v_f > 2047 then r_pb_a <= (others => '1');
             else r_pb_a <= unsigned(v_f(10 downto 1)); end if;

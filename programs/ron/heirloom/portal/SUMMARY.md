@@ -251,3 +251,24 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 Ron: K6 loads at 100 % (initial_value 1023, set by the orchestrator, with the version bump), and the camera effect at the top of the knob is 25 % stronger on bend / element programs. Bend-type: K6 Etch bends the rings, bars and stripes by the camera's luma. Camera: c_eg = 1.25 k6^2 >> 13 with the pixel product read >> 7 (was k6^2 >> 12, >> 8): top 316 in old units (was 255), saturating at +-1023 as before. The Osc is unchanged (k6^2 >> 12, product >> 3). The gain is computed per field (no new pixel-path multiplier, latency unchanged). Checked: a GHDL render of old against new code at K6 = 100 % (the K6 glide bypassed in the scratch copies), `.heirloom_work/rb_portal/k6b/k6b_cmp.png`: the same picture with a stronger camera bend, with no wrap and no new artifacts.
 
 - Build: router1, all six configs on seed 1; worst HD 94.15 MHz (HD HDMI; HD Analog 101.90, HD Dual 98.18); SD 91.93-93.12; 6945-6960 LC, 24 / 32 EBR.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`447 - x` as `x - 447`), while the GHDL simulator computes it correctly, so every render showed the intended picture and the hardware ran the reversed one. Each site is now `to_signed(N, w) - x` with the old width.
+- **Fixed (5 sites):**
+  - line 558, `v_b := to_signed(192, 10) - ...`: the middle segment of the bar-level breath LFO (384-field triangle 0 → +96 → −96 → 0);
+  - line 765, `n_lw <= to_signed(447, 11) - ...`: the Λ lower-window edge below row 720;
+  - line 770, `n_ur <= to_signed(424, 11) - ...`: the pink extent of the dome band above row 330;
+  - line 773, `v_s := to_signed(262, 12) - ...`: the eyes' green glow level per line;
+  - line 925, `v_f := to_signed(1024, 14) - resize(p9_F, 14)`: the blue-ring table address for the lower half.
+- **On hardware before → now:**
+  - the lower half of the frame (row ≥ 576) had no blue rings, just a flat mid-blue wash: the rings now run through both halves;
+  - rows 720–940 were filled edge to edge by the lower-window colour (G 90 + eye stripes), hiding the yellow / red / magenta floor rings: the Λ windows now widen downward from the cusps as in the still;
+  - the pink dome band survived only as a ~27-row strip (rows 330–357), the rest of it cyan-blue: the whole band is pink again;
+  - the eyes had no green glow, only their blue stripes: they now glow green around row 510;
+  - the breath was a rising sawtooth whose bar density popped from +35 % to −35 % (and the dome thinning jumped off) twice every 6.4 s: it is a smooth triangle again.
+- No default or preset remaps (group 1, never flashed). No sites left as-is.
+- **Build** (router1, `.heirloom_work/skew_tools/build_any.sh portal`): all six configs seed 1. Post-route Fmax: HD Analog 93.49 (builder seed, replaced), SD Analog 95.85, HD HDMI 88.66 (builder seed, replaced), SD HDMI 92.19, HD Dual 91.89, SD Dual 93.49 MHz. 6,992–7,018 / 7,680 LC, 24 / 32 EBR, iceunpack OK ×6.
+- **HD skew:** the builder's HD HDMI router1 s1 was **−0.89 / ≤ −1.11** (negative HSYNC). Screen router1 + router2 s1–80 (139 timing-clean): only one in the window. Installed **HD HDMI router2 s18 (+1.38 / ≤ −1.33, 80.33 MHz)**. HD Analog r1 s1 had its closest HDMI data bit at −0.599 (just over −0.6), so it was replaced by **HD Analog router1 s15 (−1.43 / ≤ −1.42, 92.97 MHz)**. HD Dual r1 s1 (−1.85 / ≤ −1.15) kept. Spare HD HDMI router2 s60 (+1.63 / ≤ −0.53, 79.35 MHz, data just outside the rule, as the best second choice): `.heirloom_work/rb_portal/skew/portal_v013_spare_hd_hdmi_router2_s60.vmprog`. The builder's .bins are `skew/hd_hdmi_replaced_202611212102.bin` and `skew/hd_analog_replaced_202611212102.bin`.
+- **Seeds to record:** the shipped HD HDMI is router2 s18 and HD Analog router1 s15 (hand-installed; a plain rebuild gives the builder's seed 1).
+- `out/rev_b/ron/heirloom/portal.vmprog` (v0.1.3). Backups of v0.1.2 (vhd, toml, vmprog) in `.heirloom_work/rb_portal/`. Not flashed.
