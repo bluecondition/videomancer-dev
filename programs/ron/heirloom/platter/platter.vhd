@@ -590,7 +590,7 @@ begin
                         -- the field seed (held two fields): xor-shift-add mix of the field count
                         z_seed <= z_seed xor shift_right(z_seed, 7);
                         if s_mir = '1' then
-                            if c_x0h < 0 then c_xa0 <= 844 - c_x0h; else c_xa0 <= 844 + c_x0h; end if;
+                            if c_x0h < 0 then c_xa0 <= to_signed(844, 13) - c_x0h; else c_xa0 <= 844 + c_x0h; end if;
                         else
                             c_xa0 <= c_x0h + 844;
                         end if;
@@ -598,7 +598,7 @@ begin
                         -- orbit speed: v = k4 - 512 with a +-8 deadband
                         v_d := signed(resize(s_g4(12 downto 3), 13)) - 512;
                         if v_d > 8 then z_v <= unsigned(resize(v_d - 8, 10)); z_vn <= '0';
-                        elsif v_d < -8 then z_v <= unsigned(resize(-8 - v_d, 10)); z_vn <= '1';
+                        elsif v_d < -8 then z_v <= unsigned(resize(to_signed(-8, 13) - v_d, 10)); z_vn <= '1';
                         else z_v <= (others => '0'); z_vn <= '0'; end if;
                     when 22 =>
                         z_seed <= z_seed + shift_left(z_seed, 5);

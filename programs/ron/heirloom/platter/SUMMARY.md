@@ -226,3 +226,32 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
     both the old and the new code.
 - **Build:** router1, all six on seed 1. HD Analog 84.78, HD HDMI 81.08, HD Dual 79.13 MHz (worst HD 79.13);
   7,119-7,139 LC, 24 EBR.
+
+## v0.1.4: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`844 - x` comes out as `x - 844`). The
+simulator is correct, so every render showed the intended picture; only the hardware differed.
+- **Sites fixed:**
+  - line 593 (sequencer slot 21, S9 Mirror): `c_xa0 <= 844 - c_x0h` -> `to_signed(844, 13) - c_x0h`. This is the
+    tube-field DDA's start value `xa - 1120 = 844 + |x0 - 1964|` on the left of the axis.
+  - line 601 (slot 21, K4 Orbit left of the +-8 deadband): `-8 - v_d` -> `to_signed(-8, 13) - v_d`, the clockwise
+    orbit speed magnitude `z_v`.
+- **What changes on hardware:**
+  - S9 Mirror: the field DDA started negative, so the tube field's slope was inverted: still left-right symmetric,
+    but the tube rings ran the opposite way (the field beyond the right edge, reflected). Now Mirror shows the right
+    half's S tubes on both sides, as designed. Mirror Off is unchanged.
+  - K4 Orbit left of centre: just past the deadband the clockwise orbit jumped to ~5.5x the clip speed (about twice
+    the intended maximum) and SLOWED toward the left end (~2.9x); there were no slow clockwise speeds. Now it ramps
+    from stopped at the deadband to ~2.7x the clip speed clockwise at K4 = 0. The right half (default 700) is
+    unchanged.
+- **Remaps:** none (never flashed).
+- **Left as-is:** nothing else listed by the audit.
+- **Build:** router1, all six on seed 1: HD Analog 80.94, SD Analog 82.62, HD HDMI 84.38, SD HDMI 78.71, HD Dual
+  83.06, SD Dual 78.85 MHz (worst HD 80.94); 7,130-7,164 / 7,680 LC (93 %), 24 / 32 EBR. iceunpack OK x6.
+- **HD HDMI skew:** the builder's router1 s1 sat at **-1.51** / data <= -1.79 (negative). This netlist sits low:
+  r1 + r2 s1-40 had none in the window (best +0.52), so the screen was extended to router1 s41-160 and router2
+  s41-100. That made 249 routed and 169 timing-clean (router2 misses timing on ~3/4 of seeds here), with 2 in the
+  window. Installed **router1 s135 (+1.65 / <= -0.98, 79.90 MHz)**; spare router2 s97 (+1.12 / <= -0.83, 78.04 MHz)
+  in `.heirloom_work/rb_platter/skew/platter_v014_spare_hd_hdmi_router2_s97.vmprog`. The builder's HD Analog s1 data
+  margin was too small (+1.59 / <= -0.56), so HD Analog -> **router1 s15 (-0.49 / <= -0.80, 82.62 MHz)**. HD Dual r1
+  s1 (-2.23 / <= -1.48) kept. Shipped worst HD 79.90 MHz. Not flashed.
