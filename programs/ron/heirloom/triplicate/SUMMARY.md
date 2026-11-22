@@ -289,3 +289,25 @@ Wait for Ron's preview notes. Rebuild the diag with
   `build/programs/ron/triplicate_diag/rev_b/bitstreams/*.bin` into the production build dir, regenerate
   `program_config.bin` from the production TOML, then `vmprog_pack.py --no-sign --hardware rev_b`;
 - update the production SUMMARY, README and PHASE2 row, and commit only triplicate's files.
+
+## v0.6.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`16384 - a` comes out as `a - 16384`). The
+simulator is correct, so every render showed the intended picture; only the hardware differed.
+- **Site fixed:** line 761, quadrant "00" of each copy's orbit triangle: `r_trc <= 16384 - v_a` ->
+  `to_signed(16384, 16) - v_a`. `r_trc` drives the TOP / LEFT orbit offsets (up to +-132 lines / +-526 px).
+- **What changes on hardware:** with K5 Speed outside the 384..640 band (orbit depth > 0), each copy used to snap
+  across its whole orbit once per cycle on each axis, a quarter-cycle apart: up to ~1050 px sideways or ~264 lines.
+  The triangle jumped from +16384 to -16384 and spent its first quarter on the wrong side. Now the copies glide round
+  a continuous triangle orbit, as designed. Within 384..640 and at the default nothing changes.
+- **Remaps:** none (never flashed at this version).
+- **Left as-is:** nothing else listed by the audit.
+- **Build:** router1, all six on seed 1: HD Analog 86.30, SD Analog 83.11, HD HDMI 83.38, SD HDMI 75.30, HD Dual
+  83.94, SD Dual 83.43 MHz (worst HD 83.38); 7,366-7,394 / 7,680 LC (96 %), 26 / 32 EBR. iceunpack OK x6.
+- **HD HDMI skew:** the builder's router1 s1 sat at **-0.31** / data <= -0.89 (negative). Screen hd_hdmi r1 + r2
+  s1-40: 74 routed, 40 timing-clean (router2 mostly misses timing here), 2 in the window. Installed **router1 s8
+  (+1.76 / <= -1.19, 83.32 MHz)**; spare router1 s12 (+1.34 / <= -0.79, 82.43 MHz) in
+  `.heirloom_work/rb_triplicate/skew/triplicate_v063_spare_hd_hdmi_router1_s12.vmprog`. The builder's HD Analog and
+  HD Dual seed-1 data margins were too small (<= -0.31 and <= -0.47), so both were re-seeded too: HD Analog ->
+  **router1 s9 (-1.58 / <= -0.85, 81.98 MHz)**, the only screened seed with data <= -0.6; HD Dual -> **router1 s8
+  (-1.43 / <= -1.10, 82.52 MHz)**. Shipped worst HD 81.98 MHz. Not flashed.

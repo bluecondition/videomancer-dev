@@ -758,7 +758,7 @@ begin
             if q_uc.b mod 2 = 1 then v_qd := v_qd + 1; end if;
             v_a := signed(resize(r_sp(13 downto 0), 16));
             case v_qd is
-                when "00"   => r_trc <= 16384 - v_a;
+                when "00"   => r_trc <= to_signed(16384, 16) - v_a;
                 when "01"   => r_trc <= -v_a;
                 when "10"   => r_trc <= v_a - 16384;
                 when others => r_trc <= v_a;
