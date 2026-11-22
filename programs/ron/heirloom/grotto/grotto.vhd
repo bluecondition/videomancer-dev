@@ -875,7 +875,7 @@ begin
             -- 4: reflect at the table edges (the wave can push the lookup past them)
             v_x := resize(q3_xt, 14);
             if v_x < 0 then v_x := -v_x;
-            elsif v_x > 3838 then v_x := 7676 - v_x; end if;
+            elsif v_x > 3838 then v_x := to_signed(7676, 14) - v_x; end if;
             q4_x <= unsigned(v_x(11 downto 0));
             q4_sl <= q3_sl;
             if s_src = '1' then

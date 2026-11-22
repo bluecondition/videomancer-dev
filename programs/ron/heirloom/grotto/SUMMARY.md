@@ -152,3 +152,23 @@ The etch-gain constant is 291 (was 233, x1.25 at every position). The per-field 
 Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_grotto/k6b/k6b_cmp.png`.
 
 Build: router1, all seed 1, worst HD Fmax 97.85 MHz, 6901 LC (max of 6). Fmax per config: HD Analog 97.85, SD Analog 103.44, HD HDMI 98.30, SD HDMI 109.11, HD Dual 105.98, SD Dual 85.46 MHz.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`7676 - x` comes out as `x - 7676`). The
+simulator is correct, so every render showed the intended picture; only the hardware differed.
+- **Site fixed:** line 878, the field-table edge reflection at the right edge: `v_x := 7676 - v_x` ->
+  `to_signed(7676, 14) - v_x`. It reflects the field's x lookup where S10 Wave (+-150 px) or the S7 Twin jog pushes
+  it past 3838 h.
+- **What changes on hardware:** before, the lookup jumped to the table's LEFT edge instead of reflecting. With Wave
+  On, a strip up to ~150 px at the right screen edge showed the left cavern wall, swimming with the wave, behind a
+  hard seam. With Twin On, an ~11 px sliver showed at the left screen edge, and with both on, strips showed at both
+  outer edges. Now the edges reflect seamlessly, as designed. With Wave and Twin Off nothing changes.
+- **Remaps:** none (never flashed).
+- **Left as-is:** nothing else listed by the audit.
+- **Build:** router1, all six on seed 1: HD Analog 98.59, SD Analog 95.56, HD HDMI 100.39, SD HDMI 102.55, HD Dual
+  102.88, SD Dual 98.59 MHz (worst HD 98.59); 6,889-6,908 / 7,680 LC, 23 / 32 EBR. iceunpack OK x6.
+- **HD HDMI skew:** the builder's router1 s1 sat at **-0.46** / data <= -0.83 (negative). Screen hd_hdmi r1 + r2
+  s1-40 (72 timing-clean, 3 in the window). Installed **router2 s16 (+2.05 / <= -1.15, 89.53 MHz)**; spare router1
+  s16 (+1.13 / <= -1.03, 103.37 MHz) in `.heirloom_work/rb_grotto/skew/grotto_v013_spare_hd_hdmi_router1_s16.vmprog`.
+  HD Analog r1 s1 (-1.23 / <= -0.89) and HD Dual r1 s1 (-2.23 / <= -1.52) kept. Not flashed.
