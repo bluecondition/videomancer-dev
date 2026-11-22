@@ -212,3 +212,25 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
   - Below 87.5 % the knob is unchanged (the brief's nearest-step option for a shift code).
 - **Render.** `.heirloom_work/rb_bottleneck/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same picture; the outlines melt further into the stripes.
 - **Build** v0.5.3, router1. SD Analog and SD HDMI seed 2, the rest seed 1. HD Analog 80.05, HD HDMI 83.65, HD Dual 82.43 MHz (worst HD 80.05). 7399–7416 / 7680 LC, 17 / 32 EBR. Not flashed.
+
+## v0.5.4: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 1095** (visible): Pink-body ramp: rm = 190 - xi (xi = inside distance from the bottle's left edge,
+  -65..190), 255 .. 0. Multiplied by the row factor rk (rows <= 760) it darkens R/G and adds B on the pink side: a
+  smooth shading gradient … On hardware it was: Computes xi - 190 (-255..0). The signed resize to 8 bits keeps sign
+  + 7 bits, giving 128..255: two RISING sawtooth teeth (129 -> 255 over xi -65..61 and 63..189), then a hard drop to
+  0 at xi = 190. The pink bodies get a strong hard-edged dark band (up to about R -34, G -49, B +17 in 8-bit) with a
+  step inside, instead …
+- **line 1146** (major): S10 Colours = Negative: chroma inverted, U/V = 512 - 4·offset (lilac necks, green bodies,
+  violet stripes). On hardware it was: Computes 4·o - 512, which is always below 4 for |o| <= 128, so the clamp pins
+  U = V = 4 on every pixel: Negative turns the whole picture saturated green (luma intact).
+
+**Build** v0.5.4, router1: HD Analog 80.14, SD Analog 84.30, HD HDMI 80.48 (builder seed, replaced: see HD skew), SD HDMI 89.40, HD Dual 82.44, SD Dual
+85.87. 7438-7465 / 7680 LC, 17 / 32 EBR; all six seed 1. iceunpack OK. Not simulated, not flashed.
+**HD skew** (r1 + r2 seeds 1-160 screened, three window seeds): HD HDMI router1 s88 (+1.46 / <= -1.39, 85.98 MHz) main for timing margin; spare router2 s119
+(+1.69 / <= -0.79, 75.67 MHz). A full builder rebuild re-routes seed 1: re-install the seeds with
+`.heirloom_work/skew_tools/install.sh` afterwards.

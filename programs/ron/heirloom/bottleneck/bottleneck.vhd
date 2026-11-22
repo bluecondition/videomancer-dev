@@ -1033,6 +1033,7 @@ begin
         variable v_ty : unsigned(1 downto 0);
         variable v_o  : signed(11 downto 0);
         variable v_mq : signed(12 downto 0);
+        variable v_rm : signed(12 downto 0);
     begin
         if rising_edge(clk) then
             -- 2: x (virtual px), glitch-window tests, bottle select (x >= midpoint + shift)
@@ -1092,7 +1093,7 @@ begin
             else p8_kr <= resize(p7_dn, 14) - resize(l_th(0), 14); end if;
             if p7_xi > 190 then p8_rm <= (others => '0');
             elsif p7_xi < -65 then p8_rm <= (others => '1');
-            else p8_rm <= unsigned(resize(190 - p7_xi, 8)); end if;
+            else v_rm := to_signed(190, 13) - p7_xi; p8_rm <= unsigned(v_rm(7 downto 0)); end if;
             p8_w <= p7_w; p8_ng <= p7_ng; p8_ra <= p7_ra; p8_z <= p7_z;
             -- 9: key 0..16, ramp product; background difference (middle - zone table)
             v_k := resize(shift_right(p8_kr, 2), 12);
@@ -1143,7 +1144,7 @@ begin
             -- 15: 10-bit; line texture on luma; chroma sign flipped for Colours = Negative
             p15_o(0) <= shift_left(resize(p14_o(0), 12) + resize(l_tx, 12), 2);
             for c in 1 to 2 loop
-                if s_neg = '1' then p15_o(c) <= 512 - shift_left(resize(p14_o(c), 12), 2);
+                if s_neg = '1' then p15_o(c) <= to_signed(512, 12) - shift_left(resize(p14_o(c), 12), 2);
                 else p15_o(c) <= 512 + shift_left(resize(p14_o(c), 12), 2); end if;
             end loop;
             -- 16: clamps
