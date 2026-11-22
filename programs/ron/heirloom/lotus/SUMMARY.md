@@ -219,3 +219,22 @@ v0.5.0 built 2026-10-27, NOT flashed.
 - The swell gets a third step, bit 8: 8 x lum (was at most 6 x).
 - Not rendered; checked by GHDL analysis and the build.
 - Build: v0.6.2, router1, all six on seed 1; worst HD 82.92 MHz (HD Analog 87.27, HD HDMI 83.89, HD Dual 82.92); 7,437 / 7,680 LC. `.kinetic_work/k6_builds.txt`: diag lotus OK router1 worst-HD 82.92 LC 7437.
+
+## v0.6.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 1092** (major): Distance below the cushion's top edge (cushion centre row 833, half-height hh from K3
+  Bloom); e_dy = min(top, bottom) gives the cushions' vertical soft key (B and R alphas). On hardware it was: Inner
+  term becomes hh - 833, so e_dyt = yf + 833 - hh (always large): the cushion top edge vanishes. The vertical key is
+  full on every row above the cushion's bottom edge, so each pink/white cushion becomes a column from the TOP of the
+  frame down to its bottom (within its barrel width), painted over the eyes. S10 Fold …
+
+**Build** v0.6.3, router1: HD Analog 85.29, SD Analog 85.29, HD HDMI 89.72 (builder seed, replaced: see HD skew), SD HDMI 84.15, HD Dual 76.05, SD Dual
+86.18. 7412-7433 / 7680 LC, 22 / 32 EBR; all six seed 1. iceunpack OK. Not simulated, not flashed.
+**HD skew**: NO WINDOW PLACEMENT exists (this netlist places HSYNC low; cf. chartreuse) in r1 s1-200 + r2 s1-40 (max hs +0.36): HD HDMI router1 s1 (-1.41 / <= -1.30,
+89.72 MHz) -> router1 s84 (+0.28 / <= -1.35, 82.18 MHz, sub-window); spare router1 s128 (+0.23 / <= -0.79, 89.00 MHz).
+A full builder rebuild re-routes seed 1: re-install the seeds with `.heirloom_work/skew_tools/install.sh` afterwards. If HD HDMI shows thin
+flashing lines, that is this sub-window placement: try the spare, then report it.

@@ -1089,7 +1089,7 @@ begin
             end if;
             case v_cs is
                 when 1 =>
-                    e_dyt <= signed(resize(e_yf, 12)) - (833 - signed(resize(f_hh, 12)));
+                    e_dyt <= signed(resize(e_yf, 12)) - (to_signed(833, 12) - signed(resize(f_hh, 12)));
                     e_dyb <= (833 + signed(resize(f_hh, 12))) - signed(resize(e_yf, 12));
                     l_gb <= c_gb; l_rs <= c_rs; l_gs <= c_gs;
                     -- tears: a new block of 6..28 lines
