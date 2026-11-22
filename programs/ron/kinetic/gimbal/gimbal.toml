@@ -1,0 +1,149 @@
+# Gimbal - Kinetic (v0.1.0, 2026-11-22).  After the armillary sphere and the gyroscope's gimbals: five nested
+# flat rings round a hub, each hinged across a diameter and tilting in 3-D, two-faced, crossing front over back.
+# See gimbal.vhd, gimbal.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 28
+program_id = "com.czartroniks.gimbal"
+program_name = "Gimbal"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Render", "Curve"]
+program_type = "processing"
+description = "Nested hoops of an armillary sphere tilting in 3-D, two-faced, crossing front over back; a ripple of flips."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 571
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Fan"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 90
+initial_value = 341
+display_float_digits = 0
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Depth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 784
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 740
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+value_labels = ["Ink", "Paper", "Bauhaus", "Vega", "Outrun", "Ultra", "Ocean", "Ice", "Moss", "Citrus", "Terra", "Ember", "Gold", "Candy", "Mint", "Plum"]
+initial_value_label = "Vega"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Smooth", "Snap"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Chase", "Mirror"]
+initial_value_label = "Chase"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Spin"
+value_labels = ["Rock", "Tumble"]
+initial_value_label = "Rock"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Rings"
+value_labels = ["Wide", "Wire"]
+initial_value_label = "Wide"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Cascade"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 523
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Armillary"
+
+[[preset]]
+name = "Gimbal"
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 700
+rotary_potentiometer_5 = 288
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Slatted Disc"
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 900
+rotary_potentiometer_5 = 160
+toggle_switch_7 = 1
+linear_potentiometer_12 = 380
+
+[[preset]]
+name = "Orrery"
+rotary_potentiometer_1 = 450
+rotary_potentiometer_4 = 640
+rotary_potentiometer_5 = 736
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Storm"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_4 = 820
+rotary_potentiometer_5 = 352
+toggle_switch_8 = 1
+linear_potentiometer_12 = 1023
