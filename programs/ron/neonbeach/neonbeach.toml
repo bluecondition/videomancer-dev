@@ -1,11 +1,11 @@
-# NEON BEACH (v0.3.2, 2026-11-22: HW-captured defaults; engine v0.3.1 2026-11-18).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+# NEON BEACH (v0.4.0, 2026-11-22: HW feedback on v0.3.2: crab, gulls, sand, water, sunset).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 # See neonbeach.vhd, neonbeach.py and PLAN.md.
 
 [program]
 processing_delay_clks = 33
 program_id = "com.czartroniks.neonbeach"
 program_name = "Neon Beach"
-program_version = "0.3.2"
+program_version = "0.4.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

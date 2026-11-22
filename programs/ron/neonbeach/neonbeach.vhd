@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.3.1 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.4.0 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -20,7 +20,10 @@
 --                    dimmed and broken by drifting ripple gaps
 --   water           between the surface and the sea bed, both read per pixel from a knot table (block RAM,
 --                    16 virtual px a knot, lerped, double-buffered by field): eight layers at k / 8 of the local
---                    depth, columns every 64 px; a foam band under the surface (churned triangles), spray over it
+--                    depth, each its own colour (Pixel Beach's bands: deep, mid, aqua, surf, a neon top), columns
+--                    every 64 px that sway with the passing wave; foam = 16 px squares under the surface that turn
+--                    white one by one; spray over it.  The water's colours follow the sun's elevation gradually
+--                    (per-field palette entries, written in vblank from keyframes)
 --   waves           a small microcoded engine (nbengine.py) fills the knot table once a field: each wave's phase
 --                    (Rhythm), its size (waves come in sets), shoaling, the depth cap (breaking: the excess is
 --                    foam), the profile by class, two chop waves (Chop), the surge, foam (Foam), the swash sheet
@@ -59,11 +62,18 @@ architecture neonbeach of program_top is
 
     constant C_CM1 : std_logic_vector(15 downto 0) := x"5A93";   -- clouds
     constant C_BM  : std_logic_vector(15 downto 0) := x"1242";   -- gulls
-    -- foam and spray: hand-picked aperiodic masks (a coordinate-bit hash tiles a visible motif)
-    constant C_FOAMM : std_logic_vector(0 to 63) := "0000001000111001000011011110000000010000111101010011000110011100";
+    -- spray: a hand-picked aperiodic mask (a coordinate-bit hash tiles a visible motif)
     constant C_DOT   : std_logic_vector(0 to 63) := "1011000000101000000000001000000110000000000100000000000110000000";
-    -- sheen: which pulses show, by (pulse number, object): about three in five
-    constant C_SHG : std_logic_vector(0 to 63) := x"B6D5_E39A_6F4B_D2ED";
+    -- foam squares: each square's threshold jitter (0 .. 15 rows), by knot (4 bits, reshuffled in time) & square row
+    type t_fj is array (0 to 63) of unsigned(3 downto 0);
+    constant C_FJ : t_fj := (
+        x"A", x"4", x"C", x"F", x"2", x"7", x"3", x"8", x"B", x"D", x"0", x"5", x"1", x"0", x"8", x"6",
+        x"B", x"6", x"5", x"A", x"8", x"D", x"2", x"1", x"E", x"C", x"1", x"D", x"C", x"8", x"1", x"0",
+        x"6", x"B", x"E", x"7", x"E", x"7", x"4", x"3", x"E", x"3", x"F", x"F", x"9", x"A", x"B", x"5",
+        x"2", x"D", x"0", x"A", x"5", x"7", x"6", x"2", x"4", x"4", x"3", x"F", x"9", x"9", x"C", x"9");
+    -- sheen: which pulses show, by (pulse number, object): about three in five.  Never on the sand (object 8, the
+    -- first bit of each byte): v0.3's bands running down the sand read as a constant pulsing.
+    constant C_SHG : std_logic_vector(0 to 63) := x"3655_631A_6F4B_526D";
 
     ---------------------------------------------------------------------------
     -- [A] timing-ID steps
@@ -185,18 +195,28 @@ architecture neonbeach of program_top is
     signal c_ebird, c_esun, c_emoon, c_ecrab : std_logic := '0';
     -- the sky keys: the colour path is run on two made-up pixels in vblank (zenith, horizon keyframes lerped
     -- by the elevation) and the results are kept as the sky ramp's c0 and delta
+    -- (and the same for the water: its five keys and its wire, so it changes colour gradually with the sun).  Each
+    -- result is either kept (the previous key) or written into the live palette with the previous key as a ramp
+    -- segment: entry = prev & (this - prev) / 2.
     signal c_inj  : std_logic := '0';
-    signal c_injk : std_logic_vector(1 downto 0) := "00";
+    signal c_injk : std_logic_vector(1 downto 0) := "00";        -- 01 keep, 10 write and keep, 11 write
     signal c_injent : unsigned(4 downto 0) := (others => '0');
     signal c_injt : unsigned(5 downto 0) := (others => '0');
-    signal k_hy, k_hu, k_hv : unsigned(7 downto 0) := x"40";
-    signal l_skyc : std_logic_vector(47 downto 0) := (others => '0');
+    signal c_injw : unsigned(4 downto 0) := (others => '0');      -- the entry it writes
+    signal c_wiv  : unsigned(1 downto 0) := "11";                 -- the water's keyframe interval
+    signal c_wt   : unsigned(5 downto 0) := (others => '1');      -- and the position in it
+    signal c_kp   : std_logic_vector(23 downto 0) := (others => '0');
 
     -- [C] line ROM / colour ROM / line store
     signal lr_a  : unsigned(9 downto 0) := (others => '0');
     signal lr_q, lr_qf : unsigned(15 downto 0) := (others => '0');
     signal pal_a : unsigned(7 downto 0) := (others => '0');
     signal pal_q, pal_qf : unsigned(47 downto 0) := (others => '0');
+    signal pal_ram : t_c_nb_pal := C_NB_PAL;
+    attribute no_rw_check of pal_ram : signal is true;
+    signal pal_we : std_logic := '0';
+    signal pal_wa : unsigned(7 downto 0) := (others => '0');
+    signal pal_wd : unsigned(47 downto 0) := (others => '0');
     type t_lb is array (0 to 2047) of std_logic_vector(15 downto 0);
     signal lb_ram : t_lb := (others => (others => '0'));
     attribute no_rw_check of lb_ram : signal is true;
@@ -309,6 +329,7 @@ architecture neonbeach of program_top is
     -- this line's constants (written by the line engine in blanking) and the next line's start values
     signal l_d   : unsigned(9 downto 0) := (others => '0');
     signal l_row : unsigned(10 downto 0) := (others => '0');
+    signal l_slr : unsigned(7 downto 0) := (others => '0');                   -- (sea level - row), low bits
     signal l_mir, l_ab : std_logic := '0';
     signal l_sw, l_bw : unsigned(8 downto 0) := (others => '0');
     signal l_son, l_bon : std_logic := '0';
@@ -353,24 +374,26 @@ architecture neonbeach of program_top is
     signal w6_s0, w6_b0, w7_b0 : signed(11 downto 0) := (others => '0');
     signal w7_srf, w8_srf, w8_bed, w8_n : signed(11 downto 0) := (others => '0');
     signal w9_n, w9_dd, w9_sd : unsigned(9 downto 0) := (others => '0');
-    signal w9_inw, w9_ins : std_logic := '0';
+    signal w9_inw, w9_ins, w9_nb : std_logic := '0';
+    signal w9_sw : unsigned(6 downto 0) := (others => '0');      -- the columns' sway: (sea level - surface) / 2
+    signal w9_fv : signed(6 downto 0) := (others => '0');        -- foam square: foam rows past its top + jitter
     type t_r10 is array (10 to 12) of unsigned(9 downto 0);
     signal wd_r, wd_d : t_r10 := (others => (others => '0'));
     type t_q3 is array (10 to 12) of unsigned(2 downto 0);
     signal wd_q : t_q3 := (others => (others => '0'));
     type t_t7 is array (10 to 13) of unsigned(6 downto 0);
-    signal wd_wt, wd_st : t_t7 := (others => (others => '0'));
+    signal wd_st : t_t7 := (others => (others => '0'));
     type t_s3 is array (10 to 13) of std_logic_vector(2 downto 0);
     signal wd_ss : t_s3 := (others => (others => '0'));       -- sand facets: column, row, diagonal
     signal wd_inw, wd_ins, wd_cp : std_logic_vector(10 to 13) := (others => '0');
-    signal w13_lay : std_logic := '0';
+    signal w13_q : unsigned(2 downto 0) := (others => '0');
     signal w5_fm, w6_fm, w7_fm, w8_fm : unsigned(7 downto 0) := (others => '0');
     signal w8_sph, w9_sph : unsigned(6 downto 0) := (others => '0');
-    signal w9_inf, w9_up : std_logic := '0';
+    signal w9_up : std_logic := '0';
     signal w9_nn : signed(11 downto 0) := (others => '0');
     signal wd_inf, wd_sp : std_logic_vector(10 to 13) := (others => '0');
     type t_s2 is array (10 to 13) of std_logic_vector(1 downto 0);
-    signal wd_ff : t_s2 := (others => "00");
+    signal wd_ff : t_s2 := (others => "00");                               -- foam square: knot, row parities
     signal wd_ft : t_t7 := (others => (others => '0'));
     signal f14_in, sp14 : std_logic := '0';
     signal wd_up : std_logic_vector(10 to 13) := (others => '0');          -- the upper triangle of a sand cell
@@ -382,7 +405,8 @@ architecture neonbeach of program_top is
     signal w14_in, s14_in : std_logic := '0';
     signal w14_sub : std_logic_vector(1 downto 0) := "00";
     signal s14_sub : std_logic_vector(2 downto 0) := "000";
-    signal w14_t, s14_t : unsigned(6 downto 0) := (others => '0');
+    signal s14_t : unsigned(6 downto 0) := (others => '0');
+    signal w14_q : unsigned(2 downto 0) := (others => '0');
 
     -- sun, stars
     signal s12_xr, s12_xr2 : signed(12 downto 0) := (others => '0');
@@ -406,25 +430,24 @@ architecture neonbeach of program_top is
 
     -- merge, edges, colour
     signal s15_id : std_logic_vector(7 downto 0) := (others => '0');
-    signal s15_ramp : unsigned(2 downto 0) := (others => '0');
-    signal s15_t : unsigned(6 downto 0) := (others => '0');
-    signal s15_fon, s15_sky : std_logic := '0';
+    signal s15_ent : unsigned(4 downto 0) := (others => '0');     -- the fill's colour table entry
+    signal s15_t6 : unsigned(5 downto 0) := (others => '0');      -- and its lerp position
+    signal s15_fon : std_logic := '0';
     signal s15_ovl : unsigned(1 downto 0) := (others => '0');
     signal s15_tw : unsigned(1 downto 0) := (others => '0');
     signal i_d1, i_d2, i_d3 : std_logic_vector(7 downto 0) := (others => '0');
     signal s_g15 : std_logic_vector(3 downto 0) := (others => '0');
     signal s16_e : std_logic := '0';
     signal s16_m1, s16_m2, s16_m3 : unsigned(3 downto 0) := (others => '0');
-    signal s16_ramp : unsigned(2 downto 0) := (others => '0');
-    signal s16_t : unsigned(6 downto 0) := (others => '0');
-    signal s16_fon, s16_sky : std_logic := '0';
+    signal s16_ent : unsigned(4 downto 0) := (others => '0');
+    signal s16_t6 : unsigned(5 downto 0) := (others => '0');
+    signal s16_fon : std_logic := '0';
     signal s16_ovl, s16_tw : unsigned(1 downto 0) := (others => '0');
     signal s17_ent : unsigned(4 downto 0) := (others => '0');
     signal s17_pn  : unsigned(2 downto 0) := (others => '0');
     signal s17_t6, s18_t6, s19_t6, s20_t6 : unsigned(5 downto 0) := (others => '0');
     signal s17_blk, s18_blk, s19_blk, s20_blk, s21_blk, s22_blk, s23_blk : std_logic := '1';
     signal s17_w, s18_w, s19_w, s20_w, s21_w, s22_w, s23_w : std_logic := '0';
-    signal s17_sky, s18_sky, s19_sky : std_logic := '0';
     signal s17_dim, s18_dim, s19_dim, s20_dim, s21_dim, s22_dim : std_logic := '0';
     type t_ik is array (17 to 23) of std_logic_vector(1 downto 0);
     signal s_ik : t_ik := (others => "00");
@@ -581,8 +604,18 @@ begin
                     when 43 =>
                         c_fp <= resize(s_gp, 14);
                         c_cgn <= s_g6(12 downto 9);
-                    when 52 =>                              -- the crab, from the engine's last pass
-                        c_cry <= resize(o_cy, 11) + resize(o_cs(6 downto 0), 11);
+                    when 52 =>                              -- the crab, from the engine's last pass: half
+                        c_cry <= resize(o_cy, 11) + 48;     -- size, its feet where v0.3's were, sinking at half
+                    when 54 =>                              -- rate (hidden under its hole line at 96)
+                        c_cry <= c_cry + resize(o_cs(6 downto 1), 11);
+                    when 55 =>                              -- the water's keyframe interval and position: night,
+                        if s_night = '1' then               -- dusk, golden over the slider's lower three
+                            c_wiv <= "00"; c_wt <= (others => '0');            -- quarters, day above
+                        elsif c_e(9 downto 8) = "11" then
+                            c_wiv <= "10"; c_wt <= (others => '1');
+                        else
+                            c_wiv <= c_e(9 downto 8); c_wt <= c_e(7 downto 2);
+                        end if;
                     when 53 =>
                         c_cyh <= resize(o_cy, 11) + 96;
                         c_cx2 <= o_cx & '0';
@@ -603,16 +636,36 @@ begin
                         else c_sden <= "00"; end if;
                     when 46 =>
                         c_pal <= s_theme & c_tod;
-                    -- the sky keys: zenith keyframe, then horizon keyframe, lerped by the elevation (day: all
-                    -- eight keyframes over the slider; night: the first two)
-                    when 50 | 51 =>
-                        c_inj <= '1';
+                    when others => null;
+                end case;
+            end if;
+
+            -- [C] the per-field palette entries: nine made-up pixels, 8 clocks apart (s_zc 128 .. 192), run through
+            -- the colour path from the keyframe slot; each comes out 7 clocks later and is kept or written (p_mix)
+            --   0 .. 4  the water's keys K0 .. K4 (keyframe interval c_wiv, position c_wt): entries 4 .. 7
+            --   5, 6    white: the water's and the wash's wires (K4 -> white), entries 21, 23
+            --   7, 8    the sky's zenith and horizon keyframes, lerped by the elevation (day: all eight keyframes
+            --           over the slider; night: the first two): entry 19
+            if s_zone = '1' and s_zc(12 downto 7) = "000001" and s_zc(2 downto 0) = "000" and s_zc(6 downto 3) <= 8 then
+                c_inj <= '1';
+                c_injt <= c_wt;
+                case to_integer(s_zc(6 downto 3)) is
+                    when 0 => c_injent <= "100" & c_wiv; c_injk <= "01";
+                    when 1 => c_injent <= "101" & c_wiv; c_injk <= "10"; c_injw <= to_unsigned(4, 5);
+                    when 2 => c_injent <= "110" & c_wiv; c_injk <= "10"; c_injw <= to_unsigned(5, 5);
+                    when 3 => c_injent <= "111" & c_wiv; c_injk <= "10"; c_injw <= to_unsigned(6, 5);
+                    when 4 => c_injent <= '1' & c_wiv & "11"; c_injk <= "10"; c_injw <= to_unsigned(7, 5);
+                    when 5 => c_injent <= "11111"; c_injk <= "11"; c_injw <= to_unsigned(21, 5);
+                    when 6 => c_injent <= "11111"; c_injk <= "11"; c_injw <= to_unsigned(23, 5);
+                    when 7 | 8 =>
+                        -- (7: s_zc(3) = 1, the zenith, kept; 8: the horizon, written)
                         if s_night = '1' then
-                            c_injent <= '0' & s_zc(0) & "000"; c_injt <= c_e(9 downto 4);
+                            c_injent <= '0' & (not s_zc(3)) & "000"; c_injt <= c_e(9 downto 4);
                         else
-                            c_injent <= '0' & s_zc(0) & c_e(9 downto 7); c_injt <= c_e(6 downto 1);
+                            c_injent <= '0' & (not s_zc(3)) & c_e(9 downto 7); c_injt <= c_e(6 downto 1);
                         end if;
-                        if s_zc(0) = '0' then c_injk <= "01"; else c_injk <= "10"; end if;
+                        if s_zc(3) = '1' then c_injk <= "01"; else c_injk <= "10"; end if;
+                        c_injw <= to_unsigned(19, 5);
                     when others => null;
                 end case;
             end if;
@@ -751,12 +804,12 @@ begin
                         e_asel <= '1'; e_asc <= c_sab;
                         e_aen <= '1';
                     end if;
-                    -- slot B: the crab
+                    -- slot B: the crab (48 rows, one ROM row a line)
                     e_ben <= '0';
                     e_ba <= (others => '0');
-                    if c_ecrab = '1' and e_cv = '1' and e_cr(11 downto 7) = "00000" and e_cr(6 downto 5) /= "11" then   -- 0 <= e_cr < 96
-                        if o_cs(7) = '1' then e_ba <= to_unsigned(768, 10) + (unsigned(e_cr(6 downto 1)) & "00");
-                        else e_ba <= to_unsigned(576, 10) + (unsigned(e_cr(6 downto 1)) & "00"); end if;
+                    if c_ecrab = '1' and e_cv = '1' and e_cr(11 downto 6) = "000000" and e_cr(5 downto 4) /= "11" then   -- 0 <= e_cr < 48
+                        if o_cs(7) = '1' then e_ba <= to_unsigned(768, 10) + (unsigned(e_cr(5 downto 0)) & "00");
+                        else e_ba <= to_unsigned(576, 10) + (unsigned(e_cr(5 downto 0)) & "00"); end if;
                         e_ben <= '1';
                     end if;
                 when 4 =>                                    -- the moon's bite: a disc 24 rows up
@@ -784,6 +837,7 @@ begin
                 when 32 =>
                     -- the line's constants (the previous line has left the pixel path by now)
                     l_d <= e_d; l_ab <= e_ab; l_mir <= e_mir; l_row <= v_y;
+                    l_slr <= c_sl(7 downto 0) - v_y(7 downto 0);
                     l_son <= e_son; l_bon <= e_bon; l_tsun <= e_tsun;
                     l_asel <= e_asel;
                     -- slot A's ramp positions: zone 1, zone 2 (gulls: wings, body; clouds: top, shelf)
@@ -948,6 +1002,9 @@ begin
         variable v_r2  : unsigned(10 downto 0);
         variable v_sk  : unsigned(6 downto 0);
         variable v_wv  : unsigned(3 downto 0);
+        variable v_j   : unsigned(3 downto 0);
+        variable v_cx  : unsigned(6 downto 0);
+        variable v_fa, v_fb : unsigned(6 downto 0);
     begin
         if rising_edge(clk) then
             ----------------------------------------------------------------
@@ -997,12 +1054,16 @@ begin
             v_sd := signed(resize(l_row, 12)) - w8_bed;
             v_dd := w8_bed - w8_srf;
             w9_inw <= (not v_n(11)) and v_sd(11);
-            -- foam: the top rows under the surface, as thick as the knot's foam / 4
-            if v_n(11) = '0' and v_sd(11) = '1' and v_n(10 downto 6) = "00000" and unsigned(v_n(5 downto 0)) < w8_fm(7 downto 2) then
-                w9_inf <= '1';
-            else
-                w9_inf <= '0';
-            end if;
+            -- foam squares: 16 px (one knot) x 16 rows, riding the surface, the top four rows of squares.  A square's
+            -- foam = the knot's foam / 4 (rows) less its top row and its own jitter (reshuffled 4 times a second):
+            -- positive = foam, from turning white to white (stage 10)
+            if v_n(10 downto 6) = "00000" then w9_nb <= '1'; else w9_nb <= '0'; end if;
+            v_j := C_FJ(to_integer((w_xb(8)(7 downto 4) xor c_t(7 downto 4)) & unsigned(v_n(5 downto 4))));
+            v_fa := '0' & w8_fm(7 downto 2);
+            v_fb := '0' & unsigned(v_n(5 downto 4)) & v_j;
+            w9_fv <= signed(v_fa) - signed(v_fb);
+            -- the columns sway with the passing wave: x + (sea level - surface) / 2 (low bits only)
+            w9_sw <= resize(shift_right(l_slr + unsigned(v_n(7 downto 0)), 1), 7);
             w9_up <= v_n(11) and v_sd(11);
             w9_nn <= -v_n;
             w9_sph <= w8_sph;
@@ -1033,21 +1094,23 @@ begin
                 end if;
                 wd_d(i) <= wd_d(i - 1);
             end loop;
-            -- 10: the water's ramp position (bright at the surface), the sand's (by depth) and its facets
-            if w9_n(9 downto 8) /= "00" then wd_wt(10) <= (others => '0');
-            else wd_wt(10) <= to_unsigned(127, 7) - w9_n(7 downto 1); end if;
+            -- 10: the sand's ramp position (by depth) and its facets (the water's colour is its layer: stage 15)
             wd_st(10) <= to_unsigned(127, 7) - w9_sd(9 downto 3);
             wd_ss(10) <= w_xb(9)(5) & w9_sd(5) & '0';
             -- the wetness cell under this pixel (row of depth, column), its upper triangle, its hash
             wt_pa <= w9_sd(9 downto 5) & w_xb(9)(10 downto 5);
             if w9_sd(4 downto 0) < w_xb(9)(4 downto 0) then wd_up(10) <= '1'; else wd_up(10) <= '0'; end if;
             wd_h(10) <= (w_xb(9)(5) xor w9_sd(6)) & (w_xb(9)(6) xor w9_sd(5));
-            wd_inw(10) <= w9_inw; wd_ins(10) <= w9_ins; wd_cp(10) <= w_xb(9)(6);
-            -- foam facets: a churn mask per 16 px x 8 rows (drifting), and a diagonal in every cell
-            wd_inf(10) <= w9_inf;
-            wd_ff(10)(1) <= C_FOAMM(to_integer((w_xb(9)(6 downto 4) xor c_t(6 downto 4)) & w9_n(5 downto 3)));
-            if w_xb(9)(3 downto 0) > w9_n(3 downto 0) then wd_ff(10)(0) <= '1'; else wd_ff(10)(0) <= '0'; end if;
-            wd_ft(10) <= to_unsigned(127, 7) - (w9_n(5 downto 0) & '0');
+            wd_inw(10) <= w9_inw; wd_ins(10) <= w9_ins;
+            -- the water's columns: every 64 px of the swayed x
+            v_cx := w_xb(9)(6 downto 0) + w9_sw;
+            wd_cp(10) <= v_cx(6);
+            -- foam squares: in the water, in the top four rows of squares, foam past the square's threshold.  Its
+            -- whiteness: 8 rows past the threshold is white; its facets: the knot's parity, the square row's
+            if w9_inw = '1' and w9_nb = '1' and w9_fv(6) = '0' and w9_fv /= 0 then wd_inf(10) <= '1'; else wd_inf(10) <= '0'; end if;
+            if w9_fv(5 downto 3) /= "000" then wd_ft(10) <= (others => '1');
+            else wd_ft(10) <= unsigned(w9_fv(2 downto 0)) & "1111"; end if;
+            wd_ff(10) <= w_xb(9)(4) & w9_n(4);
             -- spray: dots in 8 px cells over the band, reshuffled a few times a second
             if w9_up = '1' and w9_nn(11 downto 7) = "00000" and unsigned(w9_nn(6 downto 0)) < w9_sph
                and C_DOT(to_integer((w_xb(9)(5 downto 3) xor c_t(5 downto 3)) & l_row(5 downto 3))) = '1' then
@@ -1056,16 +1119,16 @@ begin
                 wd_sp(10) <= '0';
             end if;
             for i in 11 to 13 loop
-                wd_wt(i) <= wd_wt(i - 1); wd_st(i) <= wd_st(i - 1); wd_ss(i) <= wd_ss(i - 1);
+                wd_st(i) <= wd_st(i - 1); wd_ss(i) <= wd_ss(i - 1);
                 wd_inw(i) <= wd_inw(i - 1); wd_ins(i) <= wd_ins(i - 1); wd_cp(i) <= wd_cp(i - 1);
                 wd_inf(i) <= wd_inf(i - 1); wd_sp(i) <= wd_sp(i - 1); wd_ff(i) <= wd_ff(i - 1); wd_ft(i) <= wd_ft(i - 1);
                 wd_up(i) <= wd_up(i - 1); wd_h(i) <= wd_h(i - 1);
             end loop;
             -- 13: always eight layers (switching the layer bit by depth drew stair-step verticals where the
             -- count changed); where they crowd near the shore they merge into a solid bright edge
-            w13_lay <= wd_q(12)(0);
+            w13_q <= wd_q(12);
             -- 14
-            w14_in <= wd_inw(13); w14_sub <= w13_lay & wd_cp(13); w14_t <= wd_wt(13);
+            w14_in <= wd_inw(13); w14_sub <= w13_q(0) & wd_cp(13); w14_q <= w13_q;
             s14_in <= wd_ins(13);
             -- the wash: 15 = the whole cell, 14 = its upper triangle.  Drying sand keeps its diagonals for a while
             -- and loses them a triangle at a time (the upper ones last), by the cell's hash
@@ -1081,7 +1144,8 @@ begin
                     s14_sub <= wd_ss(13)(2 downto 1) & '0';
                 end if;
             end if;
-            if wd_st(13) > (v_wv & "00") then s14_t <= wd_st(13) - (v_wv & "00"); else s14_t <= (others => '0'); end if;
+            -- wet sand: 8 steps of the ramp a wetness step (v0.3: 4), so a fresh wash leaves the sand dark brown
+            if wd_st(13) > (v_wv & "000") then s14_t <= wd_st(13) - (v_wv & "000"); else s14_t <= (others => '0'); end if;
             f14_in <= wd_inf(13); f14_sub <= wd_ff(13); f14_t <= wd_ft(13); sp14 <= wd_sp(13);
 
             ----------------------------------------------------------------
@@ -1141,8 +1205,8 @@ begin
             if l_asel = '0' then a12_pr <= C_CM1(to_integer(v_cell)); else a12_pr <= C_BM(to_integer(v_cell)); end if;
             v_bx := b_xb(13 downto 1);
             if v_bx(12) = '1' then v_ax := unsigned(-v_bx); else v_ax := unsigned(v_bx); end if;
-            b12_xs <= v_ax(7 downto 0);
-            if v_ax(12 downto 8) = "00000" then b12_pr <= '1'; else b12_pr <= '0'; end if;
+            b12_xs <= v_ax(6 downto 0) & '0';                      -- half size: two ROM units a virtual px
+            if v_ax(12 downto 7) = "000000" then b12_pr <= '1'; else b12_pr <= '0'; end if;
             -- 13: thermometer against the six boundaries
             for i in 0 to 2 loop
                 if a12_xs >= l_arow(i)(7 downto 0)  then a13_g(2 * i) <= '1';     else a13_g(2 * i) <= '0'; end if;
@@ -1515,9 +1579,9 @@ begin
     p_mix : process(clk)
         variable v_obj  : unsigned(3 downto 0);
         variable v_sub  : std_logic_vector(3 downto 0);
-        variable v_ramp : unsigned(2 downto 0);
-        variable v_t    : unsigned(7 downto 0);
-        variable v_fon, v_sky : std_logic;
+        variable v_ent  : unsigned(4 downto 0);
+        variable v_t6   : unsigned(5 downto 0);
+        variable v_fon  : std_logic;
         variable v_e    : std_logic;
         variable v_w    : unsigned(3 downto 0);
         variable v_tri  : unsigned(4 downto 0);
@@ -1535,51 +1599,54 @@ begin
     begin
         if rising_edge(clk) then
             ----------------------------------------------------------------
-            -- 15: who owns the pixel, nearest first: crab, sand, water, clouds / gulls, sun / moon, sky
+            -- 15: who owns the pixel, nearest first: crab, wash, sand, foam, water, clouds / gulls, sun / moon, sky.
+            -- Each fill names its colour table entry and lerp position directly (ramp r: entry 2 r + t(6)).
             ----------------------------------------------------------------
             -- (no adds in this stage: every position arrives registered.  An add, a clamp and per-arm offsets
             -- here tripped yosys abc9's box-order assert in the full build.)
-            v_obj := "0000"; v_sub := "0000"; v_ramp := "000"; v_sky := '0';
-            if l_fill(0) = '1' then                      -- the sky's per-field colours (the camera lifts it)
-                v_fon := '1'; v_sky := '1';
-                v_t := resize(k14_skt, 8);
+            v_obj := "0000"; v_sub := "0000";
+            if l_fill(0) = '1' then                      -- the sky's per-field colours (the camera lifts it): 19
+                v_fon := '1';
+                v_ent := to_unsigned(19, 5); v_t6 := k14_skt;
             elsif k14_cam = '1' then                     -- wires only: the camera lights the sky ramp
                 v_fon := '1';
-                v_t := resize(k14_cg2, 8);
+                v_ent := "0000" & k14_cg2(6); v_t6 := k14_cg2(5 downto 0);
             else
                 v_fon := '0';
-                v_t := (others => '0');
+                v_ent := (others => '0'); v_t6 := (others => '0');
             end if;
             if b14_z /= 0 then
-                v_obj := "1001"; v_sub := "00" & std_logic_vector(b14_z); v_ramp := "111";
+                v_obj := "1001"; v_sub := "00" & std_logic_vector(b14_z);
                 if b14_z = "01" then v_sub(2) := l_brow(3)(14); end if;       -- creases across the shell
-                case b14_z is
-                    when "01"   => v_t := to_unsigned(64, 8);
-                    when "10"   => v_t := to_unsigned(8, 8);
-                    when others => v_t := to_unsigned(100, 8);
+                case b14_z is                                                 -- (the facet bands alternate)
+                    when "01"   => if l_brow(3)(14) = '1' then v_ent := "01110"; v_t6 := to_unsigned(44, 6);
+                                   else v_ent := "01111"; v_t6 := to_unsigned(0, 6); end if;
+                    when "10"   => v_ent := "01110"; v_t6 := to_unsigned(20, 6);
+                    when others => v_ent := "01111"; v_t6 := to_unsigned(36, 6);
                 end case;
-                v_fon := l_fill(7); v_sky := '0';
-            elsif s14_in = '1' and k14_wash = '1' then
-                v_obj := "0111"; v_sub := '0' & s14_sub; v_ramp := "100";
-                v_t := to_unsigned(80, 8); v_fon := l_fill(4); v_sky := '0';
+                v_fon := l_fill(7);
+            elsif s14_in = '1' and k14_wash = '1' then   -- the wash: the water's top colour (3/4 of K3 -> K4;
+                v_obj := "0111"; v_sub := '0' & s14_sub; -- halfway went grey at sunset)
+                v_ent := to_unsigned(7, 5); v_t6 := to_unsigned(48, 6); v_fon := l_fill(4);
             elsif s14_in = '1' then
-                v_obj := "1000"; v_sub := '0' & s14_sub; v_ramp := "101";
-                v_t := resize(s14_t, 8); v_fon := l_fill(5); v_sky := '0';
-            elsif f14_in = '1' then
-                v_obj := "0110"; v_sub := "00" & f14_sub; v_ramp := "011";
-                v_t := resize(f14_t, 8); v_fon := l_fill(3); v_sky := '0';
-            elsif w14_in = '1' then
-                v_obj := "0101"; v_sub := "00" & w14_sub; v_ramp := "010";
-                v_t := resize(w14_t, 8); v_fon := l_fill(2); v_sky := '0';
+                v_obj := "1000"; v_sub := '0' & s14_sub;
+                v_ent := "0101" & s14_t(6); v_t6 := s14_t(5 downto 0); v_fon := l_fill(5);
+            elsif f14_in = '1' then                      -- foam squares: 28 / 29, turning white
+                v_obj := "0110"; v_sub := "00" & f14_sub;
+                v_ent := "1110" & f14_t(6); v_t6 := f14_t(5 downto 0); v_fon := l_fill(3);
+            elsif w14_in = '1' then                      -- water: layer q at t = 127 - 16 q of entries 4 .. 7
+                v_obj := "0101"; v_sub := "00" & w14_sub;
+                v_ent := "001" & (not w14_q(2 downto 1)); v_t6 := (not w14_q(0)) & "11110"; v_fon := l_fill(2);
             elsif a14_z /= 0 then
-                v_obj := "0010"; v_sub := "00" & std_logic_vector(a14_z); v_ramp := "110";
-                if a14_z = "10" then v_t := resize(l_tb, 8); else v_t := resize(l_ta, 8); end if;
-                v_fon := l_fill(6); v_sky := '0';
+                v_obj := "0010"; v_sub := "00" & std_logic_vector(a14_z);
+                if a14_z = "10" then v_ent := "0110" & l_tb(6); v_t6 := l_tb(5 downto 0);
+                else v_ent := "0110" & l_ta(6); v_t6 := l_ta(5 downto 0); end if;
+                v_fon := l_fill(6);
             elsif u14_in = '1' then
-                v_obj := "0001"; v_ramp := "001"; v_t := resize(l_tsun, 8); v_fon := l_fill(1); v_sky := '0';
+                v_obj := "0001"; v_ent := "0001" & l_tsun(6); v_t6 := l_tsun(5 downto 0); v_fon := l_fill(1);
             end if;
             s15_id <= std_logic_vector(v_obj) & v_sub;
-            s15_ramp <= v_ramp; s15_t <= v_t(6 downto 0); s15_fon <= v_fon; s15_sky <= v_sky;
+            s15_ent <= v_ent; s15_t6 <= v_t6; s15_fon <= v_fon;
             if sp14 = '1' and v_obj < 5 then s15_ovl <= "10";
             elsif t14_on = '1' and v_obj = 0 then s15_ovl <= "01";
             else s15_ovl <= "00"; end if;
@@ -1606,24 +1673,23 @@ begin
             s16_m1 <= f_max4(unsigned(s15_id(7 downto 4)), unsigned(i_d1(7 downto 4)));
             s16_m2 <= f_max4(unsigned(i_d2(7 downto 4)), unsigned(i_d3(7 downto 4)));
             s16_m3 <= f_max4(unsigned(lb_qf(7 downto 4)), unsigned(lb_qf(15 downto 12)));
-            s16_ramp <= s15_ramp; s16_t <= s15_t; s16_fon <= s15_fon; s16_sky <= s15_sky;
+            s16_ent <= s15_ent; s16_t6 <= s15_t6; s16_fon <= s15_fon;
             s16_ovl <= s15_ovl; s16_tw <= s15_tw;
 
             ----------------------------------------------------------------
             -- 17: colour table entry and lerp position; the sea strip's ripple gaps; the made-up sky pixels
             ----------------------------------------------------------------
             v_w := f_max4(f_max4(s16_m1, s16_m2), s16_m3);
-            s17_blk <= '0'; s17_w <= '0'; s17_sky <= '0'; s17_pn <= c_pal; s_ik(17) <= "00";
+            s17_blk <= '0'; s17_w <= '0'; s17_pn <= c_pal; s_ik(17) <= "00";
             if s16_ovl = "10" then                      -- spray
-                s17_ent <= to_unsigned(28, 5); s17_t6 <= (others => '0');
+                s17_ent <= to_unsigned(16, 5); s17_t6 <= (others => '0');
             elsif s16_e = '1' then
                 s17_ent <= '1' & v_w; s17_w <= '1';
                 s17_t6 <= (others => '0');
             elsif s16_ovl = "01" then
                 s17_ent <= to_unsigned(27, 5); s17_t6 <= s16_tw & "0000";
             elsif s16_fon = '1' then
-                s17_ent <= '0' & s16_ramp & s16_t(6); s17_t6 <= s16_t(5 downto 0);
-                s17_sky <= s16_sky;
+                s17_ent <= s16_ent; s17_t6 <= s16_t6;
             else
                 s17_ent <= (others => '0'); s17_t6 <= (others => '0');
                 s17_blk <= '1';
@@ -1633,7 +1699,7 @@ begin
             if l_mir = '1' and v_w < 5 then s17_dim <= '1'; else s17_dim <= '0'; end if;
             if c_inj = '1' then
                 s17_ent <= c_injent; s17_t6 <= c_injt; s17_pn <= s_theme & "11";
-                s17_blk <= '0'; s17_w <= '0'; s17_sky <= '0'; s17_dim <= '0';
+                s17_blk <= '0'; s17_w <= '0'; s17_dim <= '0';
                 s_ik(17) <= c_injk;
             end if;
 
@@ -1643,7 +1709,6 @@ begin
             s19_t6 <= s18_t6; s19_blk <= s18_blk;
             s20_blk <= s19_blk;                          -- pal_q at 19, pal_qf at 20
             s18_w <= s17_w; s19_w <= s18_w; s20_w <= s19_w; s21_w <= s20_w; s22_w <= s21_w; s23_w <= s22_w;
-            s18_sky <= s17_sky; s19_sky <= s18_sky;
             s18_dim <= s17_dim; s19_dim <= s18_dim; s20_dim <= s19_dim; s21_dim <= s20_dim; s22_dim <= s21_dim;
             for i in 18 to 23 loop s_ik(i) <= s_ik(i - 1); end loop;
 
@@ -1719,17 +1784,20 @@ begin
             end if;
             s23_blk <= s22_blk;
 
-            -- the sky keys from the made-up pixels, and the sky ramp word (c0 = zenith, delta = half the
-            -- step to the horizon)
-            if s_ik(23) = "01" then
-                l_skyc(47 downto 40) <= std_logic_vector(s23_y(9 downto 2));
-                l_skyc(39 downto 32) <= std_logic_vector(s23_u(9 downto 2));
-                l_skyc(31 downto 24) <= std_logic_vector(s23_v(9 downto 2));
+            -- the per-field palette entries from the made-up pixels: keep the key (01, 10), and write a ramp
+            -- segment into the live palette (10, 11): c0 = the previous key, delta = half the step to this one
+            pal_we <= '0';
+            if s_ik(23)(1) = '1' then
+                pal_we <= '1';
+                pal_wa <= c_pal & c_injw;
+                pal_wd(47 downto 24) <= unsigned(c_kp);
+                v_k9 := signed(resize(s23_y(9 downto 2), 9)) - signed(resize(unsigned(c_kp(23 downto 16)), 9)); pal_wd(23 downto 16) <= unsigned(v_k9(8 downto 1));
+                v_k9 := signed(resize(s23_u(9 downto 2), 9)) - signed(resize(unsigned(c_kp(15 downto 8)), 9));  pal_wd(15 downto 8)  <= unsigned(v_k9(8 downto 1));
+                v_k9 := signed(resize(s23_v(9 downto 2), 9)) - signed(resize(unsigned(c_kp(7 downto 0)), 9));   pal_wd(7 downto 0)   <= unsigned(v_k9(8 downto 1));
             end if;
-            if s_ik(23) = "10" then k_hy <= s23_y(9 downto 2); k_hu <= s23_u(9 downto 2); k_hv <= s23_v(9 downto 2); end if;
-            v_k9 := signed(resize(k_hy, 9)) - signed(resize(unsigned(l_skyc(47 downto 40)), 9)); l_skyc(23 downto 16) <= std_logic_vector(v_k9(8 downto 1));
-            v_k9 := signed(resize(k_hu, 9)) - signed(resize(unsigned(l_skyc(39 downto 32)), 9)); l_skyc(15 downto 8)  <= std_logic_vector(v_k9(8 downto 1));
-            v_k9 := signed(resize(k_hv, 9)) - signed(resize(unsigned(l_skyc(31 downto 24)), 9)); l_skyc(7 downto 0)   <= std_logic_vector(v_k9(8 downto 1));
+            if s_ik(23) = "01" or s_ik(23) = "10" then
+                c_kp <= std_logic_vector(s23_y(9 downto 2)) & std_logic_vector(s23_u(9 downto 2)) & std_logic_vector(s23_v(9 downto 2));
+            end if;
 
             -- 24: neon glow.  A wire's chroma is held over the black pixels that follow it (4 px), so the
             -- wide chroma filter below returns a wire at close to full saturation instead of a pastel, with
@@ -1750,16 +1818,17 @@ begin
     -- the sea level wherever the bed is below it, and the bed itself on the beach.
     ---------------------------------------------------------------------------
     ---------------------------------------------------------------------------
-    -- ROMs, the ID line store and the knot table (one write statement each; registered reads, re-registered
-    -- in fabric).  The sky's filled pixels take the per-field sky keys in place of the colour table's word.
+    -- ROMs, the colour table (a RAM: vblank rewrites the per-field entries), the ID line store and the knot table
+    -- (one write statement each; registered reads, re-registered in fabric).
     ---------------------------------------------------------------------------
     p_rom : process(clk)
     begin
         if rising_edge(clk) then
             lr_q   <= C_NB_LROM(to_integer(lr_a));
             lr_qf  <= lr_q;
-            pal_q  <= C_NB_PAL(to_integer(pal_a));
-            if s19_sky = '1' then pal_qf <= unsigned(l_skyc); else pal_qf <= pal_q; end if;
+            pal_q  <= pal_ram(to_integer(pal_a));
+            pal_qf <= pal_q;
+            if pal_we = '1' then pal_ram(to_integer(pal_wa)) <= pal_wd; end if;
         end if;
     end process p_rom;
 

@@ -7,15 +7,20 @@ the system python3).  `python3 neonbeach.py --preview DIR` also dumps the sprite
 (needs PIL; the build never uses it).
 
 Package contents
-  C_NB_PAL   256 x 48   colour table.  Address = theme (1) & time of day (2) & entry (5).
+  C_NB_PAL   256 x 48   colour table (the initial contents of a RAM: vblank rewrites the per-field entries).
+                        Address = theme (1) & time of day (2) & entry (5).
                         Word = Y0 U0 V0 dY dU dV, 8 bits each (10-bit value >> 2, hardware convention U = Cr,
                         V = Cb; d = signed, half the step to the next key).  colour = c0 + (d * t) >> 5, t 0..63.
                         Time of day 0 day, 1 low sun, 2 night:
-                          entry 2 r + s   fill ramp r (0 .. 7), segment s (key s -> key s + 1)
+                          entry 2 r + s   fill ramp r (0, 1, 5, 6, 7), segment s (key s -> key s + 1)
+                          entries 4 .. 7  the water, four segments (K0 deep .. K4 top)          [per field]
                           entry 16 + w    wire colour of object w, lerped toward the palette's hot colour
-                          entry 27        star, entry 28 spray
-                        Time of day 3 = the sky keyframes: entries 0 .. 7 the zenith, 8 .. 15 the horizon,
-                        keyframe i lerping to i + 1 (the sky colour follows the sun's elevation smoothly).
+                                          (21 water and 23 wash: K4 -> white                   [per field])
+                          entry 16 spray, 19 the sky (zenith -> horizon) [per field], 27 star, 28 / 29 foam
+                        Time of day 3 = the keyframes: entries 0 .. 7 the zenith, 8 .. 15 the horizon (keyframe i
+                        lerping to i + 1, the sky follows the sun's elevation smoothly); the water's keys
+                        16 + 4 k + i (K0 .. K3) and 19 + 4 i (K4), keyframe i -> i + 1 for i = 0 .. 2 (night, dusk,
+                        golden, day: the water follows the sun gradually); 31 white.
   C_NB_LROM  1024 x 16  per-line tables: the circle's half-chord, then the span-coded sprite rows
                         (4 words a row: b1 b0 / b3 b2 / b5 b4 / zones z0 .. z6, 2 bits each, z0 in the LSBs,
                         bit 14 = the row's crease parity; zone = z[number of boundaries <= x])
@@ -32,11 +37,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------------------------------------------------------------------------------------------------
 # Palettes.  Ramps (3 keys each, t = 0 .. 127 runs key0 -> key1 -> key2):
-#   0 sky (lit by the camera with the fill off)   4 wash      dark .. bright
-#   1 sun / moon  bottom .. top                    5 sand      deep .. surface
-#   2 water       deep .. surface                  6 flora     clouds, gulls: dark .. bright
-#   3 foam        dark .. bright                   7 crab      dark .. body .. highlight
+#   0 sky (lit by the camera with the fill off)   4 (unused: the wash takes the water's top colour)
+#   1 sun / moon  bottom .. top                    5 sand      wet / deep .. dry surface
+#   2 (unused: the water is per field)             6 flora     clouds, gulls: dark .. bright
+#   3 foam        turning white .. white           7 crab      dark .. body .. highlight
 # Wires (by object): 1 sun, 2 cloud / gull, 5 water, 6 foam, 7 wash, 8 sand, 9 crab, 11 star, 12 spray.
+# water: the static water keys (K0 deep .. K4 top) only seed the RAM before the first field.
+# wkf (per theme): the water's keyframes, night / dusk / golden / day, each K0 .. K4 (Pixel Beach's DEEP, MID,
+# AQUA, SURF bands, with a neon top), lerped by the sun's elevation every field.
 # ---------------------------------------------------------------------------------------------------------
 def T(ramps, wires, hot="#FFFFFF"):
     return dict(ramps=ramps, wires=wires, hot=hot)
@@ -45,50 +53,62 @@ THEMES = [
     dict(name="Neon",
          tod=[
              T([("#0A1A4A", "#1E5AB4", "#7FD4FF"), ("#FF6A2A", "#FFC23D", "#FFF6B0"),
-                ("#04123A", "#0B5FA8", "#2EE6E0"), ("#4FB8E8", "#C8F8FF", "#FFFFFF"),
-                ("#0E6F9A", "#38C8E8", "#B8FFFF"), ("#5A3A1A", "#C8964A", "#FFE0A0"),
+                None, ("#9AE8E8", "#E0FCFF", "#FFFFFF"),
+                None, ("#704820", "#E8C080", "#FFF4D8"),
                 ("#2A2A3A", "#9AA8C8", "#FFFFFF"), ("#3A0008", "#E8203C", "#FF9A6A")],
-               {1: "#FFE14D", 2: "#FFFFFF", 5: "#00E5FF", 6: "#FFFFFF", 7: "#7FFFF4", 8: "#FFB000",
+               {1: "#FFE14D", 2: "#FFFFFF", 5: "#00E5FF", 6: "#A8F0F8", 7: "#7FFFF4", 8: "#FFB000",
                 9: "#FF3B6B", 11: "#FFFFFF", 12: "#E0FFFF"}),
              T([("#1A0A3A", "#8A1F8A", "#FF7A3D"), ("#C8102E", "#FF4A1A", "#FFB04D"),
-                ("#12052E", "#5A1A7A", "#FF5CA8"), ("#C85AA0", "#FFD0E8", "#FFFFFF"),
-                ("#5A1A7A", "#C83CA8", "#FFC0E0"), ("#3A1A1A", "#A8583A", "#FFB070"),
+                None, ("#E8B8E0", "#FFE8F8", "#FFFFFF"),
+                None, ("#4A2018", "#C87850", "#FFC890"),
                 ("#1A0A1A", "#6A3A5A", "#FFD0B0"), ("#2A0004", "#C81028", "#FF8040")],
-               {1: "#FFB040", 2: "#FFC8E0", 5: "#FF4FD8", 6: "#FFFFFF", 7: "#FF9AE0", 8: "#FF7A00",
+               {1: "#FFB040", 2: "#FFC8E0", 5: "#FF4FD8", 6: "#FFC8E8", 7: "#FF9AE0", 8: "#FF7A00",
                 9: "#FF2A4A", 11: "#FFFFFF", 12: "#FFE0F0"}),
              T([("#000008", "#0A0A30", "#2A3A7A"), ("#5A6A8A", "#B8C8E0", "#F0F8FF"),
-                ("#000418", "#06204A", "#1A6AA8"), ("#2A5A88", "#A8D0F0", "#E8F8FF"),
-                ("#062A4A", "#1A6A9A", "#7AC8F0"), ("#10101A", "#3A3A50", "#7A7A98"),
+                None, ("#7AB0C8", "#C8E8F8", "#F0F8FF"),
+                None, ("#0C0C14", "#505068", "#9898B0"),
                 ("#08080F", "#3A4058", "#A8B0D0"), ("#10000A", "#7A1030", "#C84060")],
-               {1: "#E0F0FF", 2: "#A8B8E0", 5: "#2A9AFF", 6: "#C8E8FF", 7: "#5AC8FF", 8: "#8A8AC8",
+               {1: "#E0F0FF", 2: "#A8B8E0", 5: "#2A9AFF", 6: "#90C8E8", 7: "#5AC8FF", 8: "#8A8AC8",
                 9: "#C82A6A", 11: "#FFFFFF", 12: "#A8D8FF"}, "#E8F0FF"),
          ],
+         # (neighbouring keyframes are picked so their lerp never passes through grey: the top goes aqua -> mint
+         # -> pale gold -> salmon -> pink -> lavender -> moonlit blue)
+         wkf=[["#020818", "#082048", "#184070", "#306888", "#5090C0"],      # night
+              ["#0C0C30", "#202868", "#404890", "#9060B0", "#F080B0"],      # dusk (sun just under the horizon)
+              ["#0A1C48", "#183878", "#3068A8", "#58A8A0", "#E8E0A0"],      # golden (sun low)
+              ["#06185A", "#104098", "#2070CC", "#38B4C4", "#80F0E0"]],     # day
          zenith=["#000006", "#0A0628", "#2A0A4A", "#4A1060", "#2A2A88", "#1E4AB0", "#2E78D8", "#3A9AF0"],
          horizon=["#06102A", "#3A1050", "#C8287A", "#FF6A3A", "#FFB060", "#FFE0A0", "#BFF0FF", "#9AE4FF"]),
     dict(name="Ice",
          tod=[
              T([("#020B1F", "#12508C", "#C8F4FF"), ("#7FD8FF", "#D4F4FF", "#FFFFFF"),
-                ("#010814", "#0B4F8A", "#7DF9FF"), ("#48CAE4", "#CAF0F8", "#FFFFFF"),
-                ("#06263F", "#2A6F97", "#A9E5F7"), ("#1A1630", "#6A6A9A", "#D8D8F0"),
+                None, ("#A8E8F8", "#E8FCFF", "#FFFFFF"),
+                None, ("#1A1630", "#9090B8", "#ECECFF"),
                 ("#02202E", "#468FAF", "#FFFFFF"), ("#1A0A2A", "#B02A8A", "#FF8AD0")],
-               {1: "#E8FBFF", 2: "#FFFFFF", 5: "#00B4D8", 6: "#FFFFFF", 7: "#90E0EF", 8: "#B8A8FF",
+               {1: "#E8FBFF", 2: "#FFFFFF", 5: "#00B4D8", 6: "#B0F0FF", 7: "#90E0EF", 8: "#B8A8FF",
                 9: "#FF6B9D", 11: "#FFFFFF", 12: "#E0FFFF"}),
              T([("#0A0628", "#4A2A8A", "#FF9AC8"), ("#FF5A8A", "#FFA8C8", "#FFF0F8"),
-                ("#0A0420", "#3A1A7A", "#B87AFF"), ("#9A7AE8", "#E0D0FF", "#FFFFFF"),
-                ("#1A0A4A", "#6A3AB8", "#E0C0FF"), ("#1A0A2A", "#6A3A7A", "#E8A8D8"),
+                None, ("#C8B0F0", "#F0E8FF", "#FFFFFF"),
+                None, ("#1A0A2A", "#8A5A98", "#F8C8E8"),
                 ("#0A0420", "#5A4A8A", "#FFE0F0"), ("#20001A", "#C81060", "#FF9AB0")],
-               {1: "#FFA8D0", 2: "#FFE0F0", 5: "#B87AFF", 6: "#FFFFFF", 7: "#E0A8FF", 8: "#FF8AC8",
+               {1: "#FFA8D0", 2: "#FFE0F0", 5: "#B87AFF", 6: "#E0C8FF", 7: "#E0A8FF", 8: "#FF8AC8",
                 9: "#FF3A80", 11: "#FFFFFF", 12: "#F0E0FF"}),
              T([("#000006", "#020A28", "#0A2A5A"), ("#6A7A9A", "#C8D8F0", "#FFFFFF"),
-                ("#000210", "#02183A", "#0A5A8A"), ("#1A4A7A", "#90C0E8", "#E8F8FF"),
-                ("#021A3A", "#0A4A7A", "#5AB0E0"), ("#08081A", "#2A2A4A", "#6A6A98"),
+                None, ("#6A9AC0", "#C0DCF0", "#F0F8FF"),
+                None, ("#06060F", "#3A3A5A", "#8080A8"),
                 ("#04040F", "#2A3A5A", "#90A8C8"), ("#0A0010", "#5A1040", "#A84078")],
-               {1: "#F0F8FF", 2: "#90A8D0", 5: "#1A8AE8", 6: "#C8E8FF", 7: "#4AB0F0", 8: "#7A7AC0",
+               {1: "#F0F8FF", 2: "#90A8D0", 5: "#1A8AE8", 6: "#90C0E0", 7: "#4AB0F0", 8: "#7A7AC0",
                 9: "#B02A70", 11: "#FFFFFF", 12: "#A8D8FF"}, "#E8F0FF"),
          ],
+         wkf=[["#000210", "#021432", "#0A3A6A", "#1A5A8A", "#3A8AB8"],
+              ["#08041E", "#201450", "#3A1A7A", "#7A50C8", "#C890FF"],
+              ["#060A28", "#18306A", "#3A5AA0", "#7A9AD8", "#C8E0FF"],
+              ["#010C20", "#06306A", "#0B5FA0", "#3AB8E0", "#A0F8FF"]],
          zenith=["#000004", "#020420", "#0A0A3A", "#1A1060", "#0A2A70", "#0A4A90", "#1A6AB8", "#2A88D8"],
          horizon=["#020A20", "#0A1A4A", "#5A2A8A", "#C85AA8", "#FF9AC8", "#E8D0FF", "#C0F4FF", "#A8ECFF"]),
 ]
+TOD_WKF = [3, 1, 0]          # the keyframe that seeds each time of day's water before the first field
+TOD_SKY = [6, 3, 0]          # and its sky entry
 
 
 def hw8(h):
@@ -111,22 +131,50 @@ def pal_entry(c0, c1):
     return w
 
 
+E_WATER, E_SPRAY, E_SKY, E_FOAM, E_HOT = 4, 16, 19, 28, 31
+
+
+def wkey_entry(k, i):
+    """The keyframe slot's entry for water key k (0 .. 4) and keyframe interval i (0 .. 2)."""
+    return 19 + 4 * i if k == 4 else 16 + 4 * k + i
+
+
 def pal_rom():
     out = []
     for th in THEMES:
-        for p in th["tod"]:
+        for tod, p in enumerate(th["tod"]):
             ent = [0] * 32
-            for r, (k0, k1, k2) in enumerate(p["ramps"]):
+            for r, keys in enumerate(p["ramps"]):
+                if keys is None or r == 3:
+                    continue
+                k0, k1, k2 = keys
                 ent[2 * r] = pal_entry(k0, k1)
                 ent[2 * r + 1] = pal_entry(k1, k2)
             for w in range(16):
                 c = p["wires"].get(w, "#FFFFFF")
                 ent[16 + w] = pal_entry(c, p["hot"])
+            # the per-field entries' seeds
+            wk = th["wkf"][TOD_WKF[tod]]
+            for s in range(4):
+                ent[E_WATER + s] = pal_entry(wk[s], wk[s + 1])
+            ent[21] = ent[23] = pal_entry(wk[4], "#FFFFFF")
+            ent[E_SKY] = pal_entry(th["zenith"][TOD_SKY[tod]], th["horizon"][TOD_SKY[tod]])
+            # spray (moved from 28), the foam's fill (two segments)
+            ent[E_SPRAY] = pal_entry(p["wires"][12], p["hot"])
+            f0, f1, f2 = p["ramps"][3]
+            ent[E_FOAM] = pal_entry(f0, f1)
+            ent[E_FOAM + 1] = pal_entry(f1, f2)
+            for e in (8, 9, 20, 26, 30, 31):
+                ent[e] = 0
             out += ent
         ent = [0] * 32
         for base, keys in ((0, th["zenith"]), (8, th["horizon"])):
             for i in range(8):
                 ent[base + i] = pal_entry(keys[i], keys[min(7, i + 1)])
+        for k in range(5):
+            for i in range(3):
+                ent[wkey_entry(k, i)] = pal_entry(th["wkf"][i][k], th["wkf"][i + 1][k])
+        ent[E_HOT] = pal_entry("#FFFFFF", "#FFFFFF")
         out += ent
     return out
 
@@ -189,48 +237,66 @@ def art_cloud():
     return cv, [0] * 48
 
 
+def bar(cv, p0, p1, w, z):
+    """A straight bar of constant width w with square caps (a quad running w / 2 past each end, so two bars
+    meeting at a joint overlap instead of leaving a notch)."""
+    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+    n = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / n * w / 2.0, dy / n * w / 2.0
+    ox, oy = -uy, ux
+    a = (p0[0] - ux, p0[1] - uy)
+    b = (p1[0] + ux, p1[1] + uy)
+    poly(cv, [(a[0] + ox, a[1] + oy), (b[0] + ox, b[1] + oy), (b[0] - ox, b[1] - oy), (a[0] - ox, a[1] - oy)], z)
+
+
 def art_birds(frame):
-    """256 x 32 units (2 virtual px a unit both ways, so 512 x 64 on screen): three gulls, wings up / down.
-    Zone 1 the wings, zone 2 the body."""
+    """256 x 32 units (2 virtual px a unit both ways, so 512 x 64 on screen): three gulls, each two long flat
+    planks meeting at the centre (no body), wings up (frame 0, a shallow V) / down (frame 1).  Zone 1 the left
+    wing, zone 2 the right (two planes, two shades).  The gulls never share a row (six boundaries a row)."""
     cv = canvas(256, 32)
-    for (cx, cy) in [(60, 8), (140, 18), (206, 12)]:
-        for i in range(-26, 27):
-            a = abs(i)
-            if frame == 0:
-                yy = cy + 3 - a * 0.40 + (a * a) * 0.0045
-            else:
-                yy = cy - 2 + a * 0.22
-            for t in range(-2, 3):
-                y = int(round(yy + t * 0.7))
+    L, TH = 34, 3
+    for (cx, base) in [(50, 0), (128, 11), (210, 22)]:
+        rise = 6 if frame == 0 else -3            # the wing tips above (+) or below (-) the centre
+        vy = base + (6 if frame == 0 else 0)      # the centre's top row
+        for i in range(-L, L + 1):
+            if i == 0:
+                continue
+            yc = vy - rise * abs(i) / float(L)
+            for y in range(int(round(yc)), int(round(yc)) + TH):
                 if 0 <= y < 32:
-                    cv[y][cx + i] = 1
-        disc(cv, cx, cy + 3, 5, 3, 2)
+                    cv[y][cx + i] = 1 if i < 0 else 2
+        for y in range(vy, vy + TH):
+            cv[y][cx] = 2
     return cv, [0] * 32
 
 
 def art_crab(frame):
-    """Half a crab, the centre line at x = 0 (the engine folds |x|): 128 x 96 virtual px, so the crab is
-    256 x 96 on screen, stored 48 rows (2 rows a unit).  Zone 1 the shell, 2 eyes / joints / mouth, 3 claws
-    and legs; the creases come from the row parity.  Frame 1 lifts the other legs."""
+    """Half a crab, the centre line at x = 0 (the engine folds |x|), drawn in straight lines: a hexagonal shell
+    cut into facet bands, bars for legs (thigh up, shin down, sharp knees), angular pincers, diamond eyes on
+    stalks.  Canvas units are half a virtual px both ways (the pixel path doubles x into the ROM, one ROM row a
+    virtual row): 256 x 96 units = 128 x 48 virtual px half-width, so the crab is about 122 x 48 on screen (half
+    v0.3's size).  Zone 1 the shell (creases = row parity: the facet bands), 2 eyes / mouth, 3 claws and legs.
+    Frame 1 lifts the other legs."""
     cv = canvas(256, 96)
-    lift = [0, 7, 0] if frame == 0 else [7, 0, 7]
-    for i in range(3):
+    # legs nested (the outer one rooted highest), each a thigh out and a little down, then a shin straight down:
+    # one crossing per leg per row, so a row never needs more than six boundaries
+    # (a step lifts a foot and swings it out; the knee stays below the root, so the thigh never rises)
+    lift = [0, 1, 0] if frame == 0 else [1, 0, 1]
+    legs = [((36, 66), (74, 69), (80, 93)), ((42, 57), (88, 61), (95, 93)), ((48, 49), (102, 52), (110, 93))]
+    for i, (root, knee, foot) in enumerate(legs):
         l = lift[i]
-        root = (44 + 8 * i, 66)
-        knee = (78 + 13 * i, 58 - l)
-        foot = (90 + 13 * i, 93 - l)
-        thick(cv, root, knee, 3.0, 3)
-        thick(cv, knee, foot, 2.4, 3)
-    thick(cv, (54, 48), (82, 34), 3.6, 3)                                                        # arm
-    poly(cv, [(78, 34), (94, 10), (114, 7), (122, 20), (104, 25), (110, 36), (90, 44)], 3)      # claw
-    disc(cv, 82, 34, 5, 5, 2)                                                                    # elbow
-    thick(cv, (12, 46), (20, 22), 2.4, 1)                                                        # eye stalk
-    disc(cv, 20, 19, 6, 6, 2)                                                                    # eye
-    disc(cv, 0, 58, 66, 26, 1)                                                                   # shell
-    poly(cv, [(0, 58), (64, 58), (52, 76), (0, 76)], 1)
-    poly(cv, [(0, 70), (14, 70), (11, 77), (0, 77)], 2)                                          # mouth
+        knee = (knee[0] + 2 * l, knee[1] - 2 * l)
+        foot = (foot[0] + 5 * l, foot[1] - 5 * l)
+        bar(cv, root, knee, 6, 3)
+        bar(cv, knee, foot, 6, 3)
+    bar(cv, (50, 40), (72, 24), 6, 3)                                                             # arm
+    poly(cv, [(68, 26), (84, 4), (110, 2), (94, 13), (114, 18), (92, 30)], 3)                    # pincer
+    bar(cv, (8, 32), (12, 16), 4, 1)                                                              # eye stalk
+    poly(cv, [(12, 6), (19, 12), (12, 18), (5, 12)], 2)                                          # eye
+    poly(cv, [(0, 30), (34, 30), (58, 42), (62, 54), (54, 70), (0, 70)], 1)                      # shell
+    poly(cv, [(34, 30), (58, 42), (40, 42)], 2)                                                  # shoulder facet
     rows = [cv[y] for y in range(0, 96, 2)]
-    return rows, hbits([44, 58, 70], 48, 2)
+    return rows, hbits([42, 54, 62], 48, 2)
 
 
 def row_words(row, hb=0):
