@@ -1,0 +1,146 @@
+# Precess - Hardline (v0.1.0, 2026-11-22).  Sixteen nested ellipses, each turned a step from the last: a spiral
+# that is not drawn; as the twist grows they cross into a lace of crescents.  Black and white; the camera bends
+# the bands and is never shown.  See precess.vhd, precess.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 40
+program_id = "com.czartroniks.precess"
+program_name = "Precess"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Curve", "Pattern"]
+program_type = "processing"
+description = "Sixteen nested ellipses, each turned from the last: a spiral vortex that winds into a lace of crescents. Video bends it."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Period"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Oval"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 660
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Spacing"
+value_labels = ["Even", "Log"]
+initial_value_label = "Even"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Fill"
+value_labels = ["Bands", "Stack"]
+initial_value_label = "Bands"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Twist"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 742
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Vortex"
+
+[[preset]]
+name = "Target"
+rotary_potentiometer_5 = 512
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Rosette"
+rotary_potentiometer_4 = 600
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Tunnel"
+toggle_switch_8 = 1
+linear_potentiometer_12 = 660
+
+[[preset]]
+name = "Rotorelief"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Wire Lace"
+rotary_potentiometer_4 = 800
+toggle_switch_10 = 1
+linear_potentiometer_12 = 860
