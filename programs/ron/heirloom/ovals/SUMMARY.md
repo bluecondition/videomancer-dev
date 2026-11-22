@@ -288,3 +288,20 @@ photo look.  Osc substitutes a drifting 2-D triangle lattice through the same pa
 **Bend type**: K6 Etch adds the camera luma to the palette index. The change is the same as in the main program: c_k6 = K6 / 2 + K6 / 8 and the etch slice p7_et(17:8), +25 % at every position. The K6 default is now 100 % (orchestrator).
 - Not rendered; checked by GHDL analysis and the build.
 - Build: v0.6.2, router1, all six on seed 1; worst HD 86.64 MHz (HD Analog 89.69, HD HDMI 96.16, HD Dual 86.64); 7,312 / 7,680 LC. `.kinetic_work/k6_builds.txt`: diag ovals OK router1 worst-HD 86.64 LC 7312.
+
+## v0.6.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`0 - x` as `+x`), while the GHDL simulator computes it correctly, so every render showed the intended picture and the hardware ran the reversed one. All nine sites were absolute values written as `0 - x`; each is now `-x` (same widths and slices).
+- **Fixed (9 sites):**
+  - line 506, `v_k := -v_k`: |K1 − 512|, the **K1 Stagger** amount (lens-row phase offset; the sign picks Rock / Braid);
+  - line 717, `v_tn := -v_t`: |tq| = |y − 520|, the line engine's distance from the chain's centre row (feeds the lens-pair separation L, centre xc and half-width offset);
+  - line 882, `v_n := resize(-v_w, 13)`: T = |w|, the folded lens triangle for the left half of each lens period;
+  - line 897, `v_n := -p2_do`: |do|, distance to the other half's inner lens (the crease union);
+  - lines 906 / 908, `v_n := -p3_a` / `-p3_b`: |a| and |b|, distances to this half's inner and outer lens centres;
+  - lines 948 / 950, `v_dg := -p6_df` / `-p6_dio`: the two crease distances that set the palette blend weight;
+  - line 983, `p10_aq <= unsigned(-v_qp(5 downto 0))`: |qp|, the star-glow weight outside each lens edge.
+- **On hardware before → now:** the pixel path was essentially broken on hardware. The left half of every lens period read the wrong triangle (882), every inner lens lost its half nearest the period centre (906), every outer lens drew only its outward half (908), so the vesica chains came out as half-ovals with ground stripes; the upper half of every chain (above line 520) had lens pairs popping in and out with a step at line 520 (717); creases had a hard palette edge on one side (948 / 950) and the star glow outside each lens edge was an inverted, over-bright band (983); where L > 511 + T (bottom ~20 % at default Split, much more above ~67 % Split) the double oval's crease was a flat vertical cut (897). The left half of **K1 Stagger** was an instant full Rock with no ramp, and K1 resting at centre flickered between the photo and full Rock on ADC jitter (506). Now the hardware draws the rendered picture: full rainbow-roped double ovals with soft creases, the glow fading away from the edges, and K1 ramping smoothly both ways from the photo at 512.
+- No default or preset remaps (group 1, never flashed). No sites left as-is.
+- **Build** (router1, `.heirloom_work/skew_tools/build_any.sh ovals`): all six configs seed 1. Post-route Fmax: HD Analog 91.53, SD Analog 84.65, HD HDMI 87.83 (builder seed, replaced, see below), SD HDMI 92.48, HD Dual 91.05, SD Dual 82.58 MHz. 7,461–7,502 / 7,680 LC (97.7 %, ~+170 over v0.6.2's 7,312: the abs logic is real now), 17 / 32 EBR, iceunpack OK ×6.
+- **HD HDMI skew:** the builder's HD HDMI router1 s1 was **−0.72 / ≤ −1.54** (negative HSYNC). Screen router1 + router2 s1–40 (77 timing-clean): 6 in the window. Installed **router2 s19 (+1.23 / ≤ −1.60, 83.93 MHz)**. Spare HD HDMI router1 s5 (+1.27 / ≤ −1.10, 83.61 MHz): `.heirloom_work/rb_ovals/skew/ovals_v063_spare_hd_hdmi_router1_s5.vmprog`. HD Analog r1 s1 (−1.52 / ≤ −1.41) and HD Dual r1 s1 (−1.59 / ≤ −0.62) kept. The builder's HD HDMI .bin is `skew/hd_hdmi_replaced_202611212016.bin`.
+- `out/rev_b/ron/heirloom/ovals.vmprog` (v0.6.3). Backups of v0.6.2 (vhd, toml, vmprog) in `.heirloom_work/rb_ovals/`. Not flashed.

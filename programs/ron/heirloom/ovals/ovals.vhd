@@ -503,7 +503,7 @@ begin
                                c_dum  <= signed(resize(c_du, 26)) - C_PHQ;
                                v_k := signed(resize(s_g1(12 downto 3), 11)) - 512;
                                c_stl <= v_k(10);
-                               if v_k(10) = '1' then v_k := 0 - v_k; end if;
+                               if v_k(10) = '1' then v_k := -v_k; end if;
                                if v_k(9) = '1' then c_kq <= (others => '1'); else c_kq <= unsigned(v_k(8 downto 0)); end if;
                     when 47 => c_gq <= r_exq(11 downto 2);
                                c_k3 <= s_g3(12 downto 3);
@@ -714,7 +714,7 @@ begin
                     r_sa <= e_phi(23 downto 14);
                 when 2 =>
                     v_t := signed(resize(e_yl, 12)) - 520;
-                    if v_t < 0 then e_tneg <= '1'; v_tn := 0 - v_t; e_tqa <= unsigned(v_tn(9 downto 0));
+                    if v_t < 0 then e_tneg <= '1'; v_tn := -v_t; e_tqa <= unsigned(v_tn(9 downto 0));
                     else e_tneg <= '0'; e_tqa <= unsigned(v_t(9 downto 0)); end if;
                     e_gy0 <= signed(resize(e_yl, 12)) - 945;
                 when 3 =>
@@ -879,7 +879,7 @@ begin
             -- 1: T = |w| (the lens triangle); the phase holds left of the first trough (hsync-reset oscillator)
             v_w := b_wq(25 downto 10);
             if v_w < -C_PHH then p1_t <= to_unsigned(C_PHH, 11); p1_sw <= '0'; p1_cl <= '1';
-            elsif v_w < 0 then v_n := resize(0 - v_w, 13); p1_t <= unsigned(v_n(10 downto 0)); p1_sw <= '0'; p1_cl <= '0';
+            elsif v_w < 0 then v_n := resize(-v_w, 13); p1_t <= unsigned(v_n(10 downto 0)); p1_sw <= '0'; p1_cl <= '0';
             else p1_t <= unsigned(v_w(10 downto 0)); p1_sw <= '1'; p1_cl <= '0'; end if;
             -- 2: s = T - m (the fold centre); the other half's inner lens: do = T + (m - L_other)
             p2_sd <= signed(resize(p1_t, 12)) - 511;
@@ -894,7 +894,7 @@ begin
             else
                 p3_a <= resize(p2_sd, 13) + resize(l_lq(1), 13); p3_b <= resize(p2_sd, 13) - resize(l_lq(0), 13);
             end if;
-            if p2_do < 0 then v_n := 0 - p2_do; p3_ado <= unsigned(v_n(11 downto 0));
+            if p2_do < 0 then v_n := -p2_do; p3_ado <= unsigned(v_n(11 downto 0));
             else p3_ado <= unsigned(p2_do(11 downto 0)); end if;
             if p2_sw = '1' then
                 if p2_do >= 0 then p3_so <= '1'; else p3_so <= '0'; end if;
@@ -903,9 +903,9 @@ begin
             end if;
             p3_sw <= p2_sw; p3_cl <= p2_cl;
             -- 4: |a|, |b| (slices, not narrowing resizes), the two half-widths; qo = h_other - |do|
-            if p3_a < 0 then v_n := 0 - p3_a; p4_aa <= unsigned(v_n(11 downto 0)); p4_ap <= '0';
+            if p3_a < 0 then v_n := -p3_a; p4_aa <= unsigned(v_n(11 downto 0)); p4_ap <= '0';
             else p4_aa <= unsigned(p3_a(11 downto 0)); if p3_a = 0 then p4_ap <= '0'; else p4_ap <= '1'; end if; end if;
-            if p3_b < 0 then v_n := 0 - p3_b; p4_ba <= unsigned(v_n(11 downto 0)); p4_bp <= '0'; p4_bz <= '0';
+            if p3_b < 0 then v_n := -p3_b; p4_ba <= unsigned(v_n(11 downto 0)); p4_bp <= '0'; p4_bz <= '0';
             else p4_ba <= unsigned(p3_b(11 downto 0)); p4_bp <= '1'; if p3_b = 0 then p4_bz <= '0'; else p4_bz <= '1'; end if; end if;
             if p3_sw = '1' then
                 p4_hi <= l_hq(2); p4_ho <= l_hq(3);
@@ -945,9 +945,9 @@ begin
             p6_cl <= p5_cl;
             -- 7: half-distances to the crease with the other half's inner lens |Qf - qo| / 2 and to the in/out
             --    crease |Q_in - Q_out| / 2 (both saturated at 63)
-            if p6_df < 0 then v_dg := 0 - p6_df; else v_dg := p6_df; end if;
+            if p6_df < 0 then v_dg := -p6_df; else v_dg := p6_df; end if;
             if v_dg(14 downto 7) /= 0 then p7_dq <= (others => '1'); else p7_dq <= unsigned(v_dg(6 downto 1)); end if;
-            if p6_dio < 0 then v_dg := 0 - p6_dio; else v_dg := p6_dio; end if;
+            if p6_dio < 0 then v_dg := -p6_dio; else v_dg := p6_dio; end if;
             if v_dg(14 downto 7) /= 0 then p7_di <= (others => '1'); else p7_di <= unsigned(v_dg(6 downto 1)); end if;
             p7_ea <= p6_ea; p7_fd <= p6_fd; p7_fc <= p6_fc;
             -- 8: e = min(axis, the crease the side faces: in/out if fd, the other half's if fc; never both)
@@ -980,7 +980,7 @@ begin
             v_qp := shift_right(p9_qg, 1);
             p10_v <= v_qp + 320;
             if v_qp > 31 or v_qp < -31 then p10_aq <= to_unsigned(32, 6);
-            elsif v_qp(17) = '1' then p10_aq <= unsigned(0 - v_qp(5 downto 0));
+            elsif v_qp(17) = '1' then p10_aq <= unsigned(-v_qp(5 downto 0));
             else p10_aq <= unsigned(v_qp(5 downto 0)); end if;
             p10_s <= p9_s; p10_gr <= p9_gr; p10_in <= p9_in; p10_cl <= p9_cl;
             -- 11: palette address {bank, index} (one word = both sides); glow-table side = the dominant palette
