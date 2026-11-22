@@ -1,0 +1,209 @@
+# Dipole - Hardline (v0.1.0, 2026-11-22).  Lines of force between two charges and the bipolar checkerboard:
+# circles through both poles crossed at right angles by circles round each pole, crisp black and white.
+# See dipole.vhd, dipole.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 40
+program_id = "com.czartroniks.dipole"
+program_name = "Dipole"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Optics", "Pattern"]
+program_type = "processing"
+description = "A bipolar checkerboard: the lines of force between two charges in black and white; they stream, video bends them."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 560
+display_min_value = -100
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 490
+display_min_value = -100
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Period"
+value_labels = ["4", "5", "6", "8", "10", "12", "16", "20", "24", "32"]
+initial_value_label = "12"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Turn"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 569
+display_min_value = -180
+display_max_value = 180
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 700
+display_min_value = -100
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Weave"
+value_labels = ["Lines", "Checker"]
+initial_value_label = "Checker"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Charge"
+value_labels = ["Opposite", "Like"]
+initial_value_label = "Opposite"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Gap"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 560
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[preset]]
+name = "Two Eyes"
+rotary_potentiometer_1 = 560
+rotary_potentiometer_2 = 490
+rotary_potentiometer_3 = 563
+rotary_potentiometer_4 = 569
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Faraday"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 666
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 640
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Saddle Net"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 461
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 380
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Flower"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 563
+rotary_potentiometer_4 = 640
+rotary_potentiometer_5 = 720
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 120
+
+[[preset]]
+name = "Uniform Field"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 870
+rotary_potentiometer_4 = 540
+rotary_potentiometer_5 = 760
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1000
+
+[[preset]]
+name = "Cassini Osc"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 461
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 700
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 700
