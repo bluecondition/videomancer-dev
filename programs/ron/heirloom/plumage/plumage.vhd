@@ -623,7 +623,7 @@ begin
                     when 22 => r_ex_a <= unsigned(z_e(7 downto 0)); z_shg <= z_e(10 downto 8);
                     when 24 => z_mg <= r_ex_q;
                     when 25 =>                         -- 1 / width: 2.5 octaves up (thin), 0.94 down (wide)
-                        v_d := 512 - signed(resize(s_g3(12 downto 3), 12));
+                        v_d := to_signed(512, 12) - signed(resize(s_g3(12 downto 3), 12));
                         if v_d >= 0 then
                             z_e <= shift_right(shift_left(resize(v_d, 13), 2) + resize(v_d, 13), 2);
                         else
@@ -640,7 +640,7 @@ begin
                     when 30 => r_ex_a <= unsigned(z_e(7 downto 0)); z_shr <= z_e(11 downto 8);
                     when 32 => z_mr <= r_ex_q;
                     when 33 =>                         -- sweep: y scale 2^(-0.75 (k2 - 512) / 256)
-                        v_d := 512 - signed(resize(s_g2(12 downto 3), 12));
+                        v_d := to_signed(512, 12) - signed(resize(s_g2(12 downto 3), 12));
                         z_e <= resize(shift_right(resize(v_d, 13) + shift_left(resize(v_d, 13), 1), 2), 13);
                     when 34 => r_ex_a <= unsigned(z_e(7 downto 0)); z_shs <= z_e(10 downto 8);
                     when 36 =>

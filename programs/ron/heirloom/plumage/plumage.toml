@@ -6,7 +6,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.plumage"
 program_name = "Plumage"
-program_version = "0.2.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -122,7 +122,7 @@ name = "Still"
 [[preset]]
 name = "Rainbow Arcs"
 rotary_potentiometer_1 = 860
-rotary_potentiometer_3 = 760
+rotary_potentiometer_3 = 264
 toggle_switch_7 = 1
 linear_potentiometer_12 = 200
 
@@ -144,14 +144,14 @@ toggle_switch_8 = 1
 [[preset]]
 name = "Quills"
 rotary_potentiometer_1 = 820
-rotary_potentiometer_3 = 80
+rotary_potentiometer_3 = 944
 
 [[preset]]
 name = "Flat Sweep"
-rotary_potentiometer_2 = 60
+rotary_potentiometer_2 = 964
 rotary_potentiometer_5 = 700
 
 [[preset]]
 name = "Hanging Plumes"
-rotary_potentiometer_2 = 960
+rotary_potentiometer_2 = 64
 toggle_switch_10 = 1

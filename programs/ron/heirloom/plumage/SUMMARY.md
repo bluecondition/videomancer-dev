@@ -289,3 +289,41 @@ hd_hdmi router1 + router2 s1-60, 102 routed, 85 timing-clean.
 - **A full builder rebuild re-routes HD HDMI on seed 1**, the negative HSYNC. After any rebuild, re-run the screen
   and `.heirloom_work/skew_tools/install.sh plumage router2 5`, or re-install the equivalent seed.
 - Record which of s5 and the s19 spare Ron finds clean.
+
+## v0.2.1: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`512 - k` became `k - 512`); the simulator
+is correct, so every render showed the intended picture while the hardware did not.
+
+- **Fixed: line 626** (vblank sequencer, step 25), `v_d := 512 - signed(resize(s_g3(12 downto 3), 12))` ->
+  `to_signed(512, 12) - ...`: the K3 Width exponent (two slopes for 1 / width).
+- **Fixed: line 643** (step 33), the same form for K2 Sweep: the y-scale exponent `2^(-0.75 (k2 - 512) / 256)`.
+- **On hardware before / after.**
+  - K3 ran backwards with its two slopes swapped: 0 = overlapping plumes (the gentle 0.94-octave half), 1023 = thin
+    quills (the steep 2.5-octave half). Now K3 runs as labelled: 0 = thin quills, 1023 = overlapping plumes.
+  - K2 ran backwards: 0 = tall plumes, 1023 = long flat arcs. Now 0 = long flat arcs sweeping right, 1023 = tall
+    near-vertical plumes.
+  - The defaults (K2 = K3 = 512) are the same picture as before.
+- **Preset remaps (1024 - v, exact).** The fixed decode at 1024 - v gives exactly the old hardware `v_d`, so every
+  preset looks as it did on hardware: Rainbow Arcs K3 760 -> 264, Quills K3 80 -> 944, Flat Sweep K2 60 -> 964,
+  Hanging Plumes K2 960 -> 64. The preset names still describe the sims, not what they show (Quills shows fat plumes,
+  Flat Sweep tall plumes, as on hardware before); rename or flip them if Ron wants the names to match.
+- **Left as is:** no other audited site in this program.
+- **Build** v0.2.1, router2 (the program's router):
+  - HD Analog 83.27, SD Analog 76.44, HD HDMI 82.37, SD HDMI 74.48, HD Dual 78.61, SD Dual 90.33 MHz (worst HD 78.61).
+  - **HD Dual seed 2** (seed 1 missed timing); the other five on seed 1. HD Dual was then re-seeded anyway (below).
+  - 7196-7235 / 7680 LC (94 %), 23 / 32 EBR. iceunpack OK x6.
+  - Backups of v0.2.0 (vhd, toml, vmprog): `.heirloom_work/rb_plumage/plumage_v020.*`.
+- **Skew** (`QUICK=1 .heirloom_work/skew_tools/screen.sh plumage` -> r1 + r2 s1-40, 68 HD HDMI timing-clean, 3 in the
+  window; plus re-routes of the builder's router2 HD Analog s1 / HD Dual s2, byte-identical to the build):
+  - Builder HD HDMI router2 s1 was **−0.16 / ≤ −1.48** (negative HSYNC, unsafe).
+  - Installed HD HDMI **router2 s3 (+1.18 / ≤ −1.20, 85.75 MHz)**.
+  - Builder HD Dual router2 s2 had data at **+0.07**, so it was replaced by **router1 s7 (−1.53 / ≤ −1.25, 92.97 MHz)**.
+  - HD Analog router2 s1 (+0.70 / ≤ −1.30) kept.
+  - Spare: HD HDMI router2 s4 (+1.07 / ≤ −0.94, 82.49 MHz), at
+    `.heirloom_work/rb_plumage/skew/plumage_v021_spare_hd_hdmi_router2_s4.vmprog`.
+  - The v0.2.0 screen and its spare moved to `.heirloom_work/rb_plumage/skew_v020/`. The replaced builder bins are in
+    `.heirloom_work/rb_plumage/skew/*_replaced_*.bin`.
+  - **A full rebuild re-routes seed 1.** After any rebuild re-screen (router2 is not deterministic, so the same
+    seeds may not reproduce).
+- Not flashed.
