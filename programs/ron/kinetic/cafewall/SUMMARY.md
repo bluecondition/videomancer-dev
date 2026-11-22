@@ -177,3 +177,32 @@ top of K6; picture programs keep their logic. The K6 default is now 100 % (initi
   (no router stalls this time). Post-route Fmax HD Analog 101.42, HD HDMI 88.83, HD Dual 104.36 MHz (worst HD
   88.83); SD Analog 101.28, SD HDMI 100.46, SD Dual 97.48. 6,148 .. 6,165 / 7,680 LC (80 %), 11 / 32 EBR.
   vmprog: out/rev_b/ron/kinetic/cafewall.vmprog (v0.1.2). Not flashed.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`0 - v` as `+v`); the simulator is
+right, so every render above showed the intended picture, but the v0.1.2 bitstreams did not. Fixed (same operands
+and width, the value the simulator always computed):
+- line 570 `c_nxq <= -v_xq` (was `0 - v_xq`): the tile counter's step while it counts DOWN from the left edge to
+  the screen centre in S8 Field = Radial (a_dec = '1');
+- line 921 `v_fn := unsigned(to_signed(0, 6) - v_d(5 downto 0))`: Radial's left half, the edge pixel's share of the
+  next tile in the down-counting direction (the anti-aliasing blend); it was masked by line 570 and would have
+  blended edges the wrong way once 570 alone was fixed.
+On hardware v0.1.2 (never flashed) Radial would have counted UP in the left half and never crossed a tile edge:
+each row's left half one solid tile colour, then a strip of ~1-px stripes at the centre and scrambled per-row
+tile phase in the right half. v0.1.3 draws the designed Radial wall, each row mirrored about the centre with tiles
+streaming out of the centre axis and anti-aliased edges on both halves. Linear mode is unchanged. No TOML remaps
+(group 1). Nothing left as-is (no other audited site in this program). `scan.py` lists no site. Backups (v0.1.2
+vhd / toml / vmprog): .heirloom_work/rb_cafewall/.
+
+Build (2026-11-21, shared queue, router1, every config seed 1): HD Analog 91.95, SD Analog 86.29, HD HDMI 90.16,
+SD HDMI 95.43, HD Dual 89.41, SD Dual 88.25 MHz; 6,188-6,206 / 7,680 LC (81 %), 11 / 32 EBR; all six pass iceunpack.
+
+HD HDMI skew: the builder's HD HDMI router1 s1 was +0.06 / <= -0.88 (HSYNC below the window). Screened HD HDMI
+router1 + router2 seeds 1-40 (68 routed, 12 timeouts under load, 64 timing-clean, 8 in the window). Installed
+**HD HDMI router2 s23 (+1.90 / <= -1.08, 83.89 MHz)**. HD Analog router1 s1 had data <= -0.33: installed **HD Analog
+router1 s9 (-0.92 / <= -0.74, 91.95 MHz)**. HD Dual router1 s1 had data <= +0.67: installed **HD Dual router1 s10
+(-2.21 / <= -1.19, 89.59 MHz)**. So the shipped seeds are HD Analog r1 s9, HD HDMI r2 s23, HD Dual r1 s10, SD
+configs r1 s1. Spare: HD HDMI router2 s20 (+1.31 / <= -1.27, 84.94 MHz),
+.heirloom_work/rb_cafewall/skew/cafewall_v013_spare_hd_hdmi_router2_s20.vmprog. Replaced bins kept in
+.heirloom_work/rb_cafewall/skew/. Shipped vmprog: out/rev_b/ron/kinetic/cafewall.vmprog (v0.1.3). Not flashed.

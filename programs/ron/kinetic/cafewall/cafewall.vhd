@@ -567,7 +567,7 @@ begin
                     when 124 => c_w <= f_acc(26 downto 12);
                     when 130 =>
                         v_xq := signed(resize(s_xs & "000", 17));
-                        c_pxq <= v_xq; c_nxq <= 0 - v_xq;
+                        c_pxq <= v_xq; c_nxq <= -v_xq;
                         c_wmx <= signed(resize(c_w, 17)) - v_xq;
                         c_xmw <= v_xq - signed(resize(c_w, 17));
                     when 156 => z_m <= f_acc(26 downto 10);
@@ -918,7 +918,7 @@ begin
             v_alt := signed(resize(a_c, 17)) + v_s2;
             if a_dec = '1' then
                 v_cross := v_d(16);
-                v_fn := unsigned(0 - v_d(5 downto 0));
+                v_fn := unsigned(to_signed(0, 6) - v_d(5 downto 0));
             else
                 v_cross := not v_alt(16);
                 v_fn := unsigned(v_alt(5 downto 0));
