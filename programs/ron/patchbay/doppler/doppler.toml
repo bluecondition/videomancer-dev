@@ -1,0 +1,152 @@
+# Doppler - Patchbay wave 2, 2026-11-22 (v0.1.0).  Wavefronts from a moving source: twelve rings, each centred
+# where the source was when it was emitted; they bunch ahead, stretch behind, pile into a wall at Mach 1 and
+# overtake each other in a Mach cone above it.  See doppler.vhd, doppler.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 36
+program_id = "com.czartroniks.doppler"
+program_name = "Doppler"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Optics", "Shape", "Pattern"]
+program_type = "processing"
+description = "Wavefronts from a moving source: rings bunch ahead, stretch behind, pile into a wall at Mach 1, a cone above."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Wavelength"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 380
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Heading"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 360
+initial_value = 960
+display_float_digits = 0
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 704
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Line"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 360
+initial_value = 0
+display_float_digits = 0
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Look"
+value_labels = ["Bands", "Rings"]
+initial_value_label = "Bands"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Pulse"
+value_labels = ["Continuous", "Burst"]
+initial_value_label = "Continuous"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Fade"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Shift", "Phosphor"]
+initial_value_label = "Shift"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Mach"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 560
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Doppler"
+
+[[preset]]
+name = "At Rest"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 420
+
+[[preset]]
+name = "Sound Wall"
+linear_potentiometer_12 = 668
+rotary_potentiometer_3 = 660
+rotary_potentiometer_1 = 300
+
+[[preset]]
+name = "Mach Cone"
+linear_potentiometer_12 = 1023
+toggle_switch_7 = 1
+rotary_potentiometer_4 = 560
+
+[[preset]]
+name = "Wave Packets"
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 250
+rotary_potentiometer_4 = 600
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Scope"
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+rotary_potentiometer_4 = 380
+linear_potentiometer_12 = 600
