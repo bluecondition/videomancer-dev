@@ -8,7 +8,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.coral"
 program_name = "Coral"
-program_version = "0.1.4"
+program_version = "0.1.5"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -64,7 +64,7 @@ name_label = "Bulb"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 599
+initial_value = 425
 display_float_digits = 0
 suffix_label = "%"
 
@@ -129,7 +129,7 @@ rotary_potentiometer_3 = 760
 [[preset]]
 name = "Red Tide"
 linear_potentiometer_12 = 1023
-rotary_potentiometer_5 = 600
+rotary_potentiometer_5 = 424
 
 [[preset]]
 name = "Hanging Bulb"

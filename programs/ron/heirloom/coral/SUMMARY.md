@@ -198,3 +198,32 @@ K1 Rings 776, K2 Arcs 1023, K3 Eye 421, K4 Speed 715, K5 Bulb 599, K6 Camera 451
 P12 Swell 231 (S7, S9, S11 unchanged). K2 is continuous (glided, through the per-field multiplier), so 1023 loads as
 dialled. The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 253 bytes), so timing
 and seeds are as in v0.1.3 (HD HDMI seed 2). Presets are unchanged.
+
+## v0.1.5: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`512 - x` becomes `x - 512`, `-8 - x`
+becomes `x + 8`); the simulator is correct, so every sim showed the intended picture while the hardware differed.
+- **Sites fixed** (same widths, now `to_signed(N, 12) - x`):
+  - line 467, K5 Bulb: `v_d = 512 - k5`, which sets the outer-zone red level fz = 620 + 2 v_d and the shapes'
+    widening grow = -v_d + g - 639;
+  - line 475, K4 Speed below the deadband: the magnitude `-8 - v_d` (1..504) of the upward roll.
+- **On hardware, before -> after.**
+  - K5 ran mirrored about 512 (0 = the red floods, 1023 = rings only). Now clockwise widens the solid shapes and
+    floods the red, as designed.
+  - K4 below ~504: on hardware the magnitude wrapped (65536 - m), so anywhere in the lower half the vertical sine and
+    the shapes raced upward at ~10x the design's top speed, nearly constant. Now the roll is proportional: still,
+    then up to 2.8x the clip's speed at K4 = 0. The upper half (and the default 715) is unchanged; the Hanging Bulb
+    preset (K4 330) now rolls up at about the clip's speed instead of racing.
+- **Remaps (keep Ron's captured look exactly).** The decode is `512 - k5`, so `k -> 1024 - k` gives the identical
+  value the hardware ran (checked with a yosys eval: v_d = 87 at old 599 and at new 425): default K5 Bulb 599 -> 425
+  (the audit list said 424 = 1023 - 599, one count off: 424 gives v_d = 88); preset Red Tide K5 600 -> 424. K4 has no
+  remap (its lower half was a wrong magnitude, not a reversal).
+- **Left as-is:** line 820 (`63 - v_p` on an unsigned: a scanner false positive).
+- **Build:** router1, all six on seed 1 (the K6-pass seed 2 on HD HDMI is gone). HD Analog 81.20, HD HDMI 84.11,
+  HD Dual 81.91, SD Analog 78.88, SD HDMI 81.37, SD Dual 80.42 MHz (builder seeds); 6,084-6,104 / 7,680 LC, 23 / 32
+  EBR. iceunpack OK x6.
+- **Skew:** the builder's HD HDMI router1 s1 sat at +0.30 / <= -0.92 (the danger zone). Screen hd_hdmi r1 + r2
+  s1-160 (239 timing-clean; none in the window in s1-40, 11 by s160). Installed **HD HDMI router1 s44 (+1.87 /
+  <= -1.02, 80.10 MHz)**; HD Dual r1 s1 (-0.04 / <= -0.47, data too late) -> **router1 s3 (-2.28 / <= -1.26,
+  79.57 MHz)**; HD Analog r1 s1 (+1.97 / <= -0.88) kept. Spare HD HDMI router1 s113 (+1.42 / <= -0.79, 81.20 MHz):
+  `.heirloom_work/rb_coral/skew/coral_v015_spare_hd_hdmi_router1_s113.vmprog`. v0.1.5 not flashed yet.

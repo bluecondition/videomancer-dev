@@ -464,7 +464,7 @@ begin
                             when others => c_kr <= z_mt(15 downto 6);
                         end case;
                         -- bulb: fz = 620 + (512 - k5) * 2; the shapes widen by (k5 - 512) + (g - 639) px
-                        v_d := 512 - signed(resize(s_g5(12 downto 3), 12));
+                        v_d := to_signed(512, 12) - signed(resize(s_g5(12 downto 3), 12));
                         c_fz <= to_signed(620, 14) + shift_left(resize(v_d, 14), 1);
                         c_grow <= -v_d + signed(resize(c_g, 12)) - 639;
                         -- speed: (k4 - 512) with a +-8 deadband, x 174
@@ -472,7 +472,7 @@ begin
                         if v_d > 8 then
                             f_b <= unsigned(resize(v_d - 8, 16)); z_neg <= '1';
                         elsif v_d < -8 then
-                            f_b <= unsigned(resize(-8 - v_d, 16)); z_neg <= '0';
+                            f_b <= unsigned(resize(to_signed(-8, 12) - v_d, 16)); z_neg <= '0';
                         else
                             f_b <= (others => '0'); z_neg <= '0';
                         end if;
