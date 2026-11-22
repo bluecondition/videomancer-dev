@@ -285,3 +285,50 @@ Ron flashed v0.2.0 (the smoothed controls), dialled the look in and captured it 
 K1 Pillars 778, K2 Cupolas 688, K3 Rows 853, K4 Roll 644, K5 Dome 860, P12 Cupola 330 (K6 Etch and S7-S11
 unchanged). The vmprog was repacked from the v0.2.0 bitstreams (only the settings block differs, 201 bytes), so
 timing and seeds are as in v0.2.0. Presets are unchanged.
+
+## v0.2.2: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` becomes `x - N`); the GHDL simulator
+is correct, so sims showed the intended picture. Audit list: `.heirloom_work/ghdl_sub_check/fix/lists/cupola.txt`.
+
+**Site fixed:**
+- **Line 709, S7 Flip.** The line engine's virtual line is 1079 − y; it is now `to_signed(1079, 13) - v_y`. It had
+  built as y − 1079, negative on every line.
+- **Was on hardware:** Flip On gave a washed-out cream / aqua screen.
+  - The cream top strip covered the whole frame (G clamped, B +191).
+  - The pillars showed as white against aqua stripes.
+  - There were no domes and no floor.
+  - The static G / B table was read unflipped and shifted, and the X diamond had a 512-line sawtooth.
+- **Now:** Flip works as designed. The domes hang as bowls, the floor becomes a ceiling and the cream strip moves to
+  the bottom.
+  - The line geometry under Flip is the unflipped picture mirrored. That includes line 714's behaviour, which is
+    part of the approved look.
+  - The "Bowls" preset (Flip On) now shows this rather than the washed-out screen.
+
+**Remaps:** none. Flip defaults Off; Ron's captured defaults (v0.2.1) are unaffected.
+
+**Left as-is on purpose** (in Ron's captured default look): line 714 (the X arms' dy) and line 821 (the dome fade).
+`scan.py` still lists both.
+
+**Build:** router1, all six on seed 1 (log `.heirloom_work/ghdl_sub_check/fix/logs/cupola.log`).
+- Builder Fmax (MHz): HD Analog 82.99, SD Analog 82.18, HD HDMI 81.75, SD HDMI 84.31, HD Dual 82.13, SD Dual 85.68.
+- 6,910–6,924 / 7,680 LC (90 %), 22 / 32 EBR. iceunpack OK ×6.
+- **Shipped HD placements** (hand-installed, see skew below):
+  - HD HDMI router2 s22, 79.83 MHz.
+  - HD Analog router1 s12, 82.18 MHz.
+  - HD Dual builder s1, 82.13 MHz.
+  - Worst shipped HD: 79.83 MHz.
+
+**HD HDMI skew.**
+- v0.2.1 shipped the v0.2.0 builder bitstreams (router1 s1 on all six). No pin-skew screen had been run.
+- The v0.2.2 builder's HD HDMI router1 s1 sat at **−0.37** / ≤ −1.84, a negative HSYNC, so it could not ship.
+- **Screen:** hd_hdmi router1 + router2 seeds 1–40, 75 routed (5 router2 timeouts), 74 timing-clean, 3 in the window.
+- **Installed HD HDMI router2 s22: +1.49 / ≤ −0.97, 79.83 MHz.**
+- **Spare:** router2 s34 (+1.25 / ≤ −0.72, 81.84 MHz) in
+  `.heirloom_work/rb_cupola/skew/cupola_v022_spare_hd_hdmi_router2_s34.vmprog`.
+  - Also in the window: router2 s21 (+1.40 / ≤ −0.84, but only 75.40 MHz).
+- **HD Analog:** s1 (+1.32 / ≤ −0.19, data too late) → **router1 s12 (−0.40 / ≤ −0.91)**.
+- **HD Dual:** s1 (−0.25 / ≤ −0.67) kept.
+- **Backups:** the v0.2.1 VHDL, TOML and vmprog are in `.heirloom_work/rb_cupola/cupola_v021.*`.
+- **Rebuilding:** a builder rebuild re-routes seed 1. Re-run `install.sh cupola router2 22` and
+  `install.sh cupola router1 12 hd_analog` afterwards.

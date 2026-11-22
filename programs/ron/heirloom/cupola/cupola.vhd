@@ -706,7 +706,7 @@ begin
             case to_integer(e_lc) is
                 when 1 =>
                     v_y := signed(resize(e_y(19 downto 8), 13));
-                    if s_flp = '1' then v_y := 1079 - v_y; end if;
+                    if s_flp = '1' then v_y := to_signed(1079, 13) - v_y; end if;
                     e_yv <= resize(v_y, 12);
                     r_lt_a <= e_r(24 downto 16);                                    -- rolled read: vR
                 when 2 =>
