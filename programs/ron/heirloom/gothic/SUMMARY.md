@@ -187,3 +187,33 @@ K1 Arches 835, K2 Curve 343, K3 Ribbons 788, K4 Speed 717, K5 Waves 1023, S7 Str
 P12 Vault 395 (K6 Etch, S10, S11 unchanged). K5 is continuous (glided, no zones), so 1023 loads as dialled. The
 vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 255 bytes), so timing, seeds and LC
 are as in v0.1.3. Presets are unchanged.
+
+## v0.1.5: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`384 - x` became `x - 384`); the simulator
+is correct, so every render showed the intended picture while the hardware did not.
+
+- **Fixed: line 638** (vblank sequencer, step 33), `z_e5n <= 384 - signed(resize(v_u, 12))` ->
+  `to_signed(384, 12) - ...`. It drives the K5 Waves exponent, i.e. the red-line phase step `c_dw`.
+- **On hardware before / after.** K5 ran backwards on hardware: 0 = 100 px looping swirls, 1023 = ~13 px fine red
+  lines (full range, mirrored about 512). Now K5 runs as labelled: 0 = 13 px fine lines, 512 = 36 px, 1023 = 100 px
+  broad swirls.
+- **Default remap.** Ron's captured K5 = 1023 was the fine-line end. The default is now **K5 = 2**, which reproduces it
+  exactly: the decode is `z = 384 - floor(3 k / 4)`, and k = 2 gives 383, the old hardware value at 1023 (also with
+  the glide's ±2-count deadband from power-up: both settle at 381). No preset sets K5, so no preset remap.
+- **Left as is (Ron's approved look): line 770**, `v_l := 35 - signed(resize(m_acc(22 downto 16), 10))` (the ground
+  stripes), still built reversed on purpose; scan.py still lists it.
+- **Build** v0.1.5, router1, 6/6 seed 1: HD Analog 81.12, SD Analog 81.87, HD HDMI 79.45, SD HDMI 83.64, HD Dual
+  76.11, SD Dual 89.17 MHz (worst HD 76.11). 7205-7226 / 7680 LC (94 %), 23 / 32 EBR. iceunpack OK x6.
+  Backups of v0.1.4 (vhd, toml, vmprog): `.heirloom_work/rb_gothic/gothic_v014.*`.
+- **Skew** (`QUICK=1 .heirloom_work/skew_tools/screen.sh gothic`, then r1 + r2 s1-40, 40 HD HDMI timing-clean, 5 in
+  the window): the builder's HD HDMI router1 s1 was **−0.29 / ≤ −1.00** (negative HSYNC, unsafe).
+  - Installed HD HDMI **router1 s13 (+1.27 / ≤ −1.04, 77.18 MHz)**, the best balance of HSYNC and data margins.
+  - HD Analog router1 s1 had data at −0.15, so it was replaced by **router1 s12 (−1.06 / ≤ −1.19, 85.19 MHz)**.
+  - HD Dual router1 s1 (−1.13 / ≤ −1.17) kept.
+  - Spare: HD HDMI router1 s6 (+1.59 / ≤ −0.62, 81.12 MHz), at
+    `.heirloom_work/rb_gothic/skew/gothic_v015_spare_hd_hdmi_router1_s6.vmprog`.
+  - The replaced builder bins are in `.heirloom_work/rb_gothic/skew/*_replaced_*.bin`.
+  - **A full rebuild re-routes seed 1.** After a rebuild of the same netlist run
+    `.heirloom_work/skew_tools/install.sh gothic router1 13` and `... install.sh gothic router1 12 hd_analog`.
+- Not flashed.

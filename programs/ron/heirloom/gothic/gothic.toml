@@ -2,12 +2,13 @@
 # Nested pointed arches of ribbons (blue leaves, wavy red-line patches, a cyan edge line) over rolling
 # green stripes; the arches sink, the stripes roll down.  See gothic.vhd, gothic.py and SUMMARY.md.
 # v0.1.1 (2026-11-10): camera luma smoothed (8 px box + vertical IIR), default camera bend lowered, Osc on its own x32.
+# v0.1.5 (2026-11-21): GHDL integer-minus-signed fix (K5 Waves ran reversed on hardware); K5 default 1023 -> 2 keeps the look.
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.gothic"
 program_name = "Gothic"
-program_version = "0.1.4"
+program_version = "0.1.5"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -63,7 +64,7 @@ name_label = "Waves"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 2
 display_float_digits = 0
 suffix_label = "%"
 

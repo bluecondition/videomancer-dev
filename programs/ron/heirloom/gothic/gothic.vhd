@@ -635,7 +635,7 @@ begin
                         z_e2n <= -z_e2;
                         v_u := resize(s_g5(12 downto 3), 20);
                         v_u := shift_right(v_u + shift_left(v_u, 1), 2);                                -- 3/4 k5
-                        z_e5n <= 384 - signed(resize(v_u, 12));
+                        z_e5n <= to_signed(384, 12) - signed(resize(v_u, 12));
                     when 35 =>
                         r_vt_a <= s_gp(12 downto 5);
                     -- exp2 mantissa reads, just before each exponential slot (address at L - 7, copy at L - 5)
