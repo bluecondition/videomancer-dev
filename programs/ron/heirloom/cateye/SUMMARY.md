@@ -195,3 +195,37 @@ Ron dialled the look in on hardware (v0.1.3), captured with `./capture_preset.sh
 K1 Chevron 620, K2 Eye 808, K3 Rings 683, K4 Speed 212, K5 Stripes 454, P12 Heat 232 (K6 Bend and S7-S11 unchanged).
 The vmprog was repacked from the v0.1.3 bitstreams (only the settings block differs, 206 bytes), so timing, seeds and
 LC are as in v0.1.3. Presets are unchanged.
+
+## v0.1.5: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`780 - u` comes out as `u - 780`). The GHDL
+simulator is right, so every render showed the intended picture; the v0.1.x hardware builds did not. The fix
+restores the simulated design.
+
+**Sites fixed** (rewritten as `to_signed(N, w) - x`; widths unchanged):
+- line 927, `v_u := 780 - u` -> the left-wall depth (`q7_lp`, `q7_dl`: the left wall's band palette, which has
+  priority over the right wall and the socket).
+- line 934, `v_w := 2028 - u` -> the falling side of the socket dip (`q7_dip`, the heat bars beside the right wall).
+- line 829, `v_s2 := 94 - t/256` -> the per-row glow slope `n_s2` (the pink glow's taper).
+
+**What changes on hardware** (what Ron saw on v0.1.3/v0.1.4 vs now):
+- The background behind the eye is laid out as designed. Before, every pixel right of u = 780 counted as left
+  wall, so the left-wall band family swept across the socket and the whole right side (flat colour toward the right
+  edge), the real left-wall area showed the socket/cream colour, and the right wall and the socket heat bars never
+  appeared. Now the left wall's bands sit at the left, the socket shows its heat-bar triangle (u 1240..2028), and
+  the right wall's bands appear at the right. S7 Facing Left mirrors the corrected layout.
+- The pink glow: before it was mostly hidden by that background and, where visible, a fat even halo (~140 px beside
+  the eye's waist). Now it has its diamond taper: tight at the eye's middle rows (~70 px), wider toward the top and
+  bottom.
+- Ron's HW-captured defaults (v0.1.4: K1 620, K2 808, K3 683, K4 212, K5 454, P12 232) are unchanged, but they were
+  dialled in on the broken background, so the look at those defaults will differ; worth a fresh look.
+
+**Remaps:** none (group 1). **Sites left as-is:** none listed.
+
+**Build:** router1, all six on seed 1. HD Analog 89.14, HD HDMI 92.07, HD Dual 89.34 MHz (worst HD 89.14), SD Analog
+87.70, SD HDMI 90.93, SD Dual 89.12 MHz; 7,198-7,233 / 7,680 LC, 21 / 32 EBR. iceunpack OK on all six.
+
+**HD HDMI skew:** the builder's HD HDMI router1 s1 is **+1.18 / data <= -0.92**, inside the window, so it ships (no
+screen, no spare). HD Analog router1 s1 had data <= -0.31 (HDMI-pin metric), so HD Analog router1 s2-16 were routed
+and **router1 s9 (-1.27 / <= -1.33, 93.22 MHz)** installed. HD Dual router1 s1 (-1.37 / <= -0.67) kept.
+**Shipped seeds: HD Analog = router1 s9, the other five router1 s1.** Worst HD now 89.34 MHz. v0.1.5 not flashed.

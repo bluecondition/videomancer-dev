@@ -826,7 +826,7 @@ begin
                 when 184 =>
                     if e_t14(17 downto 16) /= "00" then v_t := to_unsigned(65535, 18); else v_t := e_t14; end if;
                     m_a <= resize(v_t, 36); m_b <= v_t; m_acc <= (others => '0');
-                    v_s2 := 94 - signed(resize(shift_right(e_t14, 8), 9));
+                    v_s2 := to_signed(94, 9) - signed(resize(shift_right(e_t14, 8), 9));
                     if e_t14(17 downto 14) /= "0000" or v_s2 < 46 then n_s2 <= to_unsigned(46, 7);
                     else n_s2 <= unsigned(v_s2(6 downto 0)); end if;
                 when 203 =>
@@ -924,14 +924,14 @@ begin
             if q5_p(16) = '1' then q6_br <= (others => '1'); else q6_br <= q5_p(15 downto 8); end if;
             if q5_re > q5_c then q6_r <= q5_re; else q6_r <= q5_c; end if;
             -- 7: wall depths (h, clamped), socket dip = min(rise, fall) >= 0, cream index; bent r -> phi address
-            v_u := 780 - q6_u;
+            v_u := to_signed(780, 14) - q6_u;
             if v_u > 0 then q7_lp <= '1'; else q7_lp <= '0'; end if;
             if v_u > 1023 then q7_dl <= (others => '1'); else q7_dl <= unsigned(v_u(9 downto 0)); end if;
             v_u := q6_u - 2124;
             if v_u > 0 then q7_rp <= '1'; else q7_rp <= '0'; end if;
             if v_u > 1023 then q7_dr <= (others => '1'); else q7_dr <= unsigned(v_u(9 downto 0)); end if;
             v_u := shift_right(q6_u - 1240, 3);
-            v_w := 2028 - q6_u;
+            v_w := to_signed(2028, 14) - q6_u;
             if v_w < v_u then v_u := v_w; end if;
             if v_u < 0 then q7_dip <= (others => '0'); else q7_dip <= unsigned(v_u(9 downto 0)); end if;
             v_u := q6_u - 780;
