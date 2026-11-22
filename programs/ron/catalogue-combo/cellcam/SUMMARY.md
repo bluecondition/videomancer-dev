@@ -240,3 +240,28 @@ v0.1.0 (2026-09-11): HD 90.7 / 91.7 / 97.9 MHz, seed 1, 3,395–3,417 LC,
 v0.1.0: git 3fa438d (sources unchanged from 2026-09-11). v0.2.0 was never
 committed; its sources and vmprog are in the 2026-10-12/13 session
 scratchpad (cellcam_v020/) only.
+
+## v0.3.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`940 - e` as `e - 940`); the simulator
+is right, so sims always showed the intended picture. One site:
+- cellcam.vhd line 672 (stage 12, compose luma), S7 Edges = Only with S10 Ink = Black:
+  `s_ys12 <= 940 - signed(resize(s_ev11, 12))` -> `to_signed(940, 12) - signed(resize(s_ev11, 12))`.
+On hardware v0.3.2 computed edge - 940 (always under 64, clamped to black): with S7 = Only and Ink = Black (the
+Ink default) the screen went solid black (Tint Colour: only a faint chroma tint on the edges; Tint Mono: all
+black). v0.3.3 draws what was designed: black edge lines on white paper. Over mode and White ink were already
+right and are unchanged. No default / preset remaps (a switch site; no knob ran reversed). Nothing left as-is.
+The community copy ~/videomancer-community/programs/czartroniks/cellcam/cellcam.vhd (v0.3.2) carries the same
+line 672 and was NOT edited. Backups (v0.3.2 vhd / toml / vmprog): .heirloom_work/rb_cellcam/.
+
+Build (2026-11-21, `build_combo.sh cellcam` via the shared queue, router2 default): HD Analog 90.79 (s1),
+SD Analog 93.09 (s1), HD HDMI 89.70 (s1), SD HDMI 80.55 (s1), **HD Dual 92.79 (seed 2: seed 1 stalled
+router2 under heavy machine load)**, SD Dual 87.28 (s1) MHz; 5346-5367 LC (70 %), 25 / 32 EBR; all six pass
+iceunpack.
+
+HD HDMI skew: the builder's HD HDMI router2 s1 was -0.10 / <= -1.54 (a NEGATIVE HSYNC). Screened HD HDMI
+router1 + router2 s1-40 (75 routed, all timing-clean): two in the window. Installed **HD HDMI router2 s12
+(+1.07 / <= -1.40, 85.90 MHz)**; spare router2 s18 (+1.04 / <= -1.83, 86.85 MHz),
+.heirloom_work/rb_cellcam/skew/cellcam_v033_spare_hd_hdmi_router2_s18.vmprog. HD Analog router2 s1 had data
+<= -0.44: installed **HD Analog router1 s15 (-2.10 / <= -1.44, 93.10 MHz)**. HD Dual router2 s2 (-2.13 /
+<= -0.92) kept. Shipped vmprog: out/rev_b/ron/catalogue-combo/cellcam.vmprog (v0.3.3).

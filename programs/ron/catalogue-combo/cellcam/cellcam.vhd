@@ -669,7 +669,7 @@ begin
             -- 12: compose luma; Only-mode colour product
             if s_sw_only = '1' then
                 if s_sw_white = '1' then s_ys12 <= signed(resize(s_ev11, 12)) + 64;
-                else s_ys12 <= 940 - signed(resize(s_ev11, 12)); end if;
+                else s_ys12 <= to_signed(940, 12) - signed(resize(s_ev11, 12)); end if;
             else
                 if s_sw_white = '1' then s_ys12 <= signed(resize(s_y11, 12)) + signed(resize(s_ev11, 12));
                 else s_ys12 <= signed(resize(s_y11, 12)) - signed(resize(s_ev11, 12)); end if;
