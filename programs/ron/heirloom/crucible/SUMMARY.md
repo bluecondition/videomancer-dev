@@ -308,3 +308,56 @@ router1 2`). Same RTL and TOML (version only). The flashed v0.2.0 vmprog is kept
 `.heirloom_work/rb_crucible/crucible_v020_flashed_hdhdmi_s1.vmprog`; the router1 s38 spare (+1.18 / ≤ −1.26) stays in
 `skew/`. HD Analog / HD Dual were not screened (the screen was cut off) and keep the builder's seed 1. A full builder
 rebuild re-routes HD HDMI on seed 1: re-run the install afterwards.
+
+## v0.2.2: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` becomes `x - N`); the GHDL simulator
+is correct, so every sim showed the intended picture while the hardware did not. Audit list:
+`.heirloom_work/ghdl_sub_check/fix/lists/crucible.txt`.
+
+**Sites fixed** (`to_signed(N, w) - x`, every other operand and width unchanged, so the hardware now computes what
+the simulator always did):
+- **Line 542, K5 Lenses lower half** (lens threshold th, which sets the lens column's size):
+  `166 - v_d/2 - v_d/8` had built as `v_d/2 - 166 - v_d/8`.
+  - **Was on hardware:** just below 512 the lenses snapped to slivers. Turning K5 further down grew them back, to
+    th +26 at 0 (smaller than the photo), so the lower half ran backwards with a jump at the centre. The upper half
+    was right.
+  - The default 512 sat in the correct branch. But the K5 glide's ±2-count deadband could settle at 510/511 and show
+    slivers in place of the photo's lenses.
+  - **Now:** the lenses shrink smoothly from the photo's size at 512 to slivers at 0. The default is robust.
+- **Line 783, S8 Flip** (the figure / lens row coordinate vf = 1030 − virtual line): had built as line − 1030, which
+  clamped to row 0.
+  - **Was on hardware:** Flip On wiped the figure. The figure zone, border and lens row stayed at row 0's geometry
+    down the frame, so the black figure vanished and the lens column became one full-height bar. Only the flame
+    stripes still rolled.
+  - **Now:** Flip turns the figure upside down (diamond on top), and the lens chirp flips with it.
+  - The "Torn Flip" preset changes accordingly. On hardware it had been the wiped picture.
+
+**Remaps:** none. K5's default is 512 and no preset sets K5 below 512. Flip defaults Off.
+
+**Left as-is on purpose** (part of Ron's approved look): line 639 (K4 Morph) and lines 948 / 952 / 954 (the P12
+Heat thresholds). `scan.py` still lists these four.
+
+**Build:** router1, all six on seed 1 (log `.heirloom_work/ghdl_sub_check/fix/logs/crucible.log`).
+- Builder Fmax (MHz): HD Analog 84.25, SD Analog 89.23, HD HDMI 85.40, SD HDMI 86.68, HD Dual 84.73, SD Dual 94.73.
+- 7,190–7,217 / 7,680 LC (94 %), 25 / 32 EBR. iceunpack OK ×6.
+- **Shipped HD placements** (hand-installed, see skew below):
+  - HD HDMI router1 s53, 80.35 MHz.
+  - HD Analog router1 s2, 85.11 MHz.
+  - HD Dual builder s1, 84.73 MHz.
+  - Worst shipped HD: 80.35 MHz.
+
+**HD HDMI skew.**
+- v0.2.1 shipped router1 s2 (+2.02 / ≤ −0.89) on the old netlist. The v0.2.2 builder's HD HDMI router1 s1 sat at
+  **−1.70** / ≤ −1.52, a negative HSYNC, so it could not ship.
+- **Screen:** hd_hdmi router1 + router2 seeds 1–60, 113 routed (7 router2 timeouts), 66 timing-clean, 4 in the window.
+- **Installed HD HDMI router1 s53: +1.37 / ≤ −1.03, 80.35 MHz.**
+- **Spare:** router1 s55 (+1.08 / ≤ −1.08, 87.83 MHz) in
+  `.heirloom_work/rb_crucible/skew/crucible_v022_spare_hd_hdmi_router1_s55.vmprog`.
+  - Also in the window: router1 s13 (+1.22 / ≤ −0.62) and router2 s15 (+1.05 / ≤ −0.73, 75.68 MHz).
+- **HD Analog:** s1 (+2.24 / ≤ +0.03, data too late) → **router1 s2 (−1.29 / ≤ −2.22)**.
+- **HD Dual:** s1 (−0.72 / ≤ −1.03) kept.
+- **Housekeeping:** the v0.2.0 screen and its spares moved to `.heirloom_work/rb_crucible/skew_v020/`. The v0.2.1
+  VHDL, TOML and vmprog are in `.heirloom_work/rb_crucible/crucible_v021.*`.
+- **Rebuilding:** a builder rebuild re-routes seed 1. Re-run `install.sh crucible router1 53` and
+  `install.sh crucible router1 2 hd_analog` afterwards.

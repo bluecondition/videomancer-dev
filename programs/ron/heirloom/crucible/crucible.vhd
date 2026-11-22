@@ -539,7 +539,7 @@ begin
                             c_th8 <= resize(166 + shift_right(v_d, 1) - shift_right(v_d, 5) + shift_right(v_d, 7), 10);
                         else
                             v_d := signed(resize(512 - v_k, 12));
-                            c_th8 <= resize(166 - shift_right(v_d, 1) - shift_right(v_d, 3), 10);
+                            c_th8 <= resize(to_signed(166, 12) - shift_right(v_d, 1) - shift_right(v_d, 3), 10);
                         end if;
                     when 42 =>                                        -- heat (Q8): 0.75 p - 410
                         v_t13 := shift_left(resize(s_gp(12 downto 3), 13), 1) + resize(s_gp(12 downto 3), 13);
@@ -780,7 +780,7 @@ begin
                     if e_vy(18 downto 8) > 1079 then e_vl <= to_unsigned(1079, 11); else e_vl <= e_vy(18 downto 8); end if;
                 when 2 =>
                     if s_flip = '1' then
-                        v_vf := 1030 - signed(resize(e_vl, 13));
+                        v_vf := to_signed(1030, 13) - signed(resize(e_vl, 13));
                         if v_vf < 0 then e_vf <= (others => '0'); else e_vf <= unsigned(v_vf(10 downto 0)); end if;
                     else
                         e_vf <= e_vl;
