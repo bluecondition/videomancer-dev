@@ -1149,7 +1149,7 @@ begin
                 px_N  <= f_mir;
                 px_A  <= resize(f_al, 13);
                 px_Q0 <= wl_Q0;
-                px_X  <= 1 - m_W2;
+                px_X  <= to_signed(1, 12) - m_W2;
             end if;
 
             if g_go_a = '1' then

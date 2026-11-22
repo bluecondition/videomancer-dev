@@ -304,3 +304,64 @@ A rebuild does not reproduce the picks: re-route the solo seeds and repack.
   - g_go is registered and duplicated;
   - the zoom octave has one copy per consumer;
   - MRD shifts in two registered steps.
+
+## v0.4.9: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` becomes `x - N`); the GHDL simulator
+is correct, so every sim (and the v0.4.8 full-HD sims) showed the intended folds. Audit list:
+`.heirloom_work/ghdl_sub_check/fix/lists/damier.txt`.
+
+**TOML check first.** S7 Mirror and S9 Kaleido both default Off, so the default look is unchanged and the fix went
+ahead.
+
+**Site fixed:**
+- **Line 1152:** `px_X <= to_signed(1, 12) - m_W2`. This is the per-line start of the pixel X counter, 1 − W/2.
+  - It sets each pixel's fold step: px_N (the step sign, negative left of centre when Mirror is on) and px_A (|X|,
+    compared with the folded Q0 for the Kaleido diagonal fold).
+  - It had built as W/2 − 1, so X started positive and went negative only when it wrapped.
+- The line has been like this since v0.1, so every build Ron has flashed, including the signed-off v0.4.5, had these
+  folds broken.
+
+**What changes on hardware** (Mirror Off and Kaleido Off are unchanged):
+- **S7 Mirror:**
+  - **Was:** at 1080p the fold sat about 129 px right of centre (x ≈ 1089), and the left part of the screen showed the
+    off-screen outer lattice. At 720p and SD there was no fold at all, only a plain lattice shifted by a screen.
+  - **Now:** a bilateral fold about the screen centre at every resolution.
+- **S9 Kaleido:**
+  - **Was:** the per-pixel diagonal fold never happened. With Mirror Off it gave a vertical seam at x ≈ 1089 instead.
+  - **Now:** a fold along |X| = |Y|, the intended 8-fold kaleidoscope.
+- **Presets:** "Kaleidoscope" (Mirror + Flip + Kaleido) and "Chevron Pop" (Mirror) will look different from what
+  Ron has seen on hardware. They were hand-tuned from sims, so they now match their design.
+- **Hardware A/B:** the audit suggested one before replacing an approved look. The v0.4.8 vmprog is in
+  `.heirloom_work/rb_damier/damier_v048.vmprog`.
+
+**Remaps:** none (switches only).
+
+**Left as-is on purpose:** line 1357 (`128 - v_t`), a scanner false positive. The community copy was not touched.
+
+**Build:** `./build_programs.sh ron damier` via the shared queue, router2, all six on seed 1 (log
+`.heirloom_work/ghdl_sub_check/fix/logs/damier.log`).
+- Builder Fmax (MHz): HD Analog 84.89, SD Analog 81.88, HD HDMI 91.28, SD HDMI 90.78, HD Dual 90.02, SD Dual 90.75.
+- 5,912–5,954 / 7,680 LC (77 %), 15 / 32 EBR. iceunpack OK ×6.
+
+**HD placements** (hdmi_pin_skew screen, `.heirloom_work/rb_damier/skew/`). Router2 s1 re-routes reproduced all three
+builder bins byte-exact.
+
+| Config | Shipped | Fmax (MHz) | HDMI hs-clk / closest data (ns) |
+|---|---|---|---|
+| HD HDMI | **router1 s6** (hand-installed) | 92.56 | +1.56 / −0.93 |
+| HD Analog | router2 s1 (builder) | 84.89 | +1.69 / −1.04 |
+| HD Dual | router2 s1 (builder) | 90.02 | −1.97 / −1.44 |
+
+- **Why HD HDMI was re-seeded:** the builder's router2 s1 sat at +0.84 / ≤ **+0.36**, with HSYNC under the window and
+  data on the wrong side.
+- **Screen:** hd_hdmi router1 + router2 seeds 1–40, 74 routed (6 router2 timeouts), all timing-clean, 9 in the window.
+- **Why s6:** it has the best data margin in the window with HSYNC near its centre. Data margin is what separated
+  good from bad damier builds on hardware (v0.4.1).
+- **Spare:** HD HDMI router2 s19 (+1.86 / ≤ −0.85, 85.32 MHz) in
+  `.heirloom_work/rb_damier/skew/damier_v049_spare_hd_hdmi_router2_s19.vmprog`.
+- **HD Analog and HD Dual:** builder seeds kept, since both have data ≤ −0.6. They replace v0.4.8's HD Analog
+  router2 s3.
+- **Backups:** the v0.4.8 VHDL, TOML, vmprog and the six installed bins are in `.heirloom_work/rb_damier/`.
+- **Rebuilding:** a rebuild re-routes seed 1, so re-run `.heirloom_work/skew_tools/install.sh damier router1 6`
+  afterwards. For a preset-only change, regenerate program_config.bin and repack as before.
