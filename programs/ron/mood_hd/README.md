@@ -63,3 +63,22 @@ Breathing (power-on look), Ring Grid, Fringe, Auto All.
 ## License
 
 GPL-3.0-only. Copyright (C) 2026 czartroniks.
+
+## v0.1.1: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 1002** (visible): CLEAN render (MOOD HD) RING: coverage offset for the band interior shrunk by W (one
+  reference unit) on the larger-distance side; ring = HOLE band minus that core, giving uniform-width outlines on
+  BOTH band edges. On hardware it was: fr_ka = W - 32: that side's inset becomes an outset of W - 1 px, so the core
+  reaches past the band's outer edge and cancels it. Ring draws only the outline just outside the SMALLER diamond
+  (width W); the larger diamond's outline is missing (for W < 1 px it would be 1 px - W wide). Bands narrower than W
+  still show …
+
+**Build** v0.1.1: HD Analog 97.82, SD Analog 97.75, HD HDMI 96.66, SD HDMI 97.07, HD Dual 96.88, SD Dual 95.62.
+5334-5350 / 7680 LC, 21 / 32 EBR; all six seed 1. iceunpack OK. Not simulated, not flashed.
+**HD skew**: HD HDMI builder seed kept router1 s1 (+1.56 / <= -0.60, 96.66 MHz) | hd_analog kept router1 s1 (+1.07 /
+<= -0.80, 97.82 MHz) | hd_dual kept router1 s6 (-1.74 / <= -1.36, 98.77 MHz). A full builder rebuild re-routes seed 1:
+re-install the seeds with `.heirloom_work/skew_tools/install.sh` afterwards.
