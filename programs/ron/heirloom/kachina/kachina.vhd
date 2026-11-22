@@ -777,7 +777,7 @@ begin
                         if e_v < 0 then e_v <= e_v + 18816;
                         elsif e_v >= 18816 then e_v <= e_v - 18816; end if;
                     when 23 =>   -- mirror at 588 rows
-                        if e_v >= 9408 then e_v <= 18815 - e_v; end if;
+                        if e_v >= 9408 then e_v <= to_signed(18815, 17) - e_v; end if;
                     when 24 =>   -- slot = v * 445 >> 14 (445 = 512 - 64 - 3)
                         e_t1 <= shift_left(resize(unsigned(e_v(13 downto 0)), 24), 9) - shift_left(resize(unsigned(e_v(13 downto 0)), 24), 6);
                         e_t3 <= resize(unsigned(e_v(13 downto 0)), 16) + shift_left(resize(unsigned(e_v(13 downto 0)), 16), 1);
