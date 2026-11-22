@@ -113,3 +113,24 @@ emulator equals the model's per-field arithmetic on 3,000 random knob / switch /
   near the foci").
 - The leftmost 7 pixels of each line take the camera value of the line above (the coarse store's first
   column is not yet written); invisible.
+
+## v0.1.1: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 934** (subtle): Targets + Bold: signed distance into each film's band (band = half the period, centred on
+  1/2): u = 1/4 period - |pp - 1/2|, positive inside the band. Coverage = 128 + scaled u. On hardware it was:
+  Computes v_a - 4096, so both films' coverage inverts (cov -> 256 - cov, and the 'other film solid' flags flip with
+  it). The band is exactly half a period, so this is the same as moving both ring targets by half a ring. Targets
+  Ink (XOR) is unchanged (symmetric). Targets Grey Bold shows the rings half a spacing over …
+- Left as-is (part of a look Ron approved, or a scanner false positive): line 985
+
+**Build** v0.1.1, router2: HD Analog 79.60, SD Analog 86.45, HD HDMI 79.85, SD HDMI 78.43 (s2), HD Dual 82.82, SD Dual
+85.79. 6298-6317 / 7680 LC, 20 / 32 EBR; seeds other than 1: SD HDMI. iceunpack OK. Not simulated, not flashed.
+**HD skew**: HD HDMI router2 s1 (+0.80 / <= -0.48, 79.85 MHz) -> router2 s26 (+1.53 / <= -0.77, 88.02 MHz) | hd_analog
+n/a -> router1 s16 (-2.58 / <= -0.73, 86.16 MHz) | hd_dual n/a -> router1 s5 (-2.19 / <= -1.54, 91.32 MHz) | spare HD
+HDMI router2 s31 (+1.02 / <= -1.78, 91.11 MHz):
+/home/ron/videomancer-dev/.heirloom_work/rb_cassini/skew/cassini_v011_spare_hd_hdmi_router2_s31.vmprog. A full builder
+rebuild re-routes seed 1: re-install the seeds with `.heirloom_work/skew_tools/install.sh` afterwards.

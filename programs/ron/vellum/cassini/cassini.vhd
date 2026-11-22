@@ -931,7 +931,7 @@ begin
                         if p13_pp(j)(13) = '1' then v_a := p13_pp(j)(12 downto 0); else v_a := not p13_pp(j)(12 downto 0); end if;
                     end if;
                     if s_fine = '1' then p14_u(j) <= signed(resize(v_a, 14));
-                    else p14_u(j) <= 4096 - signed(resize(v_a, 14)); end if;
+                    else p14_u(j) <= to_signed(4096, 14) - signed(resize(v_a, 14)); end if;
                 end if;
             end loop;
             for k in 11 to 14 loop p_n(k) <= p_n(k - 1); p_hf(k) <= p_hf(k - 1); p_f(k) <= p_f(k - 1); end loop;
