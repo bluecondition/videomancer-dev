@@ -512,13 +512,13 @@ begin
                     when 98  =>
                         z_a <= resize(f_acc(30 downto 15), 22);
                         -- exponent 2: columns, Q8 octaves = (512 - k2) / 2; read -e2 now, +e2 at 124
-                        v_e := shift_right(512 - signed(resize(s_g2(12 downto 3), 11)), 1);
+                        v_e := shift_right(to_signed(512, 11) - signed(resize(s_g2(12 downto 3), 11)), 1);
                         v_en := -v_e;
                         r_ex_a <= unsigned(v_en(7 downto 0)); z_sh2n <= v_en(10 downto 8);
                     when 100 => z_mt2n <= r_ex_q;
                     when 122 => v_q := f_shq(f_acc, z_sh2n); c_slp8 <= v_q(15 downto 0);
                     when 123 =>
-                        v_e := shift_right(512 - signed(resize(s_g2(12 downto 3), 11)), 1);
+                        v_e := shift_right(to_signed(512, 11) - signed(resize(s_g2(12 downto 3), 11)), 1);
                         r_ex_a <= unsigned(v_e(7 downto 0)); z_sh2 <= v_e(10 downto 8);
                         case to_integer(s_xs) is
                             when 4      => c_slpx <= shift_left(resize(c_slp8, 18), 2);
@@ -705,7 +705,7 @@ begin
                     v_a12 := e_ph(23 downto 12);
                     v_d := signed(resize(v_a12, 13)) - 2048;
                     if v_d < 0 then v_d := -v_d; end if;
-                    v_t := 2047 - v_d;
+                    v_t := to_signed(2047, 13) - v_d;
                     e_tri <= v_t(11 downto 0);
                     n_ph <= e_bp(15 downto 13);
                     if e_xs(27 downto 16) >= C_XC_H then n_xl <= (others => '0');

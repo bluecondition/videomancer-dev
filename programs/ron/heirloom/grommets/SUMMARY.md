@@ -164,3 +164,33 @@ K1 Lattice 347, K2 Columns 660, K3 Rows 395, K4 Speed 177, K5 Stems 1023, S10 Ne
 S7-S9, S11 unchanged). K5 is continuous (glided, squared), so 1023 loads as dialled. The vmprog was repacked from
 the v0.1.1 bitstreams (only the settings block differs, 222 bytes), so timing, seeds and LC are as in v0.1.1.
 Presets are unchanged.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`512 - x` becomes `x - 512`); the simulator
+is correct, so every sim showed the intended picture while the hardware differed.
+- **Sites fixed** (same widths, now `to_signed(N, w) - x`):
+  - lines 515 and 521, the K2 Columns exponent `e2 = (512 - k2) / 2` (515 is read as -e2 for the slope SLP8; 521 as
+    +e2 for the half period HP and the stem base / DDA steps). Fixed together, so slope and fold stay in step;
+  - line 708, S9 Shape = Diamond: the per-line triangle `2047 - |phase - 2048|`.
+- **On hardware, before -> after.**
+  - K2 ran mirrored about 512 (0 = 4 holes across, 1023 = 1 hole). Now clockwise gives more, closer holes
+    (1 .. 4 across), as designed.
+  - Diamond: on hardware the triangle came out negated, so the V term ran 0..-GV: the diamond rows sat half a
+    vertical period off and the whole field was lowered by GV, putting the holes / rings at the wrong zone level.
+    Now Diamond draws the intended diamond holes and straight contours. Round (the default) is unaffected; the
+    Diamonds preset (S9 on) changes.
+- **Remaps (keep Ron's captured look exactly).** The decode is `(512 - k2) >> 1`, so `k -> 1024 - k` gives the
+  identical exponent the hardware ran (e2 = 74 at both): default K2 Columns 660 -> 364; preset Four Across K2
+  1023 -> 1. Note: Four Across was hand-written for the design's direction (1023 = four holes across) but showed one
+  hole across on hardware; the mirror keeps the hardware look (one across), so set it back to 1023 if the name should win.
+- **Left as-is:** no other audited sites in this program.
+- **Build:** router1, all six on seed 1. HD Analog 90.82, HD HDMI 87.67, HD Dual 92.45, SD Analog 93.82, SD HDMI
+  93.61, SD Dual 86.29 MHz (builder seeds); 6,687-6,710 / 7,680 LC, 23 / 32 EBR. iceunpack OK x6.
+- **Skew:** the builder's HD HDMI router1 s1 sat at **-0.05** / <= -0.88 (negative HSYNC). The netlist places HSYNC
+  low: r1 + r2 s1-80 (104 timing-clean) had nothing in the window, so the screen ran on to s160 (198 clean, 4 in the
+  window). Installed **HD HDMI router2 s110 (+2.02 / <= -0.94, 74.72 MHz: thin but passing)**; HD Analog r1 s1
+  (-0.92 / <= -0.10, data too late) -> **router1 s6 (-1.86 / <= -1.51, 88.73 MHz)**; HD Dual r1 s1 (-1.31 / <= -0.29)
+  -> **router1 s2 (-2.09 / <= -1.02, 93.21 MHz)**. Spare HD HDMI router1 s131 (+1.18 / <= -0.60, 95.65 MHz, for wide
+  timing margin): `.heirloom_work/rb_grommets/skew/grommets_v013_spare_hd_hdmi_router1_s131.vmprog`.
+  v0.1.3 not flashed yet.
