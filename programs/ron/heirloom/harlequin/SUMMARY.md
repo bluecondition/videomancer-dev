@@ -233,3 +233,37 @@ Ron flashed v0.1.5 (the HD HDMI re-seed) and captured a new look with `./capture
 K1 Diamonds 592, K2 Stripes 646, K3 Waist 631, K4 Bend 284, K5 Glass 461, K6 Etch 1023, P12 V-Hold 0 (S9 Core stays
 On; S7, S8, S10, S11 unchanged). Repacked from v0.1.5's bitstreams (HD HDMI router1 s43 verified in place); the spare
 was repacked with the same defaults (`skew/harlequin_v016_spare_hdhdmi_router2_s15.vmprog`, replacing the v0.1.5 one).
+
+## v0.1.7: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 767** (major): Rhombus (S7) shaper: fold the distance to the main diamond row (centre line 370) over the
+  1150-line roll cycle, d1 = min(a, 1150 - a), so the triangle widths are symmetric. On hardware it was: Rows with a
+  > 575 get a - 1150 = -d1 (negative) instead of +d1. Combined with line 771 these rows go to 0 width. Visible
+  effect (with the other five sites): in S7 Rhombus the orange cores and lemons vanish entirely, leaving only
+  stripes (hard-synced at the diamond centre line, since hb = 0, with the bend reversed …
+- **line 768** (major): Same cycle fold for the band-row distance d2 (centre line 940). On hardware it was: Wrapped
+  rows get -d2. In practice band rows (792..1071) never wrap (|vl - 940| <= 148), so this site alone changes nothing
+  visible; the band width is killed by line 771 instead.
+- **line 769** (major): Same cycle fold for the glass distance d3 (centre line 362). On hardware it was: Rows
+  938..1149 (a > 575) get -d3; then line 772 gives -d3 - 492 < 0, so no glass there.
+- **line 771** (major): Band rows: core/lemon triangle half-width = 150 - d2 (a flat diamond 150 lines tall about
+  line 940), clamped at 0 next step, then x325/256 (core) and x352/256 (lemon). On hardware it was: Computes d2 -
+  150, which is negative for every band row (d2 <= 148), so the clamp makes the band diamonds' width 0: no band
+  diamonds in Rhombus.
+- **line 771** (major): Main rows: core/lemon triangle half-width = 420 - d1 (straight-sided diamond, 840 lines tall
+  about line 370). On hardware it was: Computes d1 - 420 (or -d1 - 420 on wrapped rows): positive only in rows
+  790-791 (1-2 units), so the main diamonds are gone too. Rhombus shows no cores and no lemons at all.
+- **line 772** (major): Glass triangle half-width = 492 - d3 (a big glass diamond about line 362), x223/256, then x
+  K5 Glass. On hardware it was: Computes d3 - 492: positive only for rows 855..937 (up to 83 -> ~72 after x223/256),
+  so instead of a large glass diamond around each lemon there is a small wedge that grows downward and cuts off
+  sharply at row 937, once per roll cycle.
+
+**Build** v0.1.7, router1: HD Analog 80.53, SD Analog 89.62, HD HDMI 89.73, SD HDMI 85.49, HD Dual 81.89, SD Dual
+86.77. 7009-7030 / 7680 LC, 24 / 32 EBR; all six seed 1. iceunpack OK. Not simulated, not flashed.
+**HD skew**: HD HDMI router1 s1 (-1.32 / <= -2.57, 89.73 MHz) -> router2 s15 (+1.14 / <= -0.94, 77.67 MHz) | hd_analog
+kept router1 s1 (-1.98 / <= -0.67, 80.53 MHz) | hd_dual kept router1 s1 (-1.37 / <= -0.66, 81.89 MHz). A full builder
+rebuild re-routes seed 1: re-install the seeds with `.heirloom_work/skew_tools/install.sh` afterwards.

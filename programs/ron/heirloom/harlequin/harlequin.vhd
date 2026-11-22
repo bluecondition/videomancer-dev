@@ -764,12 +764,12 @@ begin
                 when 30 =>
                     e_t1 <= abs(e_t1); e_t2 <= abs(e_t2); e_t3 <= abs(e_t3);
                 when 31 =>
-                    if e_t1 > 575 then e_t1 <= 1150 - e_t1; end if;
-                    if e_t2 > 575 then e_t2 <= 1150 - e_t2; end if;
-                    if e_t3 > 575 then e_t3 <= 1150 - e_t3; end if;
+                    if e_t1 > 575 then e_t1 <= to_signed(1150, 12) - e_t1; end if;
+                    if e_t2 > 575 then e_t2 <= to_signed(1150, 12) - e_t2; end if;
+                    if e_t3 > 575 then e_t3 <= to_signed(1150, 12) - e_t3; end if;
                 when 32 =>
-                    if e_band = '1' then e_t1 <= 150 - e_t2; else e_t1 <= 420 - e_t1; end if;
-                    e_t3 <= 492 - e_t3;
+                    if e_band = '1' then e_t1 <= to_signed(150, 12) - e_t2; else e_t1 <= to_signed(420, 12) - e_t1; end if;
+                    e_t3 <= to_signed(492, 12) - e_t3;
                 when 33 =>
                     if e_t1 < 0 then e_t1 <= (others => '0'); end if;
                     if e_t3 < 0 then e_t3 <= (others => '0'); end if;

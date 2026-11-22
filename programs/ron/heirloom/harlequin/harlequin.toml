@@ -1,12 +1,13 @@
 # Harlequin - Heirloom (video phase), built 2026-11-10 (v0.1.0; v0.1.1 smooth camera bend) from the clip WIN_20231218_00_10_10 at 0.5 s.
 # Orange lemon diamonds in violet / red stripes that hug each diamond's right side, a glass wash, a torn seam and a
 # squashed band, rolling up (V-hold).  See harlequin.vhd, harlequin.py and SUMMARY.md.
+# v0.1.7 (2026-11-21): GHDL integer-minus-signed fix (S7 Rhombus showed no cores / lemons on hardware).
 
 [program]
 processing_delay_clks = 24
 program_id = "com.czartroniks.harlequin"
 program_name = "Harlequin"
-program_version = "0.1.6"
+program_version = "0.1.7"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
