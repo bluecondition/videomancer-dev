@@ -1,0 +1,160 @@
+# Aperture - Kinetic (wave 2), 2026-11-22.
+# A wall of 8-blade iris diaphragms opening and closing in a travelling wave (the camera iris; the mechanical-iris
+# facade of the Institut du Monde Arabe).  See aperture.vhd, aperture.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 27
+program_id = "com.czartroniks.aperture"
+program_name = "Aperture"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Grid"]
+program_type = "processing"
+description = "A wall of eight-blade iris diaphragms opening and closing in a travelling wave; bright camera areas open them."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 240
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Shape"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 260
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Depth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 646
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 16
+initial_value = 480
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Smooth", "Snap"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Linear", "Radial"]
+initial_value_label = "Linear"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Hole"
+value_labels = ["Glass", "Video"]
+initial_value_label = "Glass"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Pack"
+value_labels = ["Square", "Stagger"]
+initial_value_label = "Square"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Open"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 460
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Iris Wall"
+
+[[preset]]
+name = "Portholes"
+rotary_potentiometer_1 = 330
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_5 = 160
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Shutter Snap"
+rotary_potentiometer_1 = 120
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 760
+rotary_potentiometer_4 = 720
+toggle_switch_7 = 1
+linear_potentiometer_12 = 420
+
+[[preset]]
+name = "Radial Bloom"
+rotary_potentiometer_1 = 160
+rotary_potentiometer_3 = 820
+rotary_potentiometer_5 = 224
+toggle_switch_8 = 1
+linear_potentiometer_12 = 380
+
+[[preset]]
+name = "Lens Wall"
+rotary_potentiometer_1 = 100
+rotary_potentiometer_2 = 640
+rotary_potentiometer_3 = 420
+toggle_switch_9 = 1
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Brass Brick"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 560
+rotary_potentiometer_5 = 800
+toggle_switch_10 = 1
+linear_potentiometer_12 = 500
