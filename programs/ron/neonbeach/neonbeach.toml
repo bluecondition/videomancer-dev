@@ -1,11 +1,11 @@
-# NEON BEACH (v0.5.2, 2026-11-22: the wet-sand sweep wrote each cell from the one above it, so wetness slid down the sand every field: fixed).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+# NEON BEACH (v0.5.3, 2026-11-22: every sand square keeps its diagonal, in a random direction per square; v0.5.2 fixed the wet-sand sweep).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 # See neonbeach.vhd, neonbeach.py and PLAN.md.
 
 [program]
 processing_delay_clks = 33
 program_id = "com.czartroniks.neonbeach"
 program_name = "Neon Beach"
-program_version = "0.5.2"
+program_version = "0.5.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

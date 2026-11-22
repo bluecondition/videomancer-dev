@@ -8,7 +8,8 @@ turn white; under everything the sand, a mesh of quads. When a wave lands, a was
 it covers turn into triangles in the water's colour, and as it drains they revert a triangle at a time, leaving
 the sand dark and wet. A small faceted crab walks the sand and runs from the wash.
 
-**Status: v0.5.2 (2026-11-22): the wet-sand sweep's write-back was one clock early, so the wetness map slid one
+**Status: v0.5.3 (2026-11-22): every sand square keeps its diagonal, in a random direction per square (see
+"v0.5.3" below). v0.5.2: the wet-sand sweep's write-back was one clock early, so the wetness map slid one
 row down the sand every field (the "constant washing" on hardware since v0.3.0): fixed and checked in RTL.
 v0.5.0 made K6 Speed (no input video: a synthesis program now), the Crab switch Off / On, and drying sand fade
 back smoothly; see "v0.5.0" .. "v0.5.2" below.** Flash
@@ -59,8 +60,8 @@ shoreline and fixes the engine's timing; v0.3.2 (HW-captured defaults) was the f
   register: the tags must run three stages, see v0.5.2). 15 = under the wash, 14 = only its upper triangle, then 12 .. 1 drying one step every 12 fields
   (13 = damp and held: the sea bed's top row, the crab's hole). The
   reach thins over the last columns before the shoreline (v0.3.1; it ended in a vertical cut). The
-  pixel path draws 15 and 14 as wash triangles; drying cells keep their diagonals (the upper triangle's longer)
-  and lose them by a per-cell hash, so the triangles disappear piecemeal. Wet sand fills darker: 8 ramp steps a
+  pixel path draws 15 and 14 as wash triangles. Every cell has a diagonal, wet or dry, "/" or "\" by a per-cell
+  hash (v0.5.3; before, only damp cells had one, all the same way). Wet sand fills darker: 8 ramp steps a
   wetness step less the fields since the last step (round(8 x div / 12)), so fresh wet sand is dark brown and
   fades back smoothly to the (light) dry sand over about 2.4 s.
 - **Per-field colours.** The colour table is a block RAM (seeded from `C_NB_PAL`). In vblank the colour path is
@@ -83,7 +84,7 @@ shoreline and fixes the engine's timing; v0.3.2 (HW-captured defaults) was the f
 | 5 | water | layer parity, column parity | everything rides the wave surface; the columns sway |
 | 6 | foam squares | knot parity, square-row parity | squares turn white and fade, reshuffled 4 times a second |
 | 7 | wash (covered sand triangles) | column, row, upper triangle | arrives and drains a triangle at a time |
-| 8 | sand | column, row, the diagonal while damp | diagonals vanish as it dries |
+| 8 | sand | column, row, the cell's diagonal (either way, by a hash) | darkens under the wash and fades back |
 | 9 | crab | sprite zone, creases (facet bands) | walks, legs alternate |
 
 Spray and stars are overlays.
@@ -305,3 +306,26 @@ Built 2026-11-22 with **router1**, all six on seed 1, 28 / 32 block RAMs:
 | SD Dual | 1 | 84.20 MHz | 7257 |
 
 7,257 / 7,680 LC (94.5 %).
+
+## v0.5.3: a diagonal through every sand square (2026-11-22)
+
+Ron on v0.5.2: "i liked having the diagonal line through every square of the grid of sand, but can you make them
+randomly rotate a different direction so they're not all the same". (The sliding bug had kept every cell damp, so
+every cell showed its diagonal; with the fix only wet cells did.) Now every sand cell always has its diagonal, and
+its direction comes from a per-cell hash: `T1[(col + 11 row) mod 64] xor T2[(5 col + row) mod 64]`, two 64-bit
+tables. Checked over 64 x 20 cells: balanced, neighbours within 2 % of chance, no shift repeats (worst 8 % off
+chance); two tables on coordinate bits alone repeated every 32 columns. The wash still takes a cell's upper
+triangle first (the upper-left one in a flipped cell). Drying cells no longer lose their diagonals.
+
+Built 2026-11-22 with **router1**, all six on seed 1, 28 / 32 block RAMs:
+
+| Config | Seed | Post-route Fmax | LC |
+|---|---|---|---|
+| HD Analog | 1 | 79.25 MHz | 7263 |
+| SD Analog | 1 | 74.79 MHz | 7281 |
+| HD HDMI | 1 | 77.66 MHz | 7279 |
+| SD HDMI | 1 | 75.80 MHz | 7278 |
+| HD Dual | 1 | 78.63 MHz | 7277 |
+| SD Dual | 1 | 74.72 MHz | 7274 |
+
+7,281 / 7,680 LC (94.8 %).

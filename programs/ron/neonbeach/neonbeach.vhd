@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.5.2 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.5.3 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -30,8 +30,8 @@
 --                    running up the beach; it also runs the crab
 --   sand            under the bed line: cells 32 px wide and 32 rows deep, the rows parallel to the sand's
 --                    surface.  Wet sand (a 4-bit counter per cell, swept in vblank): the wash covers cells a
---                    triangle at a time; as it drains the cells keep their diagonals and lose them as they dry,
---                    and their colour fades back smoothly (a per-field fraction between the counter's steps)
+--                    triangle at a time and leaves them dark; their colour fades back smoothly (a per-field
+--                    fraction between the counter's steps).  Every cell has a diagonal, "/" or "\" by a hash
 --   crab            span-coded, folded about its centre line (slot B); walks, pauses, runs from the wash, burrows
 --                    when switched off and comes up somewhere new
 --
@@ -76,6 +76,11 @@ architecture neonbeach of program_top is
     -- sheen: which pulses show, by (pulse number, object): about three in five.  Never on the sand (object 8, the
     -- first bit of each byte): v0.3's bands running down the sand read as a constant pulsing.
     constant C_SHG : std_logic_vector(0 to 63) := x"3655_631A_6F4B_526D";
+    -- sand: which way each cell's diagonal runs: T1(col + 11 row) xor T2(5 col + row), indexes mod 64.  Checked
+    -- over 64 x 20 cells: balanced, neighbours and both diagonals within 2 % of chance, no shift matches more
+    -- than 8 % off chance (two tables of coordinate bits alone repeated every 32 columns).
+    constant C_DG1 : std_logic_vector(63 downto 0) := x"45E1B9523B6B6092";
+    constant C_DG2 : std_logic_vector(63 downto 0) := x"F61FE913F1D643E6";
 
     ---------------------------------------------------------------------------
     -- [A] timing-ID steps
@@ -401,8 +406,7 @@ architecture neonbeach of program_top is
     signal wd_ft : t_t7 := (others => (others => '0'));
     signal f14_in, sp14 : std_logic := '0';
     signal wd_up : std_logic_vector(10 to 13) := (others => '0');          -- the upper triangle of a sand cell
-    type t_h2 is array (10 to 13) of unsigned(1 downto 0);
-    signal wd_h : t_h2 := (others => "00");                                -- a 2-bit cell hash
+    signal w10_upb, w10_flp : std_logic := '0';                            -- the other diagonal; this cell takes it
     signal k14_wash : std_logic := '0';
     signal f14_sub : std_logic_vector(1 downto 0) := "00";
     signal f14_t : unsigned(6 downto 0) := (others => '0');
@@ -1004,6 +1008,7 @@ begin
         variable v_st8, v_d8 : unsigned(7 downto 0);
         variable v_j   : unsigned(3 downto 0);
         variable v_cx  : unsigned(6 downto 0);
+        variable v_hc, v_hr, v_ha, v_hb : unsigned(5 downto 0);
         variable v_fa, v_fb : unsigned(6 downto 0);
     begin
         if rising_edge(clk) then
@@ -1099,8 +1104,13 @@ begin
             wd_ss(10) <= w_xb(9)(5) & w9_sd(5) & '0';
             -- the wetness cell under this pixel (row of depth, column), its upper triangle, its hash
             wt_pa <= w9_sd(9 downto 5) & w_xb(9)(10 downto 5);
+            -- (every cell has its diagonal, "/" or "\" by the cell's hash: both tested here, chosen at 11)
             if w9_sd(4 downto 0) < w_xb(9)(4 downto 0) then wd_up(10) <= '1'; else wd_up(10) <= '0'; end if;
-            wd_h(10) <= (w_xb(9)(5) xor w9_sd(6)) & (w_xb(9)(6) xor w9_sd(5));
+            if w9_sd(4 downto 0) < not w_xb(9)(4 downto 0) then w10_upb <= '1'; else w10_upb <= '0'; end if;
+            v_hc := w_xb(9)(10 downto 5); v_hr := '0' & w9_sd(9 downto 5);
+            v_ha := v_hc + shift_left(v_hr, 3) + shift_left(v_hr, 1) + v_hr;
+            v_hb := v_hc + shift_left(v_hc, 2) + v_hr;
+            w10_flp <= C_DG1(to_integer(v_ha)) xor C_DG2(to_integer(v_hb));
             wd_inw(10) <= w9_inw; wd_ins(10) <= w9_ins;
             -- the water's columns: every 64 px of the swayed x
             v_cx := w_xb(9)(6 downto 0) + w9_sw;
@@ -1122,8 +1132,9 @@ begin
                 wd_st(i) <= wd_st(i - 1); wd_ss(i) <= wd_ss(i - 1);
                 wd_inw(i) <= wd_inw(i - 1); wd_ins(i) <= wd_ins(i - 1); wd_cp(i) <= wd_cp(i - 1);
                 wd_inf(i) <= wd_inf(i - 1); wd_sp(i) <= wd_sp(i - 1); wd_ff(i) <= wd_ff(i - 1); wd_ft(i) <= wd_ft(i - 1);
-                wd_up(i) <= wd_up(i - 1); wd_h(i) <= wd_h(i - 1);
+                wd_up(i) <= wd_up(i - 1);
             end loop;
+            if w10_flp = '1' then wd_up(11) <= w10_upb; end if;
             -- 13: always eight layers (switching the layer bit by depth drew stair-step verticals where the
             -- count changed); where they crowd near the shore they merge into a solid bright edge
             w13_q <= wd_q(12);
@@ -1131,20 +1142,11 @@ begin
             -- 14
             w14_in <= wd_inw(13); w14_sub <= w13_q(0) & wd_cp(13); w14_q <= w13_q;
             s14_in <= wd_ins(13);
-            -- the wash: 15 = the whole cell, 14 = its upper triangle.  Drying sand keeps its diagonals for a while
-            -- and loses them a triangle at a time (the upper ones last), by the cell's hash
+            -- the wash: 15 = the whole cell, 14 = its upper triangle.  Every sand cell keeps its diagonal, wet or
+            -- dry (v0.5.3: Ron liked the diagonal through every square; up to v0.5.2 only damp cells had it)
             v_wv := unsigned(wt_qf);
-            if v_wv = 15 or (v_wv = 14 and wd_up(13) = '1') then
-                k14_wash <= '1'; s14_sub <= wd_ss(13)(2 downto 1) & wd_up(13);
-            else
-                k14_wash <= '0';
-                if v_wv >= 14 or (wd_up(13) = '1' and v_wv >= 3 + resize(wd_h(13), 4))
-                   or (wd_up(13) = '0' and v_wv >= 8 + resize(wd_h(13), 4)) then
-                    s14_sub <= wd_ss(13)(2 downto 1) & wd_up(13);
-                else
-                    s14_sub <= wd_ss(13)(2 downto 1) & '0';
-                end if;
-            end if;
+            if v_wv = 15 or (v_wv = 14 and wd_up(13) = '1') then k14_wash <= '1'; else k14_wash <= '0'; end if;
+            s14_sub <= wd_ss(13)(2 downto 1) & wd_up(13);
             -- wet sand: 8 steps of the ramp a wetness step (v0.3: 4), so a fresh wash leaves the sand dark brown;
             -- drying cells (12 .. 1) give back the fraction since their last step (no step in the colour)
             if v_wv /= 0 and v_wv < 13 then v_st8 := w13_stp; else v_st8 := resize(wd_st(13), 8); end if;
