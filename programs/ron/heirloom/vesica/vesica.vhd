@@ -566,8 +566,8 @@ begin
                 f_cv <= signed('0' & f_hx0) + signed(resize(f_per2h, 13)) - 2027;
                 f_cc <= signed('0' & f_hx0) + signed(resize(f_per2h, 13)) - 1995;
                 f_cpv <= (others => '0');
-                f_uwV <= 1 - signed(resize(f_per2h, 13));
-                if f_cls = "01" then f_uwC <= -signed(resize(f_per2h, 13)); else f_uwC <= 1 - signed(resize(f_per2h, 13)); end if;
+                f_uwV <= to_signed(1, 13) - signed(resize(f_per2h, 13));
+                if f_cls = "01" then f_uwC <= -signed(resize(f_per2h, 13)); else f_uwC <= to_signed(1, 13) - signed(resize(f_per2h, 13)); end if;
             end if;
             if s_zone = '1' and (s_zc = 34 or s_zc = 35) then
                 if f_cv < 0 then f_cv <= f_cv + signed('0' & f_per2); f_cpv <= f_cpv - 1; end if;
@@ -896,9 +896,9 @@ begin
                 c_cC <= unsigned(f_cc(11 downto 0)); c_fwC <= f_fw0C; c_SC <= f_SC0; c_DC <= f_DC0;
                 -- crescent taper: half-px from the tip, rising (ta) and falling (tb) through the crescent
                 if n_bot = '0' then
-                    c_ta <= signed('0' & f_hx0) - 1210; c_tb <= 2690 - signed('0' & f_hx0);
+                    c_ta <= signed('0' & f_hx0) - 1210; c_tb <= to_signed(2690, 13) - signed('0' & f_hx0);
                 else
-                    c_ta <= signed('0' & f_hx0) - 1200; c_tb <= 2736 - signed('0' & f_hx0);
+                    c_ta <= signed('0' & f_hx0) - 1200; c_tb <= to_signed(2736, 13) - signed('0' & f_hx0);
                 end if;
             elsif g_avid = '1' then
                 c_phA <= c_phA + resize(f_kA, 24);

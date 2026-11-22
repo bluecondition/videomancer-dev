@@ -305,3 +305,40 @@ Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 2
   - Why the luma and not the gain: the K6 ROM word is full here (lens 2 | exponent 3 | mantissa 3). Its top, 896, has no ×1.25 step, since the exponent is capped at 7.
   - Headroom: |xm| ≤ 1120, E ≤ 8960 (15 bit), |F2 + E| ≤ 30.5 k (16 bit), lens ≤ 1280 (12 bit). Latency unchanged.
 - **Build** v0.6.2 (`k6build.sh diag vesica`), router1, all six seed 1. HD Analog 84.18, HD HDMI 82.26, HD Dual 74.72 MHz (worst HD 74.72, a thin margin). 7397–7423 / 7680 LC. `out/rev_b/ron/_diag/vesica_diag_v0.6.2.vmprog`. Not flashed. No render (diag copy).
+
+## v0.6.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 569** (major): Lens family V (the eye and its side copies): u at the first pixel after each fold wrap, u =
+  1 - per2h (negative). f_DVw = f_ddw(f_uwV) (= 2 xs u + xs^2, the X^2 DDA first difference) is computed from the
+  SIGNED value at … On hardware it was: f_uwV = per2h - 1 (positive): S is still right at the wrap but D starts
+  positive, so S grows as (|u0| + n xs)^2 from per2h^2 to 4 per2h^2 instead of falling to 0. dV is clamped to +511:
+  no lens, rim, inner rim or halo. The central eye is the fold AFTER the first wrap (wrap at x ~540 px at the photo
+  fold), so its whole …
+- **line 570** (major): Crescent family C: u after each fold wrap (= 1 - per2h at 1080p and SD, = -per2h at 720p via
+  unary minus); f_DCw = f_ddw(f_uwC) uses the signed value. The C family has no mid-fold reload, so this D drives
+  the crescent … On hardware it was: 1080p/SD (else branch): f_uwC = per2h - 1, D positive, so the crescent circle
+  seen in the central fold is X_eff = u + 2 per2h - 1, i.e. the circle centred one fold to the LEFT (x ~49 px), and
+  S = X_eff^2 overflows c_SC's 22 bits just right of the fold centre (X_eff = 2048 half-px). From the first C wrap
+  (x ~523 px) …
+- **line 899** (major): Top crescent taper: c_tb = 2690 - hx falls 2 690 -> across the line, c_ta rises; td =
+  min(ta, tb) is a tent that is 0 at the tips x 605 / 1345 px, so the crescent width min(0.866 td, w0) tapers to
+  points at both ends … On hardware it was: c_tb starts at hx0 - 2690 (-2690 at HD) and decrements, so td = tb is
+  hugely negative (no crescent) until the 13-bit counter wraps at x ~703 px (HD/720p); after the wrap td >= 198
+  everywhere, so the crescent starts almost blunt at x ~703 px and runs at full width to the RIGHT screen edge (past
+  its 1345 px tip, into …
+- **line 901** (major): Bottom crescent taper, as line 899 with tips at x 600 / 1368 px. On hardware it was: Same as
+  899 for the bottom crescent: nothing left of ~703 px (HD/720p; ~1184 virtual px at SD), then full width with a
+  blunt start to the right screen edge; no right tip.
+
+**Build** v0.6.3, router1: HD Analog 74.64 (builder seed; replaced by router1 s13, 79.56 MHz, whose HDMI data is <= -0.63 where seed 1 had +0.89), SD Analog 81.40, HD HDMI 80.10 (builder seed, replaced: see HD skew), SD HDMI 77.24, HD Dual 84.68 (s2), SD Dual
+82.06 (s2). 7387-7407 / 7680 LC, 24 / 32 EBR; seeds other than 1: HD Dual, SD Dual. iceunpack OK. Not simulated, not
+flashed.
+**HD skew**: NO WINDOW PLACEMENT exists (this netlist places HSYNC low; cf. chartreuse, lotus) in r1 s1-160 + r2 s1-40 (router1 max hs +0.33; router2 39-59 MHz): HD HDMI
+router1 s1 (-1.11 / <= -1.29, 80.10 MHz) -> router1 s49 (+0.33 / <= -0.94, 78.70 MHz, sub-window); spare router1 s81
+(+0.10 / <= -0.83, 83.40 MHz). A full builder rebuild re-routes seed 1: re-install the seeds with
+`.heirloom_work/skew_tools/install.sh` afterwards (HD HDMI router1 s49, HD Analog router1 s13). If HD HDMI shows thin
+flashing lines, that is this sub-window placement: try the spare, then report it.
