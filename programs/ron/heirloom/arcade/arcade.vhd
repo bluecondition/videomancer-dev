@@ -519,10 +519,10 @@ begin
 
                     -- exponents (Q8 octaves), exp2 lookups, the size ROM
                     when 28 =>
-                        z_d2 <= 512 - signed(resize(s_g2(12 downto 3), 11));
+                        z_d2 <= to_signed(512, 11) - signed(resize(s_g2(12 downto 3), 11));
                         z_d3 <= signed(resize(s_g3(12 downto 3), 11)) - 512;
                         z_d5 <= signed(resize(s_g5(12 downto 3), 11)) - 512;
-                        z_e1 <= shift_right(512 - signed(resize(s_g1(12 downto 3), 11)), 1);
+                        z_e1 <= shift_right(to_signed(512, 11) - signed(resize(s_g1(12 downto 3), 11)), 1);
                         r_sz_a <= s_gp(12 downto 5);
                     when 29 =>
                         z_m2 <= shift_left(resize(z_d2, 20), 7) + shift_left(resize(z_d2, 20), 5) + shift_left(resize(z_d2, 20), 3);

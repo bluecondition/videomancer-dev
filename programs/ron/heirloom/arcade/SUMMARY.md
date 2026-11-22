@@ -165,3 +165,24 @@ Ron dialled the look in on hardware (v0.1.1), captured with `./capture_preset.sh
 K1 Globes 545, K2 Arches 245, K4 Speed 276, K5 Texture 821, P12 Globe Size 515 (K3 Chevrons, K6 Etch and S7-S11
 unchanged). The vmprog was repacked from the v0.1.1 bitstreams (only the settings block differs, 192 bytes), so
 timing and seeds are as in v0.1.1 (SD Analog seed 2). Presets are unchanged.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`512 - x` becomes `x - 512`); the simulator
+is correct, so every sim showed the intended picture while the hardware ran these two knobs backwards.
+- **Sites fixed** (rewritten as `to_signed(512, 11) - x`, same widths):
+  - line 522, `z_d2`: the K2 Arches exponent (arch ring spacing lambda, the weave grain follows it);
+  - line 525, `z_e1`: the K1 Globes exponent (globes across).
+- **On hardware, before -> after.** K2 and K1 ran mirrored about 512: clockwise gave coarser arches and fewer globes.
+  Now clockwise gives finer arches (140 -> 22 px) and more globes (1 -> 4 across), as designed.
+- **Remaps (keep Ron's captured look exactly).** The decode is `512 - k` (K1 then halved), so `k -> 1024 - k`
+  gives the identical exponent the hardware ran: defaults K1 Globes 545 -> 479, K2 Arches 245 -> 779; presets
+  Beads K2 760 -> 264, Giants K1 300 -> 724, Fine Clip K2 820 -> 204, Target Row K1 800 -> 224.
+- **Left as-is:** no other audited sites in this program.
+- **Build:** router1, all six on seed 1. HD Analog 104.89, HD HDMI 104.91, HD Dual 100.36, SD Analog 102.42,
+  SD HDMI 98.15, SD Dual 100.33 MHz (builder seeds); 6,925-6,949 / 7,680 LC, 19 / 32 EBR. iceunpack OK x6.
+- **Skew:** the builder's HD HDMI router1 s1 sat at +0.28 / <= -0.89 (positive but below the window). Screen
+  hd_hdmi r1 + r2 s1-40 (73 timing-clean, 9 in the window). Installed **HD HDMI router1 s19 (+1.76 / <= -0.74,
+  102.63 MHz)**; HD Analog r1 s1 (+1.53 / <= -0.24, data too late) -> **router1 s5 (+0.54 / <= -0.77, 106.88 MHz)**;
+  HD Dual r1 s1 (-1.26 / <= -1.62) kept. Spare HD HDMI router2 s16 (+1.54 / <= -0.85, 90.60 MHz):
+  `.heirloom_work/rb_arcade/skew/arcade_v013_spare_hd_hdmi_router2_s16.vmprog`. v0.1.3 not flashed yet.
