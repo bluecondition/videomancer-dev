@@ -359,3 +359,26 @@ bit.
 - **Sim-only side finding.** The output filter's ~4-px lag shows one pixel per line of the beam's line-end state at
   the left edge. On HD the beam ends at x 3840, inside the frame test, so it is frame-black. At SD (beam ends at
   3360) one dim pixel can show at the very left. It is unchanged since v0.1.0 and not the reported issue.
+
+## v0.2.2: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 602** (visible): K3 Bars exponent e = -(k3 - 512)/2 -> bar phase step 325·2^(e/256): bar grid and mosaic
+  column pitch x0.5 (K3 0) .. the clip (512) .. x2 (1023). On hardware it was: e = +(k3 - 512)/2: K3 runs backwards
+  (0 = wide x2 bars, 1023 = fine x0.5). It is identical at 512.
+- TOML changes besides the version (knob remaps so the captured look is reproduced): -rotary_potentiometer_3 = 800; +rotary_potentiometer_3 = 224
+
+**Build** v0.2.2, router1, assembled by hand: the netlist (7279-7296 / 7680 LC, 94-95 %, 15 / 32 EBR) fails nextpnr
+placement ("Unable to find legal placement") on about 2 of 3 seeds, and the builder stops on that error instead of
+retrying. Each config was routed on its own and the vmprog packed with `vmprog_pack.py`:
+HD Analog router1 s3 94.01, SD Analog router1 s7 87.02 (seeds 1 and 5 failed placement, router1 2-4 stalled),
+SD HDMI s1 93.07, HD HDMI router1 s83 91.35, HD Dual router1 s11 89.87, SD Dual s2 90.62 MHz. Seeds other than 1:
+all but SD HDMI. iceunpack OK on all six. Not simulated, not flashed.
+**HD skew**: HD HDMI router1 s83 (+2.14 / <= -1.56, 91.35 MHz), the only window seed in router1 s1-160 +
+router2 s1-46 (150 of 206 HD HDMI routes failed placement); spare router1 s33 (+1.21 / <= -0.47, 92.67 MHz, data short) in
+`.heirloom_work/rb_placard/skew/`. HD Analog router1 s3 (-1.59 / <= -1.10) and HD Dual router1 s11 (-1.59 / <= -1.58)
+chosen for clean HDMI data. A builder rebuild will likely fail placement: re-route per config with
+`.heirloom_work/skew_tools/install.sh placard router1 <seed> <config>` from the screened outputs instead.

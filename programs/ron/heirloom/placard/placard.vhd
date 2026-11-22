@@ -599,7 +599,7 @@ begin
                         z_k1 <= s_g1(12 downto 3); z_k3 <= s_g3(12 downto 3); z_k5 <= s_g5(12 downto 3);
                     when 26 =>
                         z_e1w <= resize(z_k1, 12) + shift_left(resize(z_k1, 12), 1);             -- 3 k
-                        z_e3n <= 256 - signed(resize(shift_right(z_k3, 1), 11));                 -- -(k - 512)/2 (-+1 oct)
+                        z_e3n <= to_signed(256, 11) - signed(resize(shift_right(z_k3, 1), 11));                 -- -(k - 512)/2 (-+1 oct)
                         z_e5a <= shift_right(z_k5, 1) + shift_right(z_k5, 3);
                     when 27 =>
                         z_e1 <= signed(resize(shift_right(z_e1w, 2), 11)) - 384;                 -- 0.75 (k - 512) (+-1.5 oct)

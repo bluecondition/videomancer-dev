@@ -3,13 +3,14 @@
 # two "roads" of fine coloured lines, dark mosaic skirts, rolling down inside a black letterbox frame.
 # v0.2.0 (2026-11-21): the roads (big arcs) follow K1 (sweep), K2 (thickness) and K5 (knee).
 # v0.2.1 (2026-11-21): same bitstreams, HD HDMI re-seeded (router2 s2) against the red/blue line artifact.
+# v0.2.2 (2026-11-21): GHDL integer-minus-signed fix (K3 Bars ran reversed on hardware); preset K3 mirrored.
 # See placard.vhd, placard.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 18
 program_id = "com.czartroniks.placard"
 program_name = "Placard"
-program_version = "0.2.1"
+program_version = "0.2.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -141,7 +142,7 @@ toggle_switch_10 = 1
 [[preset]]
 name = "Dense"
 rotary_potentiometer_1 = 800
-rotary_potentiometer_3 = 800
+rotary_potentiometer_3 = 224
 rotary_potentiometer_5 = 300
 
 [[preset]]
