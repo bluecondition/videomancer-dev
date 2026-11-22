@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.5.0 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.5.1 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -299,10 +299,8 @@ architecture neonbeach of program_top is
     signal ws_r1, ws_r2 : unsigned(4 downto 0) := (others => '0');
     signal ws_v1, ws_v2 : std_logic := '0';
     signal ws_p  : unsigned(2 downto 0) := (others => '0');
-    signal ws_a1, ws_a2, ws_l : unsigned(7 downto 0) := (others => '0');
     signal ws_dp : unsigned(4 downto 0) := (others => '0');
-    signal ws_fc, ws_dist, ws_sdist : signed(8 downto 0) := (others => '0');
-    signal ws_cap : signed(9 downto 0) := (others => '0');
+    signal ws_fc, ws_dist : signed(8 downto 0) := (others => '0');
     signal ws_reach, ws_rc2 : signed(9 downto 0) := (others => '0');
     signal ws_div : unsigned(3 downto 0) := (others => '0');
     signal ws_fr  : unsigned(2 downto 0) := (others => '0');       -- 8 x (fields since the step) / 12
@@ -594,9 +592,10 @@ begin
                     when 48 => if c_e < 584 and c_e > 176 then c_mid <= '1'; else c_mid <= '0'; end if;
                     when 49 => if c_e < 144 then c_lo <= '1'; else c_lo <= '0'; end if;
                     when 42 =>                              -- sea level: 626 -+ 96 rows
-                        v_s := signed(resize(s_k2, 12)) - 512;
-                        v_c := shift_right(v_s, 3) + shift_right(v_s, 4);       -- 3/16 (no self-add: router1)
-                        c_sl <= unsigned(to_signed(C_SL0, 11) - v_c(10 downto 0));
+                        -- 626 - 3 (K2 - 512) / 16 = 722 - K2 / 8 - K2 / 16 (exactly: 512 divides by both).  On
+                        -- the unsigned knob: the old signed form added two sign-extended shifts of one value,
+                        -- so its sign net fed both inputs of a LUT, and router1 stalled on HDMI seed 1 (v0.5.1)
+                        c_sl <= to_unsigned(722, 11) - (resize(s_k2(9 downto 3), 11) + resize(s_k2(9 downto 4), 11));
                     when 43 =>
                         c_fp <= resize(s_gp, 14);
                     when 52 =>                              -- the crab, from the engine's last pass: half
@@ -1235,9 +1234,12 @@ begin
 
     ---------------------------------------------------------------------------
     -- [C] WET SAND: the RAM (one write statement; the pixel path reads it in active video) and the sweep (in
-    -- vblank, after the sky keys): per column a reach in quarter cells from the swash (the engine's envelope and
-    -- shoreline, from its last pass) plus two drifting triangle lobes, then its 32 cells read, updated and
-    -- written back one a clock.
+    -- vblank, after the sky keys): per column a reach in quarter cells from the swash sheet (the engine's
+    -- envelope and shoreline, from its last pass), then its 32 cells read, updated and written back one a clock.
+    -- The wash wets only what the sheet touches: the top row of cells, whole under the sheet, the upper triangle
+    -- at its front column.  (v0.5.0 and earlier soaked e rows deep, about 112 at the defaults, under a sheet at
+    -- most 14 rows thick, with drifting lobes past its front: the top of the beach went water-coloured and then
+    -- dark where no water was, row after row as the swash drained.)
     ---------------------------------------------------------------------------
     p_wet : process(clk)
         variable v_l9  : signed(8 downto 0);
@@ -1283,8 +1285,6 @@ begin
 
             if s_zone = '1' and s_zc = 120 then
                 ws_run <= '1'; ws_rows <= '0'; ws_col <= (others => '0'); ws_p <= "000";
-                ws_a1 <= c_t(7 downto 0) + (c_t(6 downto 0) & '0');               -- lobes drift: 3 t and -2 t
-                ws_a2 <= to_unsigned(0, 8) - (c_t(6 downto 0) & '0');
                 ws_dp <= o_e(7 downto 3);
                 v_l9 := signed(resize(o_ks, 9)) - signed(resize(o_e(7 downto 3), 9));
                 ws_fc <= shift_right(v_l9, 1);                                     -- the run-up's front column
@@ -1293,26 +1293,18 @@ begin
                 if ws_rows = '0' then
                     case ws_p is
                         when "000" =>
-                            ws_l <= resize(f_tri7(ws_a1), 8) + resize(f_tri7(ws_a2), 8);
                             if (ws_col & '1') >= o_ks(6 downto 0) and o_ks(7) = '0' then ws_uw <= '1'; else ws_uw <= '0'; end if;
                             ws_dist <= ws_fc - signed(resize(ws_col, 9));
-                            ws_sdist <= signed(resize(o_ks(7 downto 1), 9)) - signed(resize(ws_col, 9));   -- columns to the shoreline
                             ws_p <= "001";
                         when "001" =>
-                            v_l9 := signed(resize(ws_l, 9)) - 128;
-                            ws_reach <= signed(resize(ws_dp, 10)) + resize(shift_right(v_l9, 5), 10);
-                            ws_cap <= shift_left(resize(ws_sdist, 10), 3) - 4;                  -- thins over the last columns
-                            ws_p <= "010";
-                        when "010" =>
-                            if ws_uw = '1' then
-                                ws_reach <= (others => '0');
-                            elsif ws_dist > 0 then
-                                ws_reach <= ws_reach - shift_left(resize(ws_dist, 10), 3) - 4;
+                            -- under the sheet: the whole top cell (4 quarter cells); its front column: the upper
+                            -- triangle (2); past the front, under the sea or no swash: nothing
+                            if ws_uw = '1' or ws_dp = 0 or ws_dist(8) = '0' then
+                                if ws_uw = '0' and ws_dp /= 0 and ws_dist = 0 then ws_reach <= to_signed(2, 10);
+                                else ws_reach <= (others => '0'); end if;
+                            else
+                                ws_reach <= to_signed(4, 10);
                             end if;
-                            ws_a1 <= ws_a1 + 37; ws_a2 <= ws_a2 + 23;
-                            ws_p <= "011";
-                        when "011" =>
-                            if ws_reach > ws_cap then ws_reach <= ws_cap; end if;
                             ws_p <= "100";
                         when others =>
                             ws_rows <= '1'; ws_r0 <= (others => '0');

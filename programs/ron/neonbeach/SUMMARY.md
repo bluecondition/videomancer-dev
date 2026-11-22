@@ -8,9 +8,9 @@ turn white; under everything the sand, a mesh of quads. When a wave lands, a was
 it covers turn into triangles in the water's colour, and as it drains they revert a triangle at a time, leaving
 the sand dark and wet. A small faceted crab walks the sand and runs from the wash.
 
-**Status: v0.5.0 (2026-11-22): K6 is Speed (the camera and the input video are gone: a synthesis program now),
-the Crab switch reads Off / On like every other program, and drying sand fades back smoothly; see "v0.5.0"
-below.** Flash
+**Status: v0.5.1 (2026-11-22): the wash wets only the sand its water sheet touches (the top row of cells);
+v0.5.0 made K6 Speed (no input video: a synthesis program now), the Crab switch Off / On, and drying sand fade
+back smoothly; see "v0.5.0" and "v0.5.1" below.** Flash
 `out/rev_b/ron/neonbeach.vmprog`. Build plan and design history: `PLAN.md` (side-on version). v0.1.0 (ca04ddf)
 was the still scene, v0.3.0 (e419f45) the first with waves, wash and crab; v0.3.1 tapers the wash toward the
 shoreline and fixes the engine's timing; v0.3.2 (HW-captured defaults) was the first one flashed.
@@ -53,8 +53,9 @@ shoreline and fixes the engine's timing; v0.3.2 (HW-captured defaults) was the f
   50 % (GHDL testbench `.neonbeach_work/tb5`, `cmp.py`: 0 mismatches over 3 fields; the same compare against
   Speed 0 gives 204, so it discriminates).
 - **Wet sand**: a 4-bit counter per sand cell (2048 cells, block RAM). A sweep in vblank works out each column's
-  reach from the engine's swash envelope and shoreline (plus two drifting triangle lobes) and rewrites every
-  cell: 15 = under the wash, 14 = only its upper triangle, then 12 .. 1 drying one step every 12 fields
+  reach from the engine's swash envelope and shoreline and rewrites every cell. Since v0.5.1 only the top row of
+  cells takes the wash: whole under the sheet, the upper triangle at its front column (v0.5.0 and earlier soaked
+  e rows deep with drifting lobes). 15 = under the wash, 14 = only its upper triangle, then 12 .. 1 drying one step every 12 fields
   (13 = damp and held: the sea bed's top row, the crab's hole). The
   reach thins over the last columns before the shoreline (v0.3.1; it ended in a vertical cut). The
   pixel path draws 15 and 14 as wash triangles; drying cells keep their diagonals (the upper triangle's longer)
@@ -237,3 +238,32 @@ Built 2026-11-22 with **router1**, 28 / 32 block RAMs:
 
 7,237 / 7,680 LC (94.2 %, down from 95.7 %): the camera path cost more than Speed, the wider multiplier and the
 drying fraction together.
+
+## v0.5.1: the wash wets only what it touches (2026-11-22)
+
+Ron on v0.5.0: "still seeing the constant washing over of the entire top of the beach sand section, 2 or 3 times
+a second. it is darkening where water is not touching it over and over." A model of the sweep driven by the engine
+emulator (Ron's defaults) showed why: the visible swash sheet is at most 14 rows thick, but each run-up soaked the
+sand to e rows (about 112 at the defaults: four rows of cells), and drifting lobes pushed the reach past the
+sheet's front. As the swash drained (e falls 2 a field), the cell rows flipped from wash colour to dark one after
+another every 8 .. 16 fields, all along the run-up. Now the sweep wets only the top row of cells: whole under the
+sheet, the upper triangle at its front column, nothing past the front or below. The lobes, the shoreline cap and
+their logic are gone (-110 LUT standalone).
+
+Also in v0.5.1: router1 stalled on seed 1 of both HDMI configs. dupin (`~/czartroniks_port/tools/dupin.py`) found
+one LUT with a duplicated input: the Tide sea level, `626 - (v_s >> 3 + v_s >> 4)` on a signed `v_s`, adds two
+sign-extended shifts of one value (CLAUDE.md's kelp shape). It is now `722 - (K2 >> 3) - (K2 >> 4)` on the
+unsigned knob, the same value for all 1024 settings; dupin reports 0 on all six configs.
+
+Built 2026-11-22 with **router1**, all six on seed 1 (no stalls), 28 / 32 block RAMs:
+
+| Config | Seed | Post-route Fmax | LC |
+|---|---|---|---|
+| HD Analog | 1 | 85.66 MHz | 7088 |
+| SD Analog | 1 | 69.83 MHz | 7075 |
+| HD HDMI | 1 | 83.50 MHz | 7063 |
+| SD HDMI | 1 | 78.00 MHz | 7071 |
+| HD Dual | 1 | 80.26 MHz | 7070 |
+| SD Dual | 1 | 83.65 MHz | 7088 |
+
+7,088 / 7,680 LC (92.3 %).
