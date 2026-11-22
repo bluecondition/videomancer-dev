@@ -240,3 +240,28 @@ Ron: K6 is the camera strength in every program, default 50 %. Here the camera s
   K6 default 1023 (TOML).
 - **Render check:** `.heirloom_work/rb_goblet/k6b/k6b_cmp.png` (old vs new at K6 100 %, K5 Patch RGB, bear, 720p dec 4: more hue modulation and stripe bend, no wrap).
 - **Build:** router1, all six on seed 1. HD worst 85.82 MHz (HD Analog 92.00, HD HDMI 85.82, HD Dual 89.66), LC 7306 (+36 over v0.6.1).
+
+## v0.6.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 826** (visible): |x - axis| in Q5 knots for S7 Mirror: the fold xm = axis - |d| puts the left half on both
+  sides (an exactly symmetric goblet). On hardware it was: '0 - v' is built as +v (a slice of a signed is still
+  signed), so left of the axis p_ad2 = 16384 - |d| and p_xm3 = axis + |d| - 16384. Through line 831 (also reversed)
+  and the 12-bit slice this becomes axis + |d|. The left half shows the RIGHT half mirrored and the right half shows
+  the left half mirrored. Mirror On is …
+- **line 831** (visible): Edge reflection at knot 0: field x < 0 reads -x (a seamless mirror). That happens at
+  narrow K2 Width (x0.4 repeats the goblet ~3 times by reflection) and on the Mirror path's left half. On hardware
+  it was: Built as +p_xm3 (negative); the 12-bit slice gives 4096 + x. Left of knot 0 the field reads clamped knot
+  118, a flat band ~9 knots wide, and then a WRAPPED (unmirrored) copy of the field's right side. So when K2 Width <
+  50 % the left margin has a hard seam and a smeared band where the design reflects. The right-edge …
+
+**Build** v0.6.3, router1: HD Analog 88.90, SD Analog 82.36, HD HDMI 96.09, SD HDMI 85.65, HD Dual 82.64, SD Dual
+80.96. 7328-7356 / 7680 LC, 25 / 32 EBR; all six seed 1. iceunpack OK. Not simulated, not flashed.
+**HD skew**: HD HDMI router1 s1 (-1.91 / <= -2.63, 96.09 MHz) -> router1 s33 (+1.32 / <= -1.04, 85.79 MHz) | hd_analog
+kept router1 s1 (-1.32 / <= -0.67, 88.90 MHz) | hd_dual kept router1 s1 (-1.59 / <= -0.74, 82.64 MHz) | spare HD HDMI
+router1 s40 (+1.03 / <= -1.03, 87.56 MHz):
+/home/ron/videomancer-dev/.heirloom_work/rb_goblet/skew/goblet_v063_spare_hd_hdmi_router1_s40.vmprog. A full builder
+rebuild re-routes seed 1: re-install the seeds with `.heirloom_work/skew_tools/install.sh` afterwards.

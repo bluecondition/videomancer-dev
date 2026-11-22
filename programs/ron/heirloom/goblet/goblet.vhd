@@ -823,12 +823,12 @@ begin
         if rising_edge(clk) then
             -- 1..3: Q5 knots; mirror about the axis (S7 folds the right half onto the left)
             p_d1 <= b_xk(25 downto 11) - to_signed(C_CX5, 15); p_xk1 <= b_xk(25 downto 11);
-            if p_d1 < 0 then p_ad2 <= unsigned(0 - p_d1(13 downto 0)); else p_ad2 <= unsigned(p_d1(13 downto 0)); end if;
+            if p_d1 < 0 then p_ad2 <= unsigned(-p_d1(13 downto 0)); else p_ad2 <= unsigned(p_d1(13 downto 0)); end if;
             p_xk2 <= p_xk1;
             if s_mirror = '1' then p_xm3 <= to_signed(C_CX5, 15) - signed(resize(p_ad2, 15)); else p_xm3 <= p_xk2; end if;
             -- 4..5: reflect at the field's edges (0 and 119 knots)
             p_xm4 <= p_xm3;
-            p_ng4 <= 0 - p_xm3;
+            p_ng4 <= -p_xm3;
             p_hi4 <= to_signed(238 * 32, 15) - p_xm3;
             if p_xm3 < 0 then p_lt4 <= '1'; else p_lt4 <= '0'; end if;
             if p_xm3 > 119 * 32 then p_gt4 <= '1'; else p_gt4 <= '0'; end if;
