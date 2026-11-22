@@ -442,7 +442,7 @@ begin
                         else
                             c_d0 <= signed(resize(s_x0, 13)) - 1969;
                         end if;
-                        c_dthr <= 480 - signed(resize(s_xs, 13));
+                        c_dthr <= to_signed(480, 13) - signed(resize(s_xs, 13));
                         c_dstw <= signed(resize(s_xs, 13)) - 960;
                     when 196 =>
                         c_astw <= signed(resize(c_ast, 23)) - signed(resize(c_gp, 23));
