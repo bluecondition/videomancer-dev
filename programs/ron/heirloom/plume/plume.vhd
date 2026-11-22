@@ -840,7 +840,7 @@ begin
             if q1_n1 = '1' then q2_s1 <= -signed(v_k); else q2_s1 <= signed(v_k); end if;
             if q1_v2(14 downto 5) > 127 then v_k := to_unsigned(127, 8); else v_k := q1_v2(12 downto 5); end if;
             if q1_n2 = '1' then q2_s2 <= -signed(v_k); else q2_s2 <= signed(v_k); end if;
-            if f_twin = '1' and q1_xi > 960 then q2_xw <= 1920 - q1_xi; else q2_xw <= q1_xi; end if;
+            if f_twin = '1' and q1_xi > 960 then q2_xw <= to_signed(1920, 13) - q1_xi; else q2_xw <= q1_xi; end if;
             -- 3: seam ROM addresses; wiggle sum
             pw_a <= l_wb & q2_thf(9 downto 3);
             sc_a <= q2_thf(9 downto 2);

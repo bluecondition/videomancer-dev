@@ -287,3 +287,22 @@ Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 
   0 .. 31), so the outline push grows with it (±312 px at most, was ±248). The bend product still fits 15 bits.
   The same change as production plume (no render for the diag).
 - **Build:** router1; HD Analog s1 79.76, SD Analog s1 83.40, HD HDMI s1 78.15, SD HDMI s1 77.96, HD Dual s1 82.62, SD Dual s1 87.15 MHz; worst HD 78.15 MHz; 7235-7254 / 7680 LC; all seed 1. vmprog: out/rev_b/ron/_diag/plume_diag_v0.6.2.vmprog.
+
+## v0.6.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`1920 - x` comes out as `x - 1920`). The
+simulator is correct, so every render showed the intended picture; only the hardware differed.
+- **Site fixed:** line 843, `q2_xw <= 1920 - q1_xi` -> `to_signed(1920, 13) - q1_xi`: the S7 Twin fold of x about the
+  screen centre that feeds the window / ramp distances.
+- **What changes on hardware:** before, Twin On gave the right half x - 1920 (an off-screen-left position), so the
+  right half showed plain ground with a vertical seam at x = 960 and Twin CUT the plume at the centre. Now Twin On
+  mirrors the right half onto the left, as designed: a second plume mirrored in from the right edge. Twin Off is
+  unchanged. The seam phase is still unfolded (it comes from b_th), as designed.
+- **Remaps:** none (never flashed).
+- **Left as-is:** nothing else listed by the audit.
+- **Build:** router1, all six on seed 1: HD Analog 84.43, SD Analog 80.17, HD HDMI 80.53, SD HDMI 80.98, HD Dual
+  77.85, SD Dual 83.68 MHz (worst HD 77.85); 7,248-7,264 / 7,680 LC, 24 / 32 EBR. iceunpack OK x6.
+- **HD HDMI skew:** the builder's router1 s1 sat at +0.00 / data <= -1.62 (sub-window). Screen hd_hdmi r1 + r2
+  s1-60 (83 timing-clean, 2 in the window). Installed **router1 s44 (+1.15 / <= -0.79, 84.38 MHz)**; spare router2
+  s6 (+1.20 / <= -0.89, 75.53 MHz, thin timing) in `.heirloom_work/rb_plume/skew/plume_v063_spare_hd_hdmi_router2_s6.vmprog`.
+  HD Analog r1 s1 (+1.20 / <= -0.76) and HD Dual r1 s1 (-2.28 / <= -1.26) kept. Not flashed.
