@@ -2,12 +2,13 @@
 # An oil-slick kaleidoscope: red / orange domes with blue cores and magenta arcs, black voids with green edges
 # between them, a purple sky, and a dark lower tier (the reflection) under a horizon.  See oilslick.vhd,
 # oilslick.py and SUMMARY.md.
+# v0.1.4 (2026-11-21): GHDL integer-minus-signed fix (S7 Slick = Light was an almost black screen on hardware).
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.oilslick"
 program_name = "Oilslick"
-program_version = "0.1.3"
+program_version = "0.1.4"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

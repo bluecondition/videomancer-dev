@@ -176,3 +176,23 @@ K1 Domes 686, K2 Horizon 0, K3 Rings 682, K4 Flow 916, K5 Voids 409, S9 Reflect 
 S10, S11 unchanged). K2 is continuous (glided, no zones), so 0 loads as dialled. The vmprog was repacked from the
 v0.1.2 bitstreams (only the settings block differs, 207 bytes), so timing, seeds and LC are as in v0.1.2. Presets
 are unchanged.
+
+## v0.1.4: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 977** (major): S7 Slick = Light: brightness negative V' = 960 - V (the voids glow with colour, the domes
+  sink into shadow). On hardware it was: Computes V - 960, negative almost everywhere, so the clamp gives brightness
+  0: Light is an almost entirely black screen (palette x 0), with only the contour-line colour, and dim spots where
+  the lift pushes V above 960.
+- Left as-is (part of a look Ron approved, or a scanner false positive): line 970
+
+**Build** v0.1.4, router1: HD Analog 80.79, SD Analog 86.89, HD HDMI 84.58, SD HDMI 86.74, HD Dual 86.84, SD Dual
+83.20. 7181-7195 / 7680 LC, 24 / 32 EBR; all six seed 1. iceunpack OK. Not simulated, not flashed.
+**HD skew**: HD HDMI router1 s1 (+0.16 / <= -1.67, 84.58 MHz) -> router2 s32 (+1.68 / <= -0.91, 79.00 MHz) | hd_analog
+router1 s1 (-0.45 / <= -0.50, 80.79 MHz) -> router1 s5 (-1.63 / <= -1.30, 89.85 MHz) | hd_dual router1 s1 (-1.59 / <=
+-0.47, 86.84 MHz) -> router1 s11 (-2.65 / <= -1.79, 83.59 MHz) | spare HD HDMI router2 s2 (+1.42 / <= -0.60, 86.36
+MHz): /home/ron/videomancer-dev/.heirloom_work/rb_oilslick/skew/oilslick_v014_spare_hd_hdmi_router2_s2.vmprog. A full
+builder rebuild re-routes seed 1: re-install the seeds with `.heirloom_work/skew_tools/install.sh` afterwards.

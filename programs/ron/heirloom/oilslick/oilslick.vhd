@@ -974,7 +974,7 @@ begin
             else p10_bp <= v_lp(11 downto 6); end if;
             -- 11: phase; negative
             p11_ph <= p10_r + p10_s;
-            if s_neg = '1' then p11_vn <= 960 - p10_ve; else p11_vn <= p10_ve; end if;
+            if s_neg = '1' then p11_vn <= to_signed(960, 14) - p10_ve; else p11_vn <= p10_ve; end if;
             p11_bp <= p10_bp;
             -- 12: palette address; V clamp
             r_pa <= s_pal & p11_ph(15 downto 8);
