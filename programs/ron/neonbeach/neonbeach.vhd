@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.5.3 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.5.4 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -73,9 +73,9 @@ architecture neonbeach of program_top is
         x"B", x"6", x"5", x"A", x"8", x"D", x"2", x"1", x"E", x"C", x"1", x"D", x"C", x"8", x"1", x"0",
         x"6", x"B", x"E", x"7", x"E", x"7", x"4", x"3", x"E", x"3", x"F", x"F", x"9", x"A", x"B", x"5",
         x"2", x"D", x"0", x"A", x"5", x"7", x"6", x"2", x"4", x"4", x"3", x"F", x"9", x"9", x"C", x"9");
-    -- sheen: which pulses show, by (pulse number, object): about three in five.  Never on the sand (object 8, the
-    -- first bit of each byte): v0.3's bands running down the sand read as a constant pulsing.
-    constant C_SHG : std_logic_vector(0 to 63) := x"3655_631A_6F4B_526D";
+    -- sheen: which pulses show, by (pulse number, object): about three in five.  (v0.4.0 .. v0.5.3 took it off the
+    -- sand, wrongly blamed for the sweep's sliding bug; v0.5.4 has it back: Ron asked for the sand's shimmer.)
+    constant C_SHG : std_logic_vector(0 to 63) := x"B6D5_E39A_6F4B_D2ED";
     -- sand: which way each cell's diagonal runs: T1(col + 11 row) xor T2(5 col + row), indexes mod 64.  Checked
     -- over 64 x 20 cells: balanced, neighbours and both diagonals within 2 % of chance, no shift matches more
     -- than 8 % off chance (two tables of coordinate bits alone repeated every 32 columns).
@@ -199,6 +199,7 @@ architecture neonbeach of program_top is
     signal c_sden : unsigned(1 downto 0) := "00";                 -- star density
     signal c_hi, c_mid, c_lo : std_logic := '0';
     signal c_ebird, c_esun, c_emoon, c_ecrab : std_logic := '0';
+    signal c_gf : std_logic_vector(2 downto 0) := (others => '0');   -- each gull's flap frame (own speed, own phase)
     -- the sky keys: the colour path is run on two made-up pixels in vblank (zenith, horizon keyframes lerped
     -- by the elevation) and the results are kept as the sky ramp's c0 and delta
     -- (and the same for the water: its five keys and its wire, so it changes colour gradually with the sun).  Each
@@ -283,24 +284,31 @@ architecture neonbeach of program_top is
     signal o_cx, o_cy : unsigned(9 downto 0) := to_unsigned(540, 10);  -- the crab: centre x, top row
     signal o_cs : unsigned(7 downto 0) := (others => '0');           -- its sink (0 .. 96) | frame << 7
     signal o_ch : unsigned(10 downto 0) := (others => '0');          -- its hole's wetness cell
-    signal c_cry, c_cyh : unsigned(10 downto 0) := to_unsigned(700, 11);   -- per field: its drawn top, its hole line
-    signal c_cx2 : unsigned(10 downto 0) := to_unsigned(1080, 11);
+    signal c_cry : unsigned(10 downto 0) := to_unsigned(700, 11);           -- per field: its drawn top
+    -- the crab as a bitmap read at each pixel's depth under the sand line (v0.5.4: it follows the slope, like the
+    -- sand's grid, whose rows run parallel to the sand's surface and whose columns stay vertical)
+    signal c_bedc : signed(11 downto 0) := to_signed(560, 12);    -- the sand line at its centre (from the pixel path)
+    signal c_crel : signed(11 downto 0) := (others => '0');       -- its drawn top, rows under the sand line there
+    signal c_cvis : unsigned(5 downto 0) := (others => '0');      -- rows shown: 48 less half the sink (its hole line)
+    signal c_cfr  : std_logic := '0';                             -- its leg frame
     signal c_dbank : std_logic := '0';                              -- the knot table bank on screen
     signal u_lfsr : unsigned(15 downto 0) := x"ACE1";
     signal s_k1, s_k3, s_k4, s_k5 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     -- [C] wet sand: Pixel Beach's per-cell counter.  2048 cells (32 rows of depth x 64 columns of 32 px), 4 bits:
-    -- 15 = under the wash, 14 = only the upper triangle, 13 = damp and held (the sea bed's top row, the crab's
-    -- hole), 12 .. 1 drying (one step every 12 fields; drawn with the fields since the step as a fraction, so
-    -- the colour fades back smoothly: v0.4 stepped every drying cell at once, 5 times a second, a pulse along
-    -- the whole wet edge), 0 dry.  A sweep rewrites every cell in vblank; the pixel path reads it in active video.
+    -- 15 = under the wash, 14 = only the upper triangle, 13 = the crab's hole, held part dark (drawn as 6, no
+    -- fraction) on its three cells while it goes down or comes up, 6 at the next drying step after, 12 .. 1 drying (one
+    -- step every 12 fields, drawn with the fields since the step as a fraction so the colour fades back smoothly),
+    -- 0 dry.  The sea bed's top row is not held damp (v0.5.4: Ron, the top line of sand changes colour only where
+    -- water washes over it); the crab's hole darkens its three cells only part way (Ron, v0.5.4).  A sweep rewrites every cell in
+    -- vblank; the pixel path reads it in active video.
     type t_wt is array (0 to 2047) of std_logic_vector(3 downto 0);
     signal wt_ram : t_wt := (others => (others => '0'));
     attribute no_rw_check of wt_ram : signal is true;
     signal wt_a, wt_wa, wt_pa : unsigned(10 downto 0) := (others => '0');
     signal wt_q, wt_qf, wt_wd : std_logic_vector(3 downto 0) := (others => '0');
     signal wt_we : std_logic := '0';
-    signal ws_run, ws_rows, ws_tick, ws_uw : std_logic := '0';
+    signal ws_run, ws_rows, ws_tick, ws_uw, ws_hon : std_logic := '0';
     signal ws_col, ws_c1, ws_c2 : unsigned(5 downto 0) := (others => '0');
     signal ws_r0 : unsigned(5 downto 0) := (others => '0');
     signal ws_r1, ws_r2 : unsigned(4 downto 0) := (others => '0');
@@ -331,11 +339,9 @@ architecture neonbeach of program_top is
     signal e_asel : std_logic := '0';
     signal e_dyu  : signed(11 downto 0) := (others => '0');
     signal e_c1, e_bd : signed(10 downto 0) := (others => '0');
-    signal e_cr   : signed(11 downto 0) := (others => '0');
-    signal e_cv   : std_logic := '0';
     signal e_rm   : unsigned(8 downto 0) := (others => '0');
-    signal e_aa, e_ba : unsigned(9 downto 0) := (others => '0');
-    signal e_aen, e_ben, e_son, e_bon : std_logic := '0';
+    signal e_aa : unsigned(9 downto 0) := (others => '0');
+    signal e_aen, e_son, e_bon : std_logic := '0';
     signal e_asc  : unsigned(13 downto 0) := (others => '0');
     signal e_x0   : signed(13 downto 0) := (others => '0');
     signal e_fc   : unsigned(13 downto 0) := (others => '0');
@@ -350,19 +356,17 @@ architecture neonbeach of program_top is
     signal l_tsun : unsigned(6 downto 0) := (others => '0');
     signal l_tsky : unsigned(5 downto 0) := (others => '0');
     type t_row is array (0 to 3) of unsigned(15 downto 0);
-    signal l_arow, l_brow : t_row := (others => (others => '0'));
+    signal l_arow : t_row := (others => (others => '0'));
     signal l_asel : std_logic := '0';
     signal l_ta, l_tb : unsigned(6 downto 0) := (others => '0');
     signal l_fill : std_logic_vector(7 downto 0) := (others => '0');
     signal l_rip, l_v1, l_v2 : std_logic := '0';
     signal l_od, l_pc : unsigned(13 downto 0) := (others => '0');             -- sheen: per-line phase terms
     signal n_xa0, n_xw0, n_pa0 : unsigned(13 downto 0) := (others => '0');
-    signal n_xb0 : signed(13 downto 0) := (others => '0');
     signal n_x0  : signed(12 downto 0) := (others => '0');
 
     -- [C] beam counters
     signal b_xw, b_xa, b_pa : unsigned(13 downto 0) := (others => '0');
-    signal b_xb : signed(13 downto 0) := (others => '0');
     signal b_x  : signed(12 downto 0) := (others => '0');
     signal b_px : unsigned(10 downto 0) := (others => '0');
     signal s18_np : unsigned(8 downto 0) := (others => '0');
@@ -428,11 +432,15 @@ architecture neonbeach of program_top is
     signal k14_skt : unsigned(5 downto 0) := (others => '0');
 
     -- sprite slots
-    signal a12_xs, b12_xs : unsigned(7 downto 0) := (others => '0');
-    signal a12_pr, b12_pr : std_logic := '0';
-    signal a13_g, b13_g : std_logic_vector(5 downto 0) := (others => '0');
-    signal a13_pr, b13_pr : std_logic := '0';
+    signal a12_xs : unsigned(7 downto 0) := (others => '0');
+    signal a12_pr : std_logic := '0';
+    signal a13_g : std_logic_vector(5 downto 0) := (others => '0');
+    signal a13_pr : std_logic := '0';
     signal a14_z, b14_z : unsigned(1 downto 0) := (others => '0');
+    signal c10_dx, c10_cr : signed(11 downto 0) := (others => '0');                 -- the crab: x from its centre,
+    signal c11_a : unsigned(11 downto 0) := (others => '0');                         -- rows under its drawn top
+    signal c11_in, c12_in, c13_in, c11_cr, c12_cr, c13_cr, b14_cr : std_logic := '0';
+    signal c12_q, c13_q : unsigned(1 downto 0) := (others => '0');
 
     -- merge, edges, colour
     signal s15_id : std_logic_vector(7 downto 0) := (others => '0');
@@ -494,400 +502,6 @@ begin
     -- config fails, try another order with .neonbeach_work/abc9_order.py.
 
     ---------------------------------------------------------------------------
-    -- [A] TIMING AND VIRTUAL COORDINATES + [B] CONTROLS + the per-field sequencer
-    ---------------------------------------------------------------------------
-    p_ctrl : process(clk)
-        variable v_e  : unsigned(9 downto 0);
-        variable v_s  : signed(11 downto 0);
-        variable v_c  : signed(11 downto 0);
-    begin
-        if rising_edge(clk) then
-            -- [A] timing ID -> steps (decoded free-running)
-            s_tid <= registers_in(8)(3 downto 0);
-            s_ys  <= f_vstep_y(s_tid);
-            s_xsr <= f_vstep_x(s_tid);
-
-            -- [A] vblank zone: no avid for 1024 clocks
-            if data_in.avid = '1' then
-                s_idle <= (others => '0');
-            elsif s_idle /= 1023 then
-                s_idle <= s_idle + 1;
-            end if;
-            if s_idle = 1023 then s_zone <= '1'; else s_zone <= '0'; end if;
-            s_zone_d <= s_zone;
-            s_zgo <= s_zone and not s_zone_d;
-            if s_zone = '0' then
-                s_zc <= (others => '0');
-            elsif s_zc /= 8191 then
-                s_zc <= s_zc + 1;
-            end if;
-
-            -- [A] width: source avid pixels per line, max over the field
-            s_avq <= data_in.avid;
-            if data_in.avid = '1' then
-                s_hcnt <= s_hcnt + 1;
-            elsif s_avq = '1' then
-                if s_hcnt > s_wmax then s_wmax <= s_hcnt; end if;
-                s_hcnt <= (others => '0');
-            end if;
-
-            -- [A][B] per-field latches
-            if s_zgo = '1' then
-                s_w <= s_wmax; s_wmax <= (others => '0');
-                s_fsw   <= registers_in(6)(0);
-                s_theme <= registers_in(6)(1);
-                s_croff <= not registers_in(6)(2);       -- S9: 1 = On
-                s_night <= registers_in(6)(3);
-                s_k2    <= unsigned(registers_in(1));
-                s_k1    <= unsigned(registers_in(0));
-                s_k3    <= unsigned(registers_in(2));
-                s_k4    <= unsigned(registers_in(3));
-                s_k5    <= unsigned(registers_in(4));
-                s_xs    <= s_xsr;
-                -- wire thickness: 3 x 2 at 1080p, 2 x 2 at 720p, 3 x 1 at 1080i, 1 x 1 at SD
-                if s_xsr = 2 then s_th2 <= '1'; s_th3 <= '1';
-                elsif s_xsr = 3 then s_th2 <= '1'; s_th3 <= '0';
-                else s_th2 <= '0'; s_th3 <= '0'; end if;
-                if s_ys <= 384 then s_tv2 <= '1'; else s_tv2 <= '0'; end if;
-            end if;
-            g_wm1 <= s_w - 1;
-
-            -- [B] shared glide (1/8 of the gap per field, +-2 deadband): fill (to the Fill switch), Speed, sun
-            if s_zgo = '1' then
-                z_gp <= "00"; z_gc <= "00"; z_grun <= '1';
-            elsif z_grun = '1' then
-                case z_gp is
-                    when "00" =>
-                        case to_integer(z_gc) is
-                            when 0      => s_gm <= s_gp; s_gr <= (others => s_fsw);
-                            when 1      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
-                            when others => s_gm <= s_gs; s_gr <= unsigned(registers_in(7));
-                        end case;
-                        z_gp <= "11";
-                    when "11" =>
-                        s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
-                        z_gp <= "01";
-                    when "01" =>
-                        -- outside the deadband (|gap| >= 32, as bit tests: a signed compare's carry fans out)
-                        if (s_gd(14) = '0' and s_gd(13 downto 5) /= "000000000") or (s_gd(14) = '1' and s_gd(13 downto 5) /= "111111111") then
-                            s_gd <= shift_right(s_gd, 3);
-                        else
-                            s_gd <= (others => '0');
-                        end if;
-                        z_gp <= "10";
-                    when others =>
-                        case to_integer(z_gc) is
-                            when 0      => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 1      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when others => s_gs <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                        end case;
-                        z_gp <= "00";
-                        if z_gc = 2 then z_grun <= '0'; end if;
-                        z_gc <= z_gc + 1;
-                end case;
-            end if;
-
-            -- [C] per-field constants, one small step per state
-            c_inj <= '0';
-            if s_zone = '1' then
-                case to_integer(s_zc) is
-                    when 40 =>
-                        c_t <= c_t + 1;
-                        c_e <= s_gs(12 downto 3);
-                    when 41 =>                              -- the body's centre: -150 .. +217 rows
-                        v_e := c_e;
-                        c_sunc <= signed(resize(v_e(9 downto 2), 12)) + signed(resize(v_e(9 downto 3), 12))
-                                  - signed(resize(v_e(9 downto 6), 12)) - 150;
-                    -- time of day thresholds (with hysteresis), one compare a state
-                    when 47 => if c_e > 616 then c_hi <= '1'; else c_hi <= '0'; end if;
-                    when 48 => if c_e < 584 and c_e > 176 then c_mid <= '1'; else c_mid <= '0'; end if;
-                    when 49 => if c_e < 144 then c_lo <= '1'; else c_lo <= '0'; end if;
-                    when 42 =>                              -- sea level: 626 -+ 96 rows
-                        -- 626 - 3 (K2 - 512) / 16 = 722 - K2 / 8 - K2 / 16 (exactly: 512 divides by both).  On
-                        -- the unsigned knob: the old signed form added two sign-extended shifts of one value,
-                        -- so its sign net fed both inputs of a LUT, and router1 stalled on HDMI seed 1 (v0.5.1)
-                        c_sl <= to_unsigned(722, 11) - (resize(s_k2(9 downto 3), 11) + resize(s_k2(9 downto 4), 11));
-                    when 43 =>
-                        c_fp <= resize(s_gp, 14);
-                    when 52 =>                              -- the crab, from the engine's last pass: half
-                        c_cry <= resize(o_cy, 11) + 48;     -- size, its feet where v0.3's were, sinking at half
-                    when 54 =>                              -- rate (hidden under its hole line at 96)
-                        c_cry <= c_cry + resize(o_cs(6 downto 1), 11);
-                    when 55 =>                              -- the water's keyframe interval and position: night,
-                        if s_night = '1' then               -- dusk, golden over the slider's lower three
-                            c_wiv <= "00"; c_wt <= (others => '0');            -- quarters, day above
-                        elsif c_e(9 downto 8) = "11" then
-                            c_wiv <= "10"; c_wt <= (others => '1');
-                        else
-                            c_wiv <= c_e(9 downto 8); c_wt <= c_e(7 downto 2);
-                        end if;
-                    when 53 =>
-                        c_cyh <= resize(o_cy, 11) + 96;
-                        c_cx2 <= o_cx & '0';
-                    when 44 =>                              -- clouds and gulls drift on their own
-                        c_sa1 <= c_t(13 downto 0);
-                        c_sab <= c_t(11 downto 0) & "00";
-                    when 45 =>                              -- time of day (with hysteresis): day, low sun, night
-                        if s_night = '1' then c_tod <= "10";
-                        elsif c_hi = '1' then c_tod <= "00";
-                        elsif c_mid = '1' then c_tod <= "01";
-                        elsif c_lo = '1' then c_tod <= "10";
-                        end if;
-                        c_esun <= not s_night; c_emoon <= s_night; c_ecrab <= '1';   -- (the engine burrows it)
-                        if s_night = '0' and c_e(9 downto 6) /= "0000" then c_ebird <= '1'; else c_ebird <= '0'; end if;
-                        if s_night = '1' or c_e(9 downto 6) = "0000" then c_sden <= "11";
-                        elsif c_e(9 downto 6) = "0001" then c_sden <= "10";
-                        elsif c_e(9 downto 6) = "0010" then c_sden <= "01";
-                        else c_sden <= "00"; end if;
-                    when 46 =>
-                        c_pal <= s_theme & c_tod;
-                    when others => null;
-                end case;
-            end if;
-
-            -- [C] the per-field palette entries: nine made-up pixels, 8 clocks apart (s_zc 128 .. 192), run through
-            -- the colour path from the keyframe slot; each comes out 7 clocks later and is kept or written (p_mix)
-            --   0 .. 4  the water's keys K0 .. K4 (keyframe interval c_wiv, position c_wt): entries 4 .. 7
-            --   5, 6    white: the water's and the wash's wires (K4 -> white), entries 21, 23
-            --   7, 8    the sky's zenith and horizon keyframes, lerped by the elevation (day: all eight keyframes
-            --           over the slider; night: the first two): entry 19
-            if s_zone = '1' and s_zc(12 downto 7) = "000001" and s_zc(2 downto 0) = "000" and s_zc(6 downto 3) <= 8 then
-                c_inj <= '1';
-                c_injt <= c_wt;
-                case to_integer(s_zc(6 downto 3)) is
-                    when 0 => c_injent <= "100" & c_wiv; c_injk <= "01";
-                    when 1 => c_injent <= "101" & c_wiv; c_injk <= "10"; c_injw <= to_unsigned(4, 5);
-                    when 2 => c_injent <= "110" & c_wiv; c_injk <= "10"; c_injw <= to_unsigned(5, 5);
-                    when 3 => c_injent <= "111" & c_wiv; c_injk <= "10"; c_injw <= to_unsigned(6, 5);
-                    when 4 => c_injent <= '1' & c_wiv & "11"; c_injk <= "10"; c_injw <= to_unsigned(7, 5);
-                    when 5 => c_injent <= "11111"; c_injk <= "11"; c_injw <= to_unsigned(21, 5);
-                    when 6 => c_injent <= "11111"; c_injk <= "11"; c_injw <= to_unsigned(23, 5);
-                    when 7 | 8 =>
-                        -- (7: s_zc(3) = 1, the zenith, kept; 8: the horizon, written)
-                        if s_night = '1' then
-                            c_injent <= '0' & (not s_zc(3)) & "000"; c_injt <= c_e(9 downto 4);
-                        else
-                            c_injent <= '0' & (not s_zc(3)) & c_e(9 downto 7); c_injt <= c_e(6 downto 1);
-                        end if;
-                        if s_zc(3) = '1' then c_injk <= "01"; else c_injk <= "10"; end if;
-                        c_injw <= to_unsigned(19, 5);
-                    when others => null;
-                end case;
-            end if;
-
-            -- [A] sync delay, generated-avid and start-pulse shift registers
-            s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
-            s_gav_sr(0) <= g_avid;
-            for i in 1 to C_LAT - 1 loop
-                s_hsync_sr(i) <= s_hsync_sr(i - 1); s_vsync_sr(i) <= s_vsync_sr(i - 1);
-                s_gav_sr(i) <= s_gav_sr(i - 1);
-            end loop;
-            s_field_q <= data_in.field_n;
-            s_st <= g_start & s_st(1 to 15);
-        end if;
-    end process p_ctrl;
-
-    ---------------------------------------------------------------------------
-    -- [C] BEAM COUNTERS: each layer's x (half units), loaded so that its results reach stage 14
-    ---------------------------------------------------------------------------
-    p_beam : process(clk)
-    begin
-        if rising_edge(clk) then
-            if g_start = '1'  then b_xw <= n_xw0; else b_xw <= b_xw + s_xs; end if;      -- stage 1
-            if s_st(10) = '1' then                                                       -- stage 11
-                b_xa <= n_xa0; b_xb <= n_xb0; b_x <= n_x0;
-            else
-                b_xa <= b_xa + s_xs;
-                b_xb <= b_xb + signed(resize(s_xs, 14));
-                b_x <= b_x + signed(resize(s_xs, 13));
-            end if;
-            if s_st(12) = '1' then b_px <= (others => '0'); else b_px <= b_px + 1; end if;   -- stage 13
-            if s_st(16) = '1' then b_pa <= n_pa0; else b_pa <= b_pa + s_xs; end if;      -- stage 17
-        end if;
-    end process p_beam;
-
-    ---------------------------------------------------------------------------
-    -- [C] LINE ENGINE: kicked when a line's last pixel has left stage 1 (and once in the zone for line 0),
-    -- computes the NEXT line's constants in horizontal blanking.  The l_* constants are written at state 32
-    -- or later, after the previous line's last pixel has left the stages that read them.
-    ---------------------------------------------------------------------------
-    p_line : process(clk)
-        variable v_y   : unsigned(10 downto 0);
-        variable v_d   : unsigned(11 downto 0);
-        variable v_a   : unsigned(11 downto 0);
-        variable v_b   : signed(11 downto 0);
-        variable v_row : unsigned(7 downto 0);
-        variable v_t   : unsigned(9 downto 0);
-        variable v_g3, v_g5, v_g32 : unsigned(4 downto 0);
-        variable v_th  : unsigned(4 downto 0);
-        variable v_a4  : unsigned(11 downto 0);
-        variable v_rm  : signed(11 downto 0);
-        variable v_b4  : signed(11 downto 0);
-        variable v_w   : signed(4 downto 0);
-        variable v_by  : unsigned(7 downto 0);
-        variable v_fo  : unsigned(2 downto 0);
-    begin
-        if rising_edge(clk) then
-            e_zk <= '0';
-            if s_zone = '1' and s_zc = 600 then e_zk <= '1'; end if;     -- after the field constants
-            e_gq <= g_avid;
-            e_kick <= e_gq and not g_avid;
-
-            if e_zk = '1' then
-                e_vy <= (others => '0');
-                e_lc <= (others => '0');
-                e_ln <= (others => '0');
-            elsif e_kick = '1' then
-                e_vy <= e_vy + resize(s_ys, 19);
-                e_lc <= (others => '0');
-                if e_ln /= 3 then e_ln <= e_ln + 1; end if;
-            elsif e_lc /= 127 then
-                e_lc <= e_lc + 1;
-            end if;
-
-            -- fill flags (states 40 .. 47, ramp = the state's low bits): ramp i is filled out to
-            -- (fill - order x 1024) rows from the horizon; the sun goes first, then the sky, then ramps 2 .. 7
-            if e_lc(6 downto 3) = "0101" then
-                if resize(e_d, 14) + e_fc < c_fp then l_fill(to_integer(e_lc(2 downto 0))) <= '1';
-                else l_fill(to_integer(e_lc(2 downto 0))) <= '0'; end if;
-            end if;
-            v_fo := e_lc(2 downto 0) + 1;
-            case to_integer(v_fo) is
-                when 1      => e_fc <= to_unsigned(0, 14);        -- sun
-                when 0      => e_fc <= to_unsigned(1024, 14);     -- sky
-                when others => e_fc <= resize(v_fo & "0000000000", 14);
-            end case;
-
-            v_y := e_vy(18 downto 8);
-            case to_integer(e_lc) is
-                when 0 =>
-                    e_s <= signed(resize(v_y, 12)) - C_HZ;
-                when 1 =>
-                    if e_s(11) = '1' then v_d := unsigned(-e_s); else v_d := unsigned(e_s); end if;
-                    if v_d(11 downto 10) /= "00" then e_d <= (others => '1'); else e_d <= v_d(9 downto 0); end if;
-                    e_ab <= e_s(11);
-                when 2 =>
-                    -- under the horizon every line is a mirror line: the sky objects at the same distance
-                    e_mir <= not e_ab;
-                    e_dyu <= signed(resize(e_d, 12)) - c_sunc;
-                    e_c1  <= signed(resize(e_d, 11)) - 200;
-                    e_bd  <= signed(resize(e_d, 11)) - 60;
-                    e_cr  <= signed(resize(v_y, 12)) - signed(resize(c_cry, 12));
-                    if v_y < c_cyh then e_cv <= '1'; else e_cv <= '0'; end if;    -- above its hole line
-                    v_rm := to_signed(C_HZ, 12) - signed(resize(e_d, 12));
-                    if v_rm(11) = '1' then e_rm <= (others => '0'); else e_rm <= unsigned(v_rm(8 downto 0)); end if;
-                when 3 =>
-                    -- sun / moon (radius 128): half-chord address, the sun's slits, ramp position
-                    if e_dyu(11) = '1' then v_a := unsigned(-e_dyu); else v_a := unsigned(e_dyu); end if;
-                    e_son <= '0';
-                    e_sa <= v_a(6 downto 0) & '0';
-                    if v_a < 128 then
-                        if c_emoon = '1' then
-                            e_son <= '1';
-                        elsif c_esun = '1' then
-                            -- slits below the centre: period 32 rows, opening with depth, rolling
-                            v_g3 := v_a(4 downto 0) + c_t(5 downto 1);
-                            v_th := v_a(6 downto 2) + resize(v_a(6 downto 3), 5);
-                            if e_dyu(11) = '0' or v_g3 >= v_th then e_son <= '1'; end if;
-                        end if;
-                    end if;
-                    -- across the disc, 0 .. 126.  (An elevation term added here tripped yosys abc9's box-order
-                    -- assert in every config: the netlist is shape-sensitive, see SUMMARY.md.)
-                    v_b := e_dyu + 128;
-                    e_tb <= unsigned(v_b(7 downto 2));
-                    -- slot A: the cloud or gull band this line crosses
-                    e_aen <= '0'; e_asel <= '0'; e_asc <= c_sa1;
-                    e_aa <= (others => '0');
-                    if e_c1(10 downto 7) = "0000" and e_c1(6 downto 5) /= "11" then          -- 0 <= e_c1 < 96 as bit tests
-                        v_row := to_unsigned(47, 8) - unsigned(e_c1(8 downto 1));
-                        e_aa <= to_unsigned(128, 10) + (v_row(7 downto 0) & "00");
-                        e_aen <= '1';
-                    elsif c_ebird = '1' and e_bd(10 downto 6) = "00000" then                  -- 0 <= e_bd < 64
-                        v_row := to_unsigned(31, 8) - unsigned(e_bd(8 downto 1));
-                        if c_t(4) = '1' then e_aa <= to_unsigned(448, 10) + (v_row(7 downto 0) & "00");
-                        else e_aa <= to_unsigned(320, 10) + (v_row(7 downto 0) & "00"); end if;
-                        e_asel <= '1'; e_asc <= c_sab;
-                        e_aen <= '1';
-                    end if;
-                    -- slot B: the crab (48 rows, one ROM row a line)
-                    e_ben <= '0';
-                    e_ba <= (others => '0');
-                    if c_ecrab = '1' and e_cv = '1' and e_cr(11 downto 6) = "000000" and e_cr(5 downto 4) /= "11" then   -- 0 <= e_cr < 48
-                        if o_cs(7) = '1' then e_ba <= to_unsigned(768, 10) + (unsigned(e_cr(5 downto 0)) & "00");
-                        else e_ba <= to_unsigned(576, 10) + (unsigned(e_cr(5 downto 0)) & "00"); end if;
-                        e_ben <= '1';
-                    end if;
-                when 4 =>                                    -- the moon's bite: a disc 24 rows up
-                    e_tsun <= e_tb & '0';                 -- (a low sun is redder through the low-sun palette)
-                    v_b4 := e_dyu - 24;
-                    if v_b4(11) = '1' then v_a4 := unsigned(-v_b4); else v_a4 := unsigned(v_b4); end if;
-                    e_sb <= v_a4(6 downto 0) & '0';
-                    if c_emoon = '1' and v_a4 < 128 then e_bon <= '1'; else e_bon <= '0'; end if;
-                when 5 =>                                    -- the line's left edge (the sea strip wobbles it)
-                    v_w := (others => '0');
-                    if e_mir = '1' then
-                        v_g5 := resize(e_d(4 downto 1) + c_t(5 downto 2), 5);
-                        if v_g5(3) = '1' then v_w := signed('0' & (not v_g5(2 downto 0)) & '0') - 7;
-                        else v_w := signed('0' & v_g5(2 downto 0) & '0') - 7; end if;
-                    end if;
-                    e_x0 <= w_x0 + resize(v_w, 14);
-                when 6 =>
-                    n_xa0 <= unsigned(e_x0) + e_asc;
-                    n_xw0 <= unsigned(w_x0 + 1920);          -- water and sand: half units from the canvas's left
-                when 7 =>
-                    n_x0 <= e_x0(12 downto 0);
-                    n_xb0 <= signed(n_xw0) - signed(resize(c_cx2, 14));   -- the crab: half units from its centre line
-                when 12 =>                                   -- the sheen's diagonal phase: x + y + 4 t
-                    n_pa0 <= unsigned(e_x0) + resize(v_y & '0', 14) + (c_t(10 downto 0) & "000");
-                when 32 =>
-                    -- the line's constants (the previous line has left the pixel path by now)
-                    l_d <= e_d; l_ab <= e_ab; l_mir <= e_mir; l_row <= v_y;
-                    l_slr <= c_sl(7 downto 0) - v_y(7 downto 0);
-                    l_son <= e_son; l_bon <= e_bon; l_tsun <= e_tsun;
-                    l_asel <= e_asel;
-                    -- slot A's ramp positions: zone 1, zone 2 (gulls: wings, body; clouds: top, shelf)
-                    if e_asel = '1' then l_ta <= to_unsigned(70, 7); l_tb <= to_unsigned(93, 7);
-                    else l_ta <= to_unsigned(104, 7); l_tb <= to_unsigned(127, 7); end if;
-                    -- the sky ramp's position: 0 at the top, 63 at the horizon (by the mirrored row below it)
-                    v_t := resize(e_rm(8 downto 3), 10) + resize(e_rm(8 downto 4), 10) - resize(e_rm(8 downto 7), 10);
-                    if v_t > 63 then l_tsky <= (others => '1'); else l_tsky <= v_t(5 downto 0); end if;
-                    -- sea strip ripples: gaps of a 16-row period that open with depth, drifting
-                    v_g32 := resize(e_d(3 downto 0) + c_t(4 downto 1), 5);
-                    if e_mir = '1' and v_g32(3 downto 0) <= e_d(9 downto 6) then l_rip <= '1'; else l_rip <= '0'; end if;
-                    if e_ln /= 0 then l_v1 <= '1'; else l_v1 <= '0'; end if;
-                    if e_ln(1) = '1' and s_tv2 = '1' then l_v2 <= '1'; else l_v2 <= '0'; end if;
-                    lr_a <= "000" & e_sa(7 downto 1);
-                when 33 => lr_a <= "000" & e_sb(7 downto 1);
-                when 34 => lr_a <= e_aa;
-                when 35 => lr_a <= e_aa(9 downto 2) & "01";
-                    if e_sa(0) = '1' then v_by := lr_qf(15 downto 8); else v_by := lr_qf(7 downto 0); end if;
-                    l_sw <= "00" & v_by(7 downto 1);
-                when 36 => lr_a <= e_aa(9 downto 2) & "10";
-                    if e_sb(0) = '1' then v_by := lr_qf(15 downto 8); else v_by := lr_qf(7 downto 0); end if;
-                    l_bw <= "00" & v_by(7 downto 1);
-                when 37 => lr_a <= e_aa(9 downto 2) & "11";
-                    l_arow(0) <= lr_qf;
-                when 38 => lr_a <= e_ba;
-                    l_arow(1) <= lr_qf;
-                when 39 => lr_a <= e_ba(9 downto 2) & "01";
-                    l_arow(2) <= lr_qf;
-                when 40 => lr_a <= e_ba(9 downto 2) & "10";
-                    if e_aen = '1' then l_arow(3) <= lr_qf; else l_arow(3) <= (others => '0'); end if;
-                when 41 => lr_a <= e_ba(9 downto 2) & "11";
-                    l_brow(0) <= lr_qf;
-                when 42 => l_brow(1) <= lr_qf;
-                when 43 => l_brow(2) <= lr_qf;
-                when 44 =>
-                    if e_ben = '1' then l_brow(3) <= lr_qf; else l_brow(3) <= (others => '0'); end if;
-                -- sheen: the other directions.  x + 4 t (the diagonal phase less y) and y - 2 t
-                when 45 => l_od <= to_unsigned(0, 14) - resize(v_y & '0', 14);
-                when 46 => l_pc <= resize(v_y & '0', 14) - (c_t(11 downto 0) & "00");
-                when others => null;
-            end case;
-        end if;
-    end process p_line;
-
-    ---------------------------------------------------------------------------
     -- [F] OUTPUT CONDITIONING: chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent running 8-sums (resynced to
     -- neutral in blanking), luma [1 2 1]/4 at the chroma's group delay (+ 2 px for the glow), luma 13/16
     -- toward black, blanking gate.
@@ -946,50 +560,6 @@ begin
 
 
     ---------------------------------------------------------------------------
-    -- [A] Generated avid (parity-locked start 3/4 clocks after the source's avid rise, field-latched width)
-    ---------------------------------------------------------------------------
-    p_gavid : process(clk)
-    begin
-        if rising_edge(clk) then
-            g_hsq <= data_in.hsync_n;
-            g_hsr <= g_hsq and not data_in.hsync_n;
-            g_avq <= data_in.avid;
-            g_avr <= data_in.avid and not g_avq;
-
-            if g_hsr = '1' then
-                g_ph  <= '0';
-                g_arm <= '1';
-            else
-                g_ph <= not g_ph;
-            end if;
-            g_rsr <= g_rsr(1 downto 0) & '0';
-            if g_avr = '1' and g_arm = '1' then
-                g_arm    <= '0';
-                g_rsr(0) <= '1';
-                g_sel    <= g_ph xor g_par;
-                if g_ph = '1' then
-                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
-                else
-                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
-                end if;
-            end if;
-            if g_pc = 15 then g_par <= '1';
-            elsif g_pc = 0 then g_par <= '0'; end if;
-
-            if g_start = '1' then
-                g_avid <= '1';
-                g_cnt  <= (others => '0');
-            elsif g_avid = '1' then
-                g_cnt <= g_cnt + 1;
-                if g_cnt = g_wm1 or g_hsr = '1' then
-                    g_avid <= '0';
-                end if;
-            end if;
-        end if;
-    end process p_gavid;
-    g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
-
-    ---------------------------------------------------------------------------
     -- [C] PIXEL PATH, stages 2 .. 14: one block per object, each ending in a few bits at stage 14
     ---------------------------------------------------------------------------
     p_obj : process(clk)
@@ -998,13 +568,12 @@ begin
         variable v_a12 : unsigned(11 downto 0);
         variable v_hh  : unsigned(11 downto 0);
         variable v_cell : unsigned(3 downto 0);
-        variable v_ax  : unsigned(12 downto 0);
-        variable v_bx  : signed(12 downto 0);
+        variable v_cax : unsigned(11 downto 0);
         variable v_ds  : signed(10 downto 0);
         variable v_db  : signed(10 downto 0);
         variable v_n, v_sd, v_dd : signed(11 downto 0);
         variable v_r2  : unsigned(10 downto 0);
-        variable v_wv  : unsigned(3 downto 0);
+        variable v_wv, v_wd : unsigned(3 downto 0);
         variable v_st8, v_d8 : unsigned(7 downto 0);
         variable v_j   : unsigned(3 downto 0);
         variable v_cx  : unsigned(6 downto 0);
@@ -1150,8 +719,9 @@ begin
             -- wet sand: 8 steps of the ramp a wetness step (v0.3: 4), so a fresh wash leaves the sand dark brown;
             -- drying cells (12 .. 1) give back the fraction since their last step (no step in the colour)
             if v_wv /= 0 and v_wv < 13 then v_st8 := w13_stp; else v_st8 := resize(wd_st(13), 8); end if;
-            if v_st8 > resize(v_wv & "000", 8) then
-                v_d8 := v_st8 - resize(v_wv & "000", 8); s14_t <= v_d8(6 downto 0);
+            if v_wv = 13 then v_wd := to_unsigned(6, 4); else v_wd := v_wv; end if;   -- the crab's hole: part dark
+            if v_st8 > resize(v_wd & "000", 8) then
+                v_d8 := v_st8 - resize(v_wd & "000", 8); s14_t <= v_d8(6 downto 0);
             else
                 s14_t <= (others => '0');
             end if;
@@ -1202,24 +772,18 @@ begin
             k14_skt <= l_tsky;
 
             ----------------------------------------------------------------
-            -- sprite slots: span-coded rows.  A = clouds / gulls (2 virtual px a unit), B = the crab (folded)
+            -- sprite slot A: span-coded rows, clouds / gulls (2 virtual px a unit).  (The crab: stages 9 .. 14 below.)
             ----------------------------------------------------------------
             -- 12: lattice cell, presence, x inside the sprite
             v_cell := b_xa(13 downto 10);
             a12_xs <= b_xa(9 downto 2);
             if l_asel = '0' then a12_pr <= C_CM1(to_integer(v_cell)); else a12_pr <= C_BM(to_integer(v_cell)); end if;
-            v_bx := b_xb(13 downto 1);
-            if v_bx(12) = '1' then v_ax := unsigned(-v_bx); else v_ax := unsigned(v_bx); end if;
-            b12_xs <= v_ax(6 downto 0) & '0';                      -- half size: two ROM units a virtual px
-            if v_ax(12 downto 7) = "000000" then b12_pr <= '1'; else b12_pr <= '0'; end if;
             -- 13: thermometer against the six boundaries
             for i in 0 to 2 loop
                 if a12_xs >= l_arow(i)(7 downto 0)  then a13_g(2 * i) <= '1';     else a13_g(2 * i) <= '0'; end if;
                 if a12_xs >= l_arow(i)(15 downto 8) then a13_g(2 * i + 1) <= '1'; else a13_g(2 * i + 1) <= '0'; end if;
-                if b12_xs >= l_brow(i)(7 downto 0)  then b13_g(2 * i) <= '1';     else b13_g(2 * i) <= '0'; end if;
-                if b12_xs >= l_brow(i)(15 downto 8) then b13_g(2 * i + 1) <= '1'; else b13_g(2 * i + 1) <= '0'; end if;
             end loop;
-            a13_pr <= a12_pr; b13_pr <= b12_pr;
+            a13_pr <= a12_pr;
             -- 14: the zone of the interval
             if a13_pr = '0' then a14_z <= "00";
             elsif a13_g(5) = '1' then a14_z <= l_arow(3)(13 downto 12);
@@ -1229,17 +793,254 @@ begin
             elsif a13_g(1) = '1' then a14_z <= l_arow(3)(5 downto 4);
             elsif a13_g(0) = '1' then a14_z <= l_arow(3)(3 downto 2);
             else a14_z <= l_arow(3)(1 downto 0); end if;
-            if b13_pr = '0' then b14_z <= "00";
-            elsif b13_g(5) = '1' then b14_z <= l_brow(3)(13 downto 12);
-            elsif b13_g(4) = '1' then b14_z <= l_brow(3)(11 downto 10);
-            elsif b13_g(3) = '1' then b14_z <= l_brow(3)(9 downto 8);
-            elsif b13_g(2) = '1' then b14_z <= l_brow(3)(7 downto 6);
-            elsif b13_g(1) = '1' then b14_z <= l_brow(3)(5 downto 4);
-            elsif b13_g(0) = '1' then b14_z <= l_brow(3)(3 downto 2);
-            else b14_z <= l_brow(3)(1 downto 0); end if;
+            -- the crab (folded about its centre line), read at each pixel's own depth under the sand line, so it
+            -- follows the slope like the sand's grid.  9: the sand line at its centre (the same lerp as the sand;
+            -- the sand never moves, so any line will do).  10: x from its centre, rows under its drawn top.
+            -- 11: |x|, the visible window (its hole line clips it as it sinks), the address.  12: the bitmap (a
+            -- block RAM: 1 px x 2 rows a texel, 64 x 24 a frame).  13: a fabric register.  14: its zone.
+            if w_xb(8) = resize(o_cx, 11) then c_bedc <= w8_bed; end if;
+            c10_dx <= signed(resize(w_xb(9), 12)) - signed(resize(o_cx, 12));
+            c10_cr <= signed(resize(w9_sd, 12)) - c_crel;
+            if c10_dx(11) = '1' then v_cax := unsigned(-c10_dx); else v_cax := unsigned(c10_dx); end if;
+            c11_a <= c_cfr & unsigned(c10_cr(5 downto 1)) & v_cax(5 downto 0);
+            if c_ecrab = '1' and v_cax(11 downto 6) = "000000" and c10_cr(11 downto 6) = "000000"
+               and unsigned(c10_cr(5 downto 0)) < c_cvis then c11_in <= '1'; else c11_in <= '0'; end if;
+            c11_cr <= C_NB_CRC(to_integer(unsigned(c10_cr(5 downto 1))))(0);
+            c12_q <= C_NB_CRAB(to_integer(c11_a)); c12_in <= c11_in; c12_cr <= c11_cr;
+            c13_q <= c12_q; c13_in <= c12_in; c13_cr <= c12_cr;
+            if c13_in = '1' then b14_z <= c13_q; else b14_z <= "00"; end if;
+            b14_cr <= c13_cr;
         end if;
     end process p_obj;
 
+
+    ---------------------------------------------------------------------------
+    -- [C] LINE ENGINE: kicked when a line's last pixel has left stage 1 (and once in the zone for line 0),
+    -- computes the NEXT line's constants in horizontal blanking.  The l_* constants are written at state 32
+    -- or later, after the previous line's last pixel has left the stages that read them.
+    ---------------------------------------------------------------------------
+    p_line : process(clk)
+        variable v_y   : unsigned(10 downto 0);
+        variable v_d   : unsigned(11 downto 0);
+        variable v_a   : unsigned(11 downto 0);
+        variable v_b   : signed(11 downto 0);
+        variable v_row : unsigned(7 downto 0);
+        variable v_gfl : std_logic;
+        variable v_t   : unsigned(9 downto 0);
+        variable v_g3, v_g5, v_g32 : unsigned(4 downto 0);
+        variable v_th  : unsigned(4 downto 0);
+        variable v_a4  : unsigned(11 downto 0);
+        variable v_rm  : signed(11 downto 0);
+        variable v_b4  : signed(11 downto 0);
+        variable v_w   : signed(4 downto 0);
+        variable v_by  : unsigned(7 downto 0);
+        variable v_fo  : unsigned(2 downto 0);
+    begin
+        if rising_edge(clk) then
+            e_zk <= '0';
+            if s_zone = '1' and s_zc = 600 then e_zk <= '1'; end if;     -- after the field constants
+            e_gq <= g_avid;
+            e_kick <= e_gq and not g_avid;
+
+            if e_zk = '1' then
+                e_vy <= (others => '0');
+                e_lc <= (others => '0');
+                e_ln <= (others => '0');
+            elsif e_kick = '1' then
+                e_vy <= e_vy + resize(s_ys, 19);
+                e_lc <= (others => '0');
+                if e_ln /= 3 then e_ln <= e_ln + 1; end if;
+            elsif e_lc /= 127 then
+                e_lc <= e_lc + 1;
+            end if;
+
+            -- fill flags (states 40 .. 47, ramp = the state's low bits): ramp i is filled out to
+            -- (fill - order x 1024) rows from the horizon; the sun goes first, then the sky, then ramps 2 .. 7
+            if e_lc(6 downto 3) = "0101" then
+                if resize(e_d, 14) + e_fc < c_fp then l_fill(to_integer(e_lc(2 downto 0))) <= '1';
+                else l_fill(to_integer(e_lc(2 downto 0))) <= '0'; end if;
+            end if;
+            v_fo := e_lc(2 downto 0) + 1;
+            case to_integer(v_fo) is
+                when 1      => e_fc <= to_unsigned(0, 14);        -- sun
+                when 0      => e_fc <= to_unsigned(1024, 14);     -- sky
+                when others => e_fc <= resize(v_fo & "0000000000", 14);
+            end case;
+
+            v_y := e_vy(18 downto 8);
+            case to_integer(e_lc) is
+                when 0 =>
+                    e_s <= signed(resize(v_y, 12)) - C_HZ;
+                when 1 =>
+                    if e_s(11) = '1' then v_d := unsigned(-e_s); else v_d := unsigned(e_s); end if;
+                    if v_d(11 downto 10) /= "00" then e_d <= (others => '1'); else e_d <= v_d(9 downto 0); end if;
+                    e_ab <= e_s(11);
+                when 2 =>
+                    -- under the horizon every line is a mirror line: the sky objects at the same distance
+                    e_mir <= not e_ab;
+                    e_dyu <= signed(resize(e_d, 12)) - c_sunc;
+                    e_c1  <= signed(resize(e_d, 11)) - 200;
+                    e_bd  <= signed(resize(e_d, 11)) - 60;
+                    v_rm := to_signed(C_HZ, 12) - signed(resize(e_d, 12));
+                    if v_rm(11) = '1' then e_rm <= (others => '0'); else e_rm <= unsigned(v_rm(8 downto 0)); end if;
+                when 3 =>
+                    -- sun / moon (radius 128): half-chord address, the sun's slits, ramp position
+                    if e_dyu(11) = '1' then v_a := unsigned(-e_dyu); else v_a := unsigned(e_dyu); end if;
+                    e_son <= '0';
+                    e_sa <= v_a(6 downto 0) & '0';
+                    if v_a < 128 then
+                        if c_emoon = '1' then
+                            e_son <= '1';
+                        elsif c_esun = '1' then
+                            -- slits below the centre: period 32 rows, opening with depth, rolling
+                            v_g3 := v_a(4 downto 0) + c_t(5 downto 1);
+                            v_th := v_a(6 downto 2) + resize(v_a(6 downto 3), 5);
+                            if e_dyu(11) = '0' or v_g3 >= v_th then e_son <= '1'; end if;
+                        end if;
+                    end if;
+                    -- across the disc, 0 .. 126.  (An elevation term added here tripped yosys abc9's box-order
+                    -- assert in every config: the netlist is shape-sensitive, see SUMMARY.md.)
+                    v_b := e_dyu + 128;
+                    e_tb <= unsigned(v_b(7 downto 2));
+                    -- slot A: the cloud or gull band this line crosses
+                    e_aen <= '0'; e_asel <= '0'; e_asc <= c_sa1;
+                    e_aa <= (others => '0');
+                    if e_c1(10 downto 7) = "0000" and e_c1(6 downto 5) /= "11" then          -- 0 <= e_c1 < 96 as bit tests
+                        v_row := to_unsigned(47, 8) - unsigned(e_c1(8 downto 1));
+                        e_aa <= to_unsigned(128, 10) + (v_row(7 downto 0) & "00");
+                        e_aen <= '1';
+                    elsif c_ebird = '1' and e_bd(10 downto 6) = "00000" then                  -- 0 <= e_bd < 64
+                        -- the three gulls never share a row (rows 0 .. 10, 11 .. 21, 22 .. 31): each row
+                        -- takes its own gull's flap frame
+                        v_row := to_unsigned(31, 8) - unsigned(e_bd(8 downto 1));
+                        if v_row < 11 then v_gfl := c_gf(0); elsif v_row < 22 then v_gfl := c_gf(1); else v_gfl := c_gf(2); end if;
+                        if v_gfl = '1' then e_aa <= to_unsigned(448, 10) + (v_row(7 downto 0) & "00");
+                        else e_aa <= to_unsigned(320, 10) + (v_row(7 downto 0) & "00"); end if;
+                        e_asel <= '1'; e_asc <= c_sab;
+                        e_aen <= '1';
+                    end if;
+                when 4 =>                                    -- the moon's bite: a disc 24 rows up
+                    e_tsun <= e_tb & '0';                 -- (a low sun is redder through the low-sun palette)
+                    v_b4 := e_dyu - 24;
+                    if v_b4(11) = '1' then v_a4 := unsigned(-v_b4); else v_a4 := unsigned(v_b4); end if;
+                    e_sb <= v_a4(6 downto 0) & '0';
+                    if c_emoon = '1' and v_a4 < 128 then e_bon <= '1'; else e_bon <= '0'; end if;
+                when 5 =>                                    -- the line's left edge (the sea strip wobbles it)
+                    v_w := (others => '0');
+                    if e_mir = '1' then
+                        v_g5 := resize(e_d(4 downto 1) + c_t(5 downto 2), 5);
+                        if v_g5(3) = '1' then v_w := signed('0' & (not v_g5(2 downto 0)) & '0') - 7;
+                        else v_w := signed('0' & v_g5(2 downto 0) & '0') - 7; end if;
+                    end if;
+                    e_x0 <= w_x0 + resize(v_w, 14);
+                when 6 =>
+                    n_xa0 <= unsigned(e_x0) + e_asc;
+                    n_xw0 <= unsigned(w_x0 + 1920);          -- water and sand: half units from the canvas's left
+                when 7 =>
+                    n_x0 <= e_x0(12 downto 0);
+                when 12 =>                                   -- the sheen's diagonal phase: x + y + 4 t
+                    n_pa0 <= unsigned(e_x0) + resize(v_y & '0', 14) + (c_t(10 downto 0) & "000");
+                when 32 =>
+                    -- the line's constants (the previous line has left the pixel path by now)
+                    l_d <= e_d; l_ab <= e_ab; l_mir <= e_mir; l_row <= v_y;
+                    l_slr <= c_sl(7 downto 0) - v_y(7 downto 0);
+                    l_son <= e_son; l_bon <= e_bon; l_tsun <= e_tsun;
+                    l_asel <= e_asel;
+                    -- slot A's ramp positions: zone 1, zone 2 (gulls: wings, body; clouds: top, shelf)
+                    if e_asel = '1' then l_ta <= to_unsigned(70, 7); l_tb <= to_unsigned(93, 7);
+                    else l_ta <= to_unsigned(104, 7); l_tb <= to_unsigned(127, 7); end if;
+                    -- the sky ramp's position: 0 at the top, 63 at the horizon (by the mirrored row below it)
+                    v_t := resize(e_rm(8 downto 3), 10) + resize(e_rm(8 downto 4), 10) - resize(e_rm(8 downto 7), 10);
+                    if v_t > 63 then l_tsky <= (others => '1'); else l_tsky <= v_t(5 downto 0); end if;
+                    -- sea strip ripples: gaps of a 16-row period that open with depth, drifting
+                    v_g32 := resize(e_d(3 downto 0) + c_t(4 downto 1), 5);
+                    if e_mir = '1' and v_g32(3 downto 0) <= e_d(9 downto 6) then l_rip <= '1'; else l_rip <= '0'; end if;
+                    if e_ln /= 0 then l_v1 <= '1'; else l_v1 <= '0'; end if;
+                    if e_ln(1) = '1' and s_tv2 = '1' then l_v2 <= '1'; else l_v2 <= '0'; end if;
+                    lr_a <= "000" & e_sa(7 downto 1);
+                when 33 => lr_a <= "000" & e_sb(7 downto 1);
+                when 34 => lr_a <= e_aa;
+                when 35 => lr_a <= e_aa(9 downto 2) & "01";
+                    if e_sa(0) = '1' then v_by := lr_qf(15 downto 8); else v_by := lr_qf(7 downto 0); end if;
+                    l_sw <= "00" & v_by(7 downto 1);
+                when 36 => lr_a <= e_aa(9 downto 2) & "10";
+                    if e_sb(0) = '1' then v_by := lr_qf(15 downto 8); else v_by := lr_qf(7 downto 0); end if;
+                    l_bw <= "00" & v_by(7 downto 1);
+                when 37 => lr_a <= e_aa(9 downto 2) & "11";
+                    l_arow(0) <= lr_qf;
+                when 38 => l_arow(1) <= lr_qf;
+                when 39 => l_arow(2) <= lr_qf;
+                when 40 =>
+                    if e_aen = '1' then l_arow(3) <= lr_qf; else l_arow(3) <= (others => '0'); end if;
+                -- sheen: the other directions.  x + 4 t (the diagonal phase less y) and y - 2 t
+                when 45 => l_od <= to_unsigned(0, 14) - resize(v_y & '0', 14);
+                when 46 => l_pc <= resize(v_y & '0', 14) - (c_t(11 downto 0) & "00");
+                when others => null;
+            end case;
+        end if;
+    end process p_line;
+
+    ---------------------------------------------------------------------------
+    -- [A] Generated avid (parity-locked start 3/4 clocks after the source's avid rise, field-latched width)
+    ---------------------------------------------------------------------------
+    p_gavid : process(clk)
+    begin
+        if rising_edge(clk) then
+            g_hsq <= data_in.hsync_n;
+            g_hsr <= g_hsq and not data_in.hsync_n;
+            g_avq <= data_in.avid;
+            g_avr <= data_in.avid and not g_avq;
+
+            if g_hsr = '1' then
+                g_ph  <= '0';
+                g_arm <= '1';
+            else
+                g_ph <= not g_ph;
+            end if;
+            g_rsr <= g_rsr(1 downto 0) & '0';
+            if g_avr = '1' and g_arm = '1' then
+                g_arm    <= '0';
+                g_rsr(0) <= '1';
+                g_sel    <= g_ph xor g_par;
+                if g_ph = '1' then
+                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
+                else
+                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
+                end if;
+            end if;
+            if g_pc = 15 then g_par <= '1';
+            elsif g_pc = 0 then g_par <= '0'; end if;
+
+            if g_start = '1' then
+                g_avid <= '1';
+                g_cnt  <= (others => '0');
+            elsif g_avid = '1' then
+                g_cnt <= g_cnt + 1;
+                if g_cnt = g_wm1 or g_hsr = '1' then
+                    g_avid <= '0';
+                end if;
+            end if;
+        end if;
+    end process p_gavid;
+    g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
+
+    ---------------------------------------------------------------------------
+    -- [C] BEAM COUNTERS: each layer's x (half units), loaded so that its results reach stage 14
+    ---------------------------------------------------------------------------
+    p_beam : process(clk)
+    begin
+        if rising_edge(clk) then
+            if g_start = '1'  then b_xw <= n_xw0; else b_xw <= b_xw + s_xs; end if;      -- stage 1
+            if s_st(10) = '1' then                                                       -- stage 11
+                b_xa <= n_xa0; b_x <= n_x0;
+            else
+                b_xa <= b_xa + s_xs;
+                b_x <= b_x + signed(resize(s_xs, 13));
+            end if;
+            if s_st(12) = '1' then b_px <= (others => '0'); else b_px <= b_px + 1; end if;   -- stage 13
+            if s_st(16) = '1' then b_pa <= n_pa0; else b_pa <= b_pa + s_xs; end if;      -- stage 17
+        end if;
+    end process p_beam;
 
     ---------------------------------------------------------------------------
     -- [C] WET SAND: the RAM (one write statement; the pixel path reads it in active video) and the sweep (in
@@ -1288,10 +1089,16 @@ begin
                 if ws_rc2 >= v_top + 4 then v_n := to_unsigned(15, 4);
                 elsif ws_rc2 > v_top then v_n := to_unsigned(14, 4);
                 elsif v_o >= 14 then v_n := to_unsigned(12, 4);
+                elsif v_o = 13 then                                       -- the hole, let go: 6 at a step
+                    if ws_tick = '1' then v_n := to_unsigned(6, 4); else v_n := v_o; end if;
                 elsif ws_tick = '1' and v_o /= 0 then v_n := v_o - 1;
                 else v_n := v_o; end if;
-                if ws_uw = '1' and ws_r3 = 0 then v_n := to_unsigned(13, 4); end if;    -- the sea bed's top row: damp
-                if o_cs(6 downto 0) >= 90 and (ws_r3 & ws_c3) = o_ch then v_n := to_unsigned(13, 4); end if;   -- the crab's hole
+                -- the crab going down or coming up: its hole's row, its column and the two beside it, held
+                -- part dark (never lighter than the wash left them)
+                if ws_hon = '1' and ws_r3 = o_ch(10 downto 6) and v_n <= 6
+                   and (ws_c3 = o_ch(5 downto 0) or ws_c3 = o_ch(5 downto 0) - 1 or ws_c3 = o_ch(5 downto 0) + 1) then
+                    v_n := to_unsigned(13, 4);
+                end if;
                 wt_we <= '1'; wt_wa <= ws_r3 & ws_c3; wt_wd <= std_logic_vector(v_n);
             end if;
 
@@ -1300,6 +1107,7 @@ begin
                 ws_a1 <= c_t(7 downto 0) + (c_t(6 downto 0) & '0');               -- lobes drift: 3 t and -2 t
                 ws_a2 <= to_unsigned(0, 8) - (c_t(6 downto 0) & '0');
                 ws_dp <= o_e(7 downto 3);
+                if o_cs(6 downto 0) /= 0 and o_cs(6 downto 0) /= 96 then ws_hon <= '1'; else ws_hon <= '0'; end if;
                 v_l9 := signed(resize(o_ks, 9)) - signed(resize(o_e(7 downto 3), 9));
                 ws_fc <= shift_right(v_l9, 1);                                     -- the run-up's front column
                 if ws_div = 11 then ws_div <= (others => '0'); ws_tick <= '1'; else ws_div <= ws_div + 1; ws_tick <= '0'; end if;
@@ -1315,11 +1123,16 @@ begin
                         when "001" =>
                             v_l9 := signed(resize(ws_l, 9)) - 128;
                             ws_reach <= signed(resize(ws_dp, 10)) + resize(shift_right(v_l9, 5), 10);
-                            ws_cap <= shift_left(resize(ws_sdist, 10), 3) - 4;                  -- thins over the last columns
+                            if ws_sdist(8) = '0' and ws_sdist(7 downto 5) /= "000" then ws_cap <= to_signed(511, 10);
+                            else ws_cap <= shift_left(resize(ws_sdist, 10), 3) - 4; end if;     -- thins over the last columns
                             ws_p <= "010";
                         when "010" =>
                             if ws_uw = '1' then
                                 ws_reach <= (others => '0');
+                            elsif ws_dist(8) = '0' and ws_dist(7 downto 5) /= "000" then
+                                ws_reach <= to_signed(-1, 10);  -- 32+ columns past the front: never (8 x 64 wrapped
+                                                                -- the 10-bit sum to +508: with no shoreline, ks 128,
+                                                                -- the first column flooded to the bottom, v0.5.2 .. 3)
                             elsif ws_dist > 0 then
                                 ws_reach <= ws_reach - shift_left(resize(ws_dist, 10), 3) - 4;
                             end if;
@@ -1564,6 +1377,249 @@ begin
     end process p_eng;
 
     ---------------------------------------------------------------------------
+    -- ROMs, the colour table (a RAM: vblank rewrites the per-field entries), the ID line store and the knot table
+    -- (one write statement each; registered reads, re-registered in fabric).
+    ---------------------------------------------------------------------------
+    p_rom : process(clk)
+    begin
+        if rising_edge(clk) then
+            lr_q   <= C_NB_LROM(to_integer(lr_a));
+            lr_qf  <= lr_q;
+            pal_q  <= pal_ram(to_integer(pal_a));
+            pal_qf <= pal_q;
+            if pal_we = '1' then pal_ram(to_integer(pal_wa)) <= pal_wd; end if;
+        end if;
+    end process p_rom;
+
+    p_lb : process(clk)
+    begin
+        if rising_edge(clk) then
+            lb_q  <= lb_ram(to_integer(b_px));
+            lb_qf <= lb_q;
+            if lb_we = '1' then lb_ram(to_integer(lb_wa)) <= lb_wd; end if;
+        end if;
+    end process p_lb;
+
+    p_kr : process(clk)
+    begin
+        if rising_edge(clk) then
+            kr_q  <= kr_ram(to_integer(kr_a));
+            kr_qf <= kr_q;
+            if kr_we = '1' then kr_ram(to_integer(kr_wa)) <= kr_wd; end if;
+        end if;
+    end process p_kr;
+
+    w_x0 <= to_signed(-1440, 14) when s_xs = 4 else to_signed(-1920, 14);
+
+    ---------------------------------------------------------------------------
+    -- [C] FILLER (vblank): writes the knot table from the right edge to the left.  v0.1.0: the surface is
+    -- the sea level wherever the bed is below it, and the bed itself on the beach.
+    ---------------------------------------------------------------------------
+    ---------------------------------------------------------------------------
+    -- [A] TIMING AND VIRTUAL COORDINATES + [B] CONTROLS + the per-field sequencer
+    ---------------------------------------------------------------------------
+    p_ctrl : process(clk)
+        variable v_g5 : unsigned(4 downto 0);
+        variable v_e  : unsigned(9 downto 0);
+        variable v_s  : signed(11 downto 0);
+        variable v_c  : signed(11 downto 0);
+    begin
+        if rising_edge(clk) then
+            -- [A] timing ID -> steps (decoded free-running)
+            s_tid <= registers_in(8)(3 downto 0);
+            s_ys  <= f_vstep_y(s_tid);
+            s_xsr <= f_vstep_x(s_tid);
+
+            -- [A] vblank zone: no avid for 1024 clocks
+            if data_in.avid = '1' then
+                s_idle <= (others => '0');
+            elsif s_idle /= 1023 then
+                s_idle <= s_idle + 1;
+            end if;
+            if s_idle = 1023 then s_zone <= '1'; else s_zone <= '0'; end if;
+            s_zone_d <= s_zone;
+            s_zgo <= s_zone and not s_zone_d;
+            if s_zone = '0' then
+                s_zc <= (others => '0');
+            elsif s_zc /= 8191 then
+                s_zc <= s_zc + 1;
+            end if;
+
+            -- [A] width: source avid pixels per line, max over the field
+            s_avq <= data_in.avid;
+            if data_in.avid = '1' then
+                s_hcnt <= s_hcnt + 1;
+            elsif s_avq = '1' then
+                if s_hcnt > s_wmax then s_wmax <= s_hcnt; end if;
+                s_hcnt <= (others => '0');
+            end if;
+
+            -- [A][B] per-field latches
+            if s_zgo = '1' then
+                s_w <= s_wmax; s_wmax <= (others => '0');
+                s_fsw   <= registers_in(6)(0);
+                s_theme <= registers_in(6)(1);
+                s_croff <= not registers_in(6)(2);       -- S9: 1 = On
+                s_night <= registers_in(6)(3);
+                s_k2    <= unsigned(registers_in(1));
+                s_k1    <= unsigned(registers_in(0));
+                s_k3    <= unsigned(registers_in(2));
+                s_k4    <= unsigned(registers_in(3));
+                s_k5    <= unsigned(registers_in(4));
+                s_xs    <= s_xsr;
+                -- wire thickness: 3 x 2 at 1080p, 2 x 2 at 720p, 3 x 1 at 1080i, 1 x 1 at SD
+                if s_xsr = 2 then s_th2 <= '1'; s_th3 <= '1';
+                elsif s_xsr = 3 then s_th2 <= '1'; s_th3 <= '0';
+                else s_th2 <= '0'; s_th3 <= '0'; end if;
+                if s_ys <= 384 then s_tv2 <= '1'; else s_tv2 <= '0'; end if;
+            end if;
+            g_wm1 <= s_w - 1;
+
+            -- [B] shared glide (1/8 of the gap per field, +-2 deadband): fill (to the Fill switch), Speed, sun
+            if s_zgo = '1' then
+                z_gp <= "00"; z_gc <= "00"; z_grun <= '1';
+            elsif z_grun = '1' then
+                case z_gp is
+                    when "00" =>
+                        case to_integer(z_gc) is
+                            when 0      => s_gm <= s_gp; s_gr <= (others => s_fsw);
+                            when 1      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when others => s_gm <= s_gs; s_gr <= unsigned(registers_in(7));
+                        end case;
+                        z_gp <= "11";
+                    when "11" =>
+                        s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
+                        z_gp <= "01";
+                    when "01" =>
+                        -- outside the deadband (|gap| >= 32, as bit tests: a signed compare's carry fans out)
+                        if (s_gd(14) = '0' and s_gd(13 downto 5) /= "000000000") or (s_gd(14) = '1' and s_gd(13 downto 5) /= "111111111") then
+                            s_gd <= shift_right(s_gd, 3);
+                        else
+                            s_gd <= (others => '0');
+                        end if;
+                        z_gp <= "10";
+                    when others =>
+                        case to_integer(z_gc) is
+                            when 0      => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 1      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when others => s_gs <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        end case;
+                        z_gp <= "00";
+                        if z_gc = 2 then z_grun <= '0'; end if;
+                        z_gc <= z_gc + 1;
+                end case;
+            end if;
+
+            -- [C] per-field constants, one small step per state
+            c_inj <= '0';
+            if s_zone = '1' then
+                case to_integer(s_zc) is
+                    when 40 =>
+                        c_t <= c_t + 1;
+                        c_e <= s_gs(12 downto 3);
+                    when 41 =>                              -- the body's centre: -150 .. +217 rows
+                        v_e := c_e;
+                        c_sunc <= signed(resize(v_e(9 downto 2), 12)) + signed(resize(v_e(9 downto 3), 12))
+                                  - signed(resize(v_e(9 downto 6), 12)) - 150;
+                    -- time of day thresholds (with hysteresis), one compare a state
+                    when 47 => if c_e > 616 then c_hi <= '1'; else c_hi <= '0'; end if;
+                    when 48 => if c_e < 584 and c_e > 176 then c_mid <= '1'; else c_mid <= '0'; end if;
+                    when 49 => if c_e < 144 then c_lo <= '1'; else c_lo <= '0'; end if;
+                    when 42 =>                              -- sea level: 626 -+ 96 rows
+                        -- 626 - 3 (K2 - 512) / 16 = 722 - K2 / 8 - K2 / 16 (exactly: 512 divides by both).  On
+                        -- the unsigned knob: the old signed form added two sign-extended shifts of one value,
+                        -- so its sign net fed both inputs of a LUT, and router1 stalled on HDMI seed 1 (v0.5.1)
+                        c_sl <= to_unsigned(722, 11) - (resize(s_k2(9 downto 3), 11) + resize(s_k2(9 downto 4), 11));
+                    when 43 =>
+                        c_fp <= resize(s_gp, 14);
+                    when 52 =>                              -- the crab, from the engine's last pass: half
+                        c_cry <= resize(o_cy, 11) + 48;     -- size, its feet where v0.3's were, sinking at half
+                    when 54 =>                              -- rate (hidden under its hole line at 96)
+                        c_cry <= c_cry + resize(o_cs(6 downto 1), 11);
+                    when 55 =>                              -- the water's keyframe interval and position: night,
+                        if s_night = '1' then               -- dusk, golden over the slider's lower three
+                            c_wiv <= "00"; c_wt <= (others => '0');            -- quarters, day above
+                        elsif c_e(9 downto 8) = "11" then
+                            c_wiv <= "10"; c_wt <= (others => '1');
+                        else
+                            c_wiv <= c_e(9 downto 8); c_wt <= c_e(7 downto 2);
+                        end if;
+                    when 53 =>
+                    when 56 =>                              -- the crab, sand-relative (after 52 .. 54)
+                        c_crel <= signed(resize(c_cry, 12)) - c_bedc;
+                        c_cvis <= to_unsigned(48, 6) - o_cs(6 downto 1);
+                        c_cfr  <= o_cs(7);
+                    when 50 =>                              -- the gulls flap out of step: 1 at t / 16,
+                        c_gf(0) <= c_t(4);                  -- 2 at 9 t / 128 + 5, 3 at 3 t / 64 + 11 (bit 4 of
+                        v_g5 := c_t(4 downto 0) + c_t(7 downto 3) + 5;     -- a 5-bit phase: periods 32, 28
+                        c_gf(1) <= v_g5(4);                 -- and 43 fields)
+                    when 51 =>
+                        v_g5 := c_t(4 downto 0) - c_t(6 downto 2) + 11;
+                        c_gf(2) <= v_g5(4);
+                    when 44 =>                              -- clouds and gulls drift on their own
+                        c_sa1 <= c_t(13 downto 0);
+                        c_sab <= c_t(11 downto 0) & "00";
+                    when 45 =>                              -- time of day (with hysteresis): day, low sun, night
+                        if s_night = '1' then c_tod <= "10";
+                        elsif c_hi = '1' then c_tod <= "00";
+                        elsif c_mid = '1' then c_tod <= "01";
+                        elsif c_lo = '1' then c_tod <= "10";
+                        end if;
+                        c_esun <= not s_night; c_emoon <= s_night; c_ecrab <= '1';   -- (the engine burrows it)
+                        if s_night = '0' and c_e(9 downto 6) /= "0000" then c_ebird <= '1'; else c_ebird <= '0'; end if;
+                        if s_night = '1' or c_e(9 downto 6) = "0000" then c_sden <= "11";
+                        elsif c_e(9 downto 6) = "0001" then c_sden <= "10";
+                        elsif c_e(9 downto 6) = "0010" then c_sden <= "01";
+                        else c_sden <= "00"; end if;
+                    when 46 =>
+                        c_pal <= s_theme & c_tod;
+                    when others => null;
+                end case;
+            end if;
+
+            -- [C] the per-field palette entries: nine made-up pixels, 8 clocks apart (s_zc 128 .. 192), run through
+            -- the colour path from the keyframe slot; each comes out 7 clocks later and is kept or written (p_mix)
+            --   0 .. 4  the water's keys K0 .. K4 (keyframe interval c_wiv, position c_wt): entries 4 .. 7
+            --   5, 6    white: the water's and the wash's wires (K4 -> white), entries 21, 23
+            --   7, 8    the sky's zenith and horizon keyframes, lerped by the elevation (day: all eight keyframes
+            --           over the slider; night: the first two): entry 19
+            if s_zone = '1' and s_zc(12 downto 7) = "000001" and s_zc(2 downto 0) = "000" and s_zc(6 downto 3) <= 8 then
+                c_inj <= '1';
+                c_injt <= c_wt;
+                case to_integer(s_zc(6 downto 3)) is
+                    when 0 => c_injent <= "100" & c_wiv; c_injk <= "01";
+                    when 1 => c_injent <= "101" & c_wiv; c_injk <= "10"; c_injw <= to_unsigned(4, 5);
+                    when 2 => c_injent <= "110" & c_wiv; c_injk <= "10"; c_injw <= to_unsigned(5, 5);
+                    when 3 => c_injent <= "111" & c_wiv; c_injk <= "10"; c_injw <= to_unsigned(6, 5);
+                    when 4 => c_injent <= '1' & c_wiv & "11"; c_injk <= "10"; c_injw <= to_unsigned(7, 5);
+                    when 5 => c_injent <= "11111"; c_injk <= "11"; c_injw <= to_unsigned(21, 5);
+                    when 6 => c_injent <= "11111"; c_injk <= "11"; c_injw <= to_unsigned(23, 5);
+                    when 7 | 8 =>
+                        -- (7: s_zc(3) = 1, the zenith, kept; 8: the horizon, written)
+                        if s_night = '1' then
+                            c_injent <= '0' & (not s_zc(3)) & "000"; c_injt <= c_e(9 downto 4);
+                        else
+                            c_injent <= '0' & (not s_zc(3)) & c_e(9 downto 7); c_injt <= c_e(6 downto 1);
+                        end if;
+                        if s_zc(3) = '1' then c_injk <= "01"; else c_injk <= "10"; end if;
+                        c_injw <= to_unsigned(19, 5);
+                    when others => null;
+                end case;
+            end if;
+
+            -- [A] sync delay, generated-avid and start-pulse shift registers
+            s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
+            s_gav_sr(0) <= g_avid;
+            for i in 1 to C_LAT - 1 loop
+                s_hsync_sr(i) <= s_hsync_sr(i - 1); s_vsync_sr(i) <= s_vsync_sr(i - 1);
+                s_gav_sr(i) <= s_gav_sr(i - 1);
+            end loop;
+            s_field_q <= data_in.field_n;
+            s_st <= g_start & s_st(1 to 15);
+        end if;
+    end process p_ctrl;
+
+    ---------------------------------------------------------------------------
     -- [E] MERGE, EDGES, COLOUR (stages 15 .. 24)
     ---------------------------------------------------------------------------
     p_mix : process(clk)
@@ -1604,9 +1660,9 @@ begin
             end if;
             if b14_z /= 0 then
                 v_obj := "1001"; v_sub := "00" & std_logic_vector(b14_z);
-                if b14_z = "01" then v_sub(2) := l_brow(3)(14); end if;       -- creases across the shell
+                if b14_z = "01" then v_sub(2) := b14_cr; end if;               -- creases across the shell
                 case b14_z is                                                 -- (the facet bands alternate)
-                    when "01"   => if l_brow(3)(14) = '1' then v_ent := "01110"; v_t6 := to_unsigned(44, 6);
+                    when "01"   => if b14_cr = '1' then v_ent := "01110"; v_t6 := to_unsigned(44, 6);
                                    else v_ent := "01111"; v_t6 := to_unsigned(0, 6); end if;
                     when "10"   => v_ent := "01110"; v_t6 := to_unsigned(20, 6);
                     when others => v_ent := "01111"; v_t6 := to_unsigned(36, 6);
@@ -1799,45 +1855,6 @@ begin
             end if;
         end if;
     end process p_mix;
-
-    ---------------------------------------------------------------------------
-    -- [C] FILLER (vblank): writes the knot table from the right edge to the left.  v0.1.0: the surface is
-    -- the sea level wherever the bed is below it, and the bed itself on the beach.
-    ---------------------------------------------------------------------------
-    ---------------------------------------------------------------------------
-    -- ROMs, the colour table (a RAM: vblank rewrites the per-field entries), the ID line store and the knot table
-    -- (one write statement each; registered reads, re-registered in fabric).
-    ---------------------------------------------------------------------------
-    p_rom : process(clk)
-    begin
-        if rising_edge(clk) then
-            lr_q   <= C_NB_LROM(to_integer(lr_a));
-            lr_qf  <= lr_q;
-            pal_q  <= pal_ram(to_integer(pal_a));
-            pal_qf <= pal_q;
-            if pal_we = '1' then pal_ram(to_integer(pal_wa)) <= pal_wd; end if;
-        end if;
-    end process p_rom;
-
-    p_lb : process(clk)
-    begin
-        if rising_edge(clk) then
-            lb_q  <= lb_ram(to_integer(b_px));
-            lb_qf <= lb_q;
-            if lb_we = '1' then lb_ram(to_integer(lb_wa)) <= lb_wd; end if;
-        end if;
-    end process p_lb;
-
-    p_kr : process(clk)
-    begin
-        if rising_edge(clk) then
-            kr_q  <= kr_ram(to_integer(kr_a));
-            kr_qf <= kr_q;
-            if kr_we = '1' then kr_ram(to_integer(kr_wa)) <= kr_wd; end if;
-        end if;
-    end process p_kr;
-
-    w_x0 <= to_signed(-1440, 14) when s_xs = 4 else to_signed(-1920, 14);
     data_out.y       <= std_logic_vector(o4_y);
     data_out.u       <= std_logic_vector(o4_u);
     data_out.v       <= std_logic_vector(o4_v);

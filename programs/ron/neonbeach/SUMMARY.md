@@ -8,8 +8,10 @@ turn white; under everything the sand, a mesh of quads. When a wave lands, a was
 it covers turn into triangles in the water's colour, and as it drains they revert a triangle at a time, leaving
 the sand dark and wet. A small faceted crab walks the sand and runs from the wash.
 
-**Status: v0.5.3 (2026-11-22): every sand square keeps its diagonal, in a random direction per square (see
-"v0.5.3" below). v0.5.2: the wet-sand sweep's write-back was one clock early, so the wetness map slid one
+**Status: v0.5.4 (2026-11-22): the sand's grid lines shimmer again; sand changes colour only where the wash
+touches it; the gulls flap out of step; the crab follows the sand's slope (a bitmap read at each pixel's depth
+under the sand line) and its hole darkens three blocks part way (see "v0.5.4" below). v0.5.3: every sand square keeps its diagonal, in a random
+direction per square. v0.5.2: the wet-sand sweep's write-back was one clock early, so the wetness map slid one
 row down the sand every field (the "constant washing" on hardware since v0.3.0): fixed and checked in RTL.
 v0.5.0 made K6 Speed (no input video: a synthesis program now), the Crab switch Off / On, and drying sand fade
 back smoothly; see "v0.5.0" .. "v0.5.2" below.** Flash
@@ -56,7 +58,7 @@ shoreline and fixes the engine's timing; v0.3.2 (HW-captured defaults) was the f
   Speed 0 gives 204, so it discriminates).
 - **Wet sand**: a 4-bit counter per sand cell (2048 cells, block RAM). A sweep in vblank works out each column's
   reach from the engine's swash envelope and shoreline (plus two drifting triangle lobes) and rewrites every
-  cell, reading it and writing it back three clocks later (address register, RAM output register, fabric
+  cell (only the wash wets a cell; the crab's hole is the one held damp cell), reading it and writing it back three clocks later (address register, RAM output register, fabric
   register: the tags must run three stages, see v0.5.2). 15 = under the wash, 14 = only its upper triangle, then 12 .. 1 drying one step every 12 fields
   (13 = damp and held: the sea bed's top row, the crab's hole). The
   reach thins over the last columns before the shoreline (v0.3.1; it ended in a vertical cut). The
@@ -80,12 +82,12 @@ shoreline and fixes the engine's timing; v0.3.2 (HW-captured defaults) was the f
 |---|---|---|---|
 | 0 | sky (and the sea strip) | none | stars twinkle; ripple gaps drift |
 | 1 | sun / moon and its mirror | none | the sun's slits roll; the moon is a crescent |
-| 2 | clouds, gulls and their mirrors | sprite zone (gulls: left / right wing plank) | drift; gulls flap |
+| 2 | clouds, gulls and their mirrors | sprite zone (gulls: left / right wing plank) | drift; each gull flaps on its own clock |
 | 5 | water | layer parity, column parity | everything rides the wave surface; the columns sway |
 | 6 | foam squares | knot parity, square-row parity | squares turn white and fade, reshuffled 4 times a second |
 | 7 | wash (covered sand triangles) | column, row, upper triangle | arrives and drains a triangle at a time |
 | 8 | sand | column, row, the cell's diagonal (either way, by a hash) | darkens under the wash and fades back |
-| 9 | crab | sprite zone, creases (facet bands) | walks, legs alternate |
+| 9 | crab | bitmap zone, creases (facet bands) | walks, legs alternate; sheared to the sand's slope |
 
 Spray and stars are overlays.
 
@@ -101,7 +103,7 @@ Spray and stars are overlays.
 | K6 | Speed | how fast the waves run in to the shore, x1 .. x3 at the same rhythm (they get that much longer); default 50 % = x2 |
 | S7 | Fill | Wires / Fill (the gradients roll in object by object) |
 | S8 | Colour | Neon / Ice (each with day, low-sun and night palettes) |
-| S9 | Crab | Off / On (1 = On since v0.5.0; it burrows; on again it comes up somewhere new; its hole is a damp cell) |
+| S9 | Crab | Off / On (1 = On since v0.5.0; it burrows; on again it comes up somewhere new; while it goes down or comes up its three hole blocks darken part way, then fade) |
 | S10 | Sky | Day / Night |
 | P12 | Sun | elevation of the sun or moon; the sky, the palette and the stars follow it; gulls roost when it is down |
 
@@ -329,3 +331,41 @@ Built 2026-11-22 with **router1**, all six on seed 1, 28 / 32 block RAMs:
 | SD Dual | 1 | 74.72 MHz | 7274 |
 
 7,281 / 7,680 LC (94.8 %).
+
+## v0.5.4: shimmer, wash-only wet sand, gulls out of step, the crab on the slope (2026-11-22)
+
+Ron's notes on v0.5.3, in order:
+
+| Note | Change |
+|---|---|
+| "bring back the shimmer on the grid lines of the sand" | The sheen table `C_SHG` is v0.3's again (`x"B6D5_E39A_6F4B_D2ED"`): it differs from v0.4.0's only in the six sand bits, so the sand's wires shimmer as in v0.3 and nothing else changes. (It came off in v0.4.0 for a "pulsing" that was really the sweep's sliding bug.) |
+| "the very top line of sand ... would only change color when water actually washes over" | The sweep no longer holds the sea bed's top row of cells damp (13) under the water. Under the sea the sand keeps its dry colour. |
+| "can the seagulls wings flapping not all be synced" | Each strip's three gulls never share a row (rows 0 .. 10, 11 .. 21, 22 .. 31), so each row band takes its own flap frame: bit 4 of `t`, of `t + t/8 + 5` and of `t - t/4 + 11` (5-bit phases; periods 32, 28 and 43 fields, set in sequencer states 50 / 51). Gulls in two strips on screen at once still share their positions' clocks. |
+| "don't darken the sand where the crab goes up or down", then "darken the 3 grid blocks ... only partially" | While the crab is going down or coming up (sink strictly between 0 and 96), its hole's row of cells, its column and the two beside it are held at 13, drawn as wetness 6 (48 ramp steps, against 96 .. 104 for a fresh wash) with no drying fraction, and never over a darker wash. When it stops, 13 drops to 6 on the next drying step and fades smoothly. A crab switched off and hidden leaves no mark. |
+| "can the crab be rotated to match the angle of the grid lines it's within" | The sand's grid rows run parallel to the surface and its columns stay vertical, so the grid is sheared, not rotated: the crab is now sheared the same way. It is a bitmap (`C_NB_CRAB`, 4096 x 2 = two block RAMs: 1 px x 2 rows a texel, 64 x 24 a frame, folded about the centre line) read at each pixel's own depth under the sand line, so each column of it sits as far down as the sand there. The sand line at its centre is latched from the pixel path's own bed lerp, so at its centre it is where it was; its hole line follows the slope too. The slope where it walks is 3 deg (x 280) to 14 deg (x 800): 7 to 30 rows across it. The span-coded slot B and its per-line fetch are gone. The art is the same drawing downsampled (`crab_bitmap`: a texel is crab when 4 of its 8 canvas units are, eyes and legs winning ties); 2 px texels in one block RAM merged the legs. Before / after: `.neonbeach_work/crab_bitmap_cmp2.png`. |
+
+- Block RAMs 28 -> 30 / 32: the 30 / 32 congestion line in CLAUDE.md; watch the seeds.
+- Process order: each netlist change moved a config onto the yosys abc9 box-order failure (logged as `ERROR ...
+  output.aig not found` after `Boxes ... topological order`; `check6.sh` counts it under errors). The file uses a
+  passing order from `abc9_order.py` (same lines, reordered blocks).
+- Found in the v0.5.4 render: the wash's front-column test multiplied the distance by 8 in a 10-bit signed sum, so
+  a distance of 64 wrapped to +508 and the first sand column flooded to the bottom. That happens whenever there is
+  no shoreline (`o_ks` = 128): the power-up value since v0.5.2, and in play at high tide with a big swell. Now 32+
+  columns past the front give nothing (the same result without the wrap), and the shoreline cap is clamped the
+  same way. RTL check (`.neonbeach_work/tb6/run54.sh`, model updated to this version's rules: no damp sea-bed
+  row, the part-dark crab hole, 13 -> 6): 0 mismatches over 16,384 cell writes, with the crab burrowing.
+- GHDL render at 720p (Ron's defaults, Speed 50 %, swash preset): `.neonbeach_work/prev/g_day.png` (crab zoom
+  `g_day_crab.png`; `g_day_left.png` shows the flooded column, before the fix).
+
+Built 2026-11-22 with **router1**, all six on seed 1, 30 / 32 block RAMs:
+
+| Config | Seed | Post-route Fmax | LC |
+|---|---|---|---|
+| HD Analog | 1 | 88.25 MHz | 7207 |
+| SD Analog | 1 | 87.85 MHz | 7200 |
+| HD HDMI | 1 | 95.01 MHz | 7216 |
+| SD HDMI | 1 | 82.16 MHz | 7204 |
+| HD Dual | 1 | 85.19 MHz | 7203 |
+| SD Dual | 1 | 96.47 MHz | 7221 |
+
+7,221 / 7,680 LC (94.0 %): the bitmap crab is smaller than the span slot it replaced.

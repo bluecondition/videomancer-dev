@@ -26,6 +26,7 @@ Package contents
                         bit 14 = the row's crease parity; zone = z[number of boundaries <= x])
   C_NB_BED   128 x 10   sea bed / beach row at each knot (16 virtual px apart from the canvas's left edge)
 """
+import collections
 import math
 import os
 import sys
@@ -270,7 +271,7 @@ def art_birds(frame):
     return cv, [0] * 32
 
 
-def art_crab(frame):
+def crab_canvas(frame):
     """Half a crab, the centre line at x = 0 (the engine folds |x|), drawn in straight lines: a hexagonal shell
     cut into facet bands, bars for legs (thigh up, shin down, sharp knees), angular pincers, diamond eyes on
     stalks.  Canvas units are half a virtual px both ways (the pixel path doubles x into the ROM, one ROM row a
@@ -295,8 +296,49 @@ def art_crab(frame):
     poly(cv, [(12, 6), (19, 12), (12, 18), (5, 12)], 2)                                          # eye
     poly(cv, [(0, 30), (34, 30), (58, 42), (62, 54), (54, 70), (0, 70)], 1)                      # shell
     poly(cv, [(34, 30), (58, 42), (40, 42)], 2)                                                  # shoulder facet
+    return cv
+
+
+CRAB_CREASES = [42, 54, 62]
+
+
+def art_crab(frame):
+    cv = crab_canvas(frame)
     rows = [cv[y] for y in range(0, 96, 2)]
-    return rows, hbits([42, 54, 62], 48, 2)
+    return rows, hbits(CRAB_CREASES, 48, 2)
+
+
+def crab_bitmap(frame):
+    """v0.5.4: the crab as a bitmap, so the pixel path can read each pixel at its own depth under the sand line (the
+    crab follows the slope like the sand's grid).  Texels of 1 virtual px x 2 rows = 2 x 4 canvas units; 64 columns
+    (|x| from the centre line) x 32 rows (24 used).  A texel takes the zone covering most of it when at least 4 of
+    its 8 units are crab, eyes and legs / claws winning ties over the shell.  (2 px texels in one block RAM merged
+    the legs where they cross: they are 3 px wide and about 7 px apart.)"""
+    cv = crab_canvas(frame)
+    out = [[0] * 64 for _ in range(32)]
+    for tr in range(24):
+        for tc in range(64):
+            c = collections.Counter(cv[4 * tr + j][2 * tc + i] for j in range(4) for i in range(2))
+            if 8 - c[0] < 4:
+                continue
+            out[tr][tc] = max((1, 2, 3), key=lambda z: (c[z], z != 1))
+    return out
+
+
+def crab_rom():
+    """C_NB_CRAB: 4096 x 2 (two block RAMs), address = frame & texel row (5) & column (6)."""
+    rom = [0] * 4096
+    for f in (0, 1):
+        bm = crab_bitmap(f)
+        for tr in range(32):
+            for tc in range(64):
+                rom[(f << 11) | (tr << 6) | tc] = bm[tr][tc]
+    return rom
+
+
+def crab_creases():
+    """C_NB_CRC: per texel row, the shell's facet band parity (the creases of art_crab, at 4 canvas rows a row)."""
+    return hbits(CRAB_CREASES, 32, 4)
 
 
 def row_words(row, hb=0):
@@ -345,8 +387,7 @@ LR_BIRD, BIRD_ROWS = 320, 32        # frame 1 at + 128
 LR_CRAB, CRAB_ROWS = 576, 48        # frame 1 at + 192
 
 SPRITES = [("cloud", LR_CLOUD, art_cloud), ("bird0", LR_BIRD, lambda: art_birds(0)),
-           ("bird1", LR_BIRD + 128, lambda: art_birds(1)), ("crab0", LR_CRAB, lambda: art_crab(0)),
-           ("crab1", LR_CRAB + 192, lambda: art_crab(1))]
+           ("bird1", LR_BIRD + 128, lambda: art_birds(1))]     # (the crab is a bitmap since v0.5.4: crab_rom)
 
 
 def line_rom():
@@ -479,6 +520,8 @@ def write_pkg():
              vhd_table("C_NB_PAL", 256, 48, pal_rom()),
              vhd_table("C_NB_LROM", 1024, 16, line_rom()),
              vhd_table("C_NB_BED", 128, 10, bed_tab()),
+             vhd_table("C_NB_CRAB", 4096, 2, crab_rom()),
+             vhd_table("C_NB_CRC", 32, 1, crab_creases()),
              vhd_table("C_NB_SOFF", 128, 16, soff_tab()),
              vhd_table("C_NB_DT2", 16, 8, dt2_tab()),
              vhd_table("C_NB_SIZE", 16, 4, SIZES),
