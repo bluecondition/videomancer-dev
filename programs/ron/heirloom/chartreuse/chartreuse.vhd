@@ -93,8 +93,8 @@ architecture chartreuse of program_top is
         variable v : signed(9 downto 0);
         variable s : std_logic;
     begin
-        if j < 0 then v := -1 - j; s := '1';
-        elsif j > 120 then v := 240 - j; s := '1';
+        if j < 0 then v := to_signed(-1, 10) - j; s := '1';
+        elsif j > 120 then v := to_signed(240, 10) - j; s := '1';
         else v := j; s := '0'; end if;
         return s & unsigned(v(6 downto 0));
     end function;
@@ -522,7 +522,7 @@ begin
                 when 3      => f_dxs <= to_unsigned(384, 11);
                 when others => f_dxs <= to_unsigned(256, 11);
             end case;
-            f_x0n <= shift_left(resize(960 - signed(resize(s_vw(11 downto 1), 13)), 22), 8);
+            f_x0n <= shift_left(resize(to_signed(960, 13) - signed(resize(s_vw(11 downto 1), 13)), 22), 8);
             v_hw := signed(resize(s_vw(11 downto 1), 13)) - 640;
             if v_hw < 0 then f_hw <= (others => '0'); else f_hw <= unsigned(v_hw(8 downto 0)); end if;
             -- P12: gain mantissa / octave; fold lines fade in above 50 %

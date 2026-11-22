@@ -220,3 +220,44 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 Ron: K6 loads at 100 % (initial_value 1023, set by the orchestrator, with the version bump), and the camera effect at the top of the knob is 25 % stronger on bend / element programs. Bend-type: K6 Picture adds the source (camera luma or Osc) to the surface level F and the line field S. The gain f_kv = 1.5 k6 >> 6 is now x1.25 (`v_s + (v_s >> 2)`, top 23 -> 29), per field in the decode. The camera and the Osc share this gain, so both are 25 % stronger. Widths checked: the source product peaks at 128 x 29 (15-bit signed), and the offset sum stays under 2900 of +-4095. The gain is computed per field (no new pixel-path multiplier, latency unchanged). Checked: a GHDL render of old against new code at K6 = 100 % (K6 is latched per field, no glide), `.heirloom_work/rb_chartreuse/k6b/k6b_cmp.png`: the same picture with a stronger camera bend, with no wrap and no new artifacts.
 
 - Build: router1; SD Dual on seed 2 (seed 1 stalled router1, timeout), the other five on seed 1; worst HD 76.25 MHz (HD Analog; HD HDMI 78.41, HD Dual 81.41); SD 77.60-81.21; 7209-7223 LC, 23 / 32 EBR.
+
+## v0.6.4: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`240 - j` comes out as `j - 240`). The GHDL
+simulator is right, so every render showed the intended picture, but the hardware build did not. chartreuse was
+never flashed, so the fix restores the simulated design.
+
+**Sites fixed** (rewritten as `to_signed(N, w) - x`; widths unchanged):
+- line 96, `f_effw`: `-1 - j` -> the mirrored sample word left of the field (j < 0).
+- line 97, `f_effw`: `240 - j` -> the mirrored sample word right of the 121 written words (j > 120).
+- line 525, `f_x0n`: `960 - vw/2` -> the field X of pixel 0 in normal mode (SD start offset).
+
+**What changes on hardware** (the bitstreams before this fix vs now):
+- S8 Mirror: before, the left half showed no mirrored sphere (a dark band of never-written words beside the centre,
+  then the far-right crescents reversed). Now the left half is the mirror image of the right, about X = 0.
+- Right edge: before, whenever the right edge passed X = 1935 (K1 Crescents above 512, or a positive K4 sway) the
+  edge jumped to the sphere-zone samples near X = 144 with 8-px jaggies. Now it continues the crescents as a mirror.
+- Left edge, normal mode: the word or two of dark band that could flicker at the left edge when the K4 sway goes
+  negative (on at the default K4 640) is gone.
+- SD: before, SD showed X -240..1200 (shifted 480 virtual px, left 240 px garbage). Now it shows the centre 4:3,
+  X 240..1680, as designed. HD and 720p were never affected by line 525.
+
+**Remaps:** none (group 1). **Left as-is (as listed):** line 542 (`32768 - v_pq` is natural minus unsigned, which
+GHDL builds correctly; scan.py still lists it).
+
+**Build:** router1, all six on seed 1. HD Analog 74.76 (thin but passing), HD HDMI 78.91, HD Dual 76.23 MHz, SD
+Analog 80.03, SD HDMI 75.55, SD Dual 76.19 MHz; 7,216-7,234 / 7,680 LC, 23 / 32 EBR. iceunpack OK on all six.
+
+**HD HDMI skew: NO placement in the window exists for this netlist.** The builder's HD HDMI router1 s1 was
+**-1.22 / data <= -1.58** (negative, never shipped). Screened hd_hdmi router1 s1-160 + router2 s1-80 (231 routed,
+147 timing-clean; router2 closes timing on only ~3 % of seeds here): nothing reached +1.0. The most positive
+timing-clean HSYNC was router1 s14 +0.86 (data only <= -0.19); with data <= -0.6 the best was router1 s87 +0.58.
+Placer variants did not help either (`--placer sa` fails to legalise at 94 % LC; router1 `--opt-timing` s1-12 and
+`--placer-heap-timingweight=20` s1-12 topped out at +0.58; files `.heirloom_work/rb_chartreuse/skew/screen_var.txt`,
+`route_var.sh`). Installed **HD HDMI router1 s87 (+0.58 / <= -0.94, 79.79 MHz)**, the most positive HSYNC with
+data <= -0.6. Spare HD HDMI router1 s14 (+0.86 / <= -0.19, 75.33 MHz):
+`.heirloom_work/rb_chartreuse/skew/chartreuse_v064_spare_hd_hdmi_router1_s14.vmprog`. Both sit below the window
+(wildfire's +0.65 showed lines on hardware), so **watch HD HDMI for the hsync lines**; if they show, try the spare,
+and beyond that this netlist needs a different approach. HD Analog router1 s1 (+0.01 / <= -0.87) and HD Dual router1
+s1 (-0.83 / <= -1.45) kept. **Shipped seeds: HD HDMI = router1 s87, the other five router1 s1.** The v0.6.3-era
+screen is in `.heirloom_work/rb_chartreuse/skew_v063/`. Not flashed.
