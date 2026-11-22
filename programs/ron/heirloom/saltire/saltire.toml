@@ -6,7 +6,7 @@
 processing_delay_clks = 40
 program_id = "com.czartroniks.saltire"
 program_name = "Saltire"
-program_version = "0.1.2"
+program_version = "0.1.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -62,7 +62,7 @@ name_label = "Spread"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 456
+initial_value = 570
 display_float_digits = 0
 suffix_label = ""
 
@@ -149,11 +149,11 @@ rotary_potentiometer_4 = 760
 [[preset]]
 name = "Wide Open"
 rotary_potentiometer_3 = 300
-rotary_potentiometer_5 = 820
+rotary_potentiometer_5 = 206
 rotary_potentiometer_6 = 800
 
 [[preset]]
 name = "Narrow Gate"
 rotary_potentiometer_1 = 760
-rotary_potentiometer_5 = 140
+rotary_potentiometer_5 = 885
 toggle_switch_10 = 1

@@ -260,3 +260,32 @@ K1 Stripes 1023, K2 Wave 415, K3 Cross 487, K4 Speed 709, K5 Spread 456, S7 Fold
 S8-S11 unchanged). K1 is continuous (glided, through the per-field multiplier), so 1023 loads as dialled. The vmprog
 was repacked from the v0.1.1 bitstreams (only the settings block differs, 225 bytes), so timing and seeds are as in
 v0.1.1 (HD Analog seed 2). Presets are unchanged.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`294 - x` becomes `x - 294`); the simulator
+is correct, so every sim showed the intended picture while the hardware differed.
+- **Sites fixed** (same widths, now `to_signed(N, w) - x`):
+  - line 677, the K5 Spread exponent `e5 = 294 - (k5 * 147 >> 8)` (spread gain gq);
+  - line 702, S9 Twin: the fold `c_ftw = 30720 - shift`.
+- **On hardware, before -> after.**
+  - K5 ran mirrored about 512 (0 = arms out of the frame, 1023 = a thin X). Now clockwise opens the X (gq 2.2 ..
+    0.45), as designed.
+  - Twin: on hardware the left half read geometry 1920-2880 px left of the frame (far-out band and arms, no second
+    vertex) with a hard seam at the centre. Now the left half mirrors the right, so two X's face each other joined
+    by the band. The default (Twin Off) is unaffected; the Twin Blades preset (S9 on) changes.
+- **Remaps (keep Ron's captured look exactly).** With P(k) = k * 147 >> 8 the hardware ran e5 = P(k) - 294, so the
+  new value k' must satisfy 294 - P(k') = P(k) - 294; 1024 - k is one exponent step off here, so each value was
+  solved exactly (the lower of the two exact solutions): default K5 Spread 456 -> 570 (e5 = -33 both; 568 would give
+  -32); presets Wide Open K5 820 -> 206 (e5 = +176), Narrow Gate K5 140 -> 885 (e5 = -214).
+- **Left as-is:** no other audited sites in this program.
+- **Build:** router1. **Seeds other than 1: HD HDMI seed 3, HD Dual seed 2, SD Dual seed 2.** HD Analog 75.98,
+  HD HDMI 77.77 (s3), HD Dual 74.68 (s2, thin), SD Analog 82.62, SD HDMI 80.30, SD Dual 77.17 (s2) MHz;
+  7,178-7,197 / 7,680 LC (93.7 %), 24 / 32 EBR. iceunpack OK x6.
+- **Skew:** the builder's HD HDMI router1 s3 sat at **+0.00** / <= -0.98 (the danger zone). This netlist is hard to
+  place: router2 never closed timing on HD HDMI (37 routes, best 73.05 MHz) and router1 puts HSYNC around -0.5 ns.
+  Screen hd_hdmi r1 s1-160 + r2 s1-40 (182 routed, 103 timing-clean) found one placement in the window: installed
+  **HD HDMI router1 s41 (+1.31 / <= -0.65, 76.19 MHz)**. HD Analog r1 s1 (+1.13 / <= -1.02) and HD Dual r1 s2
+  (-1.24 / <= -1.03) kept. Spare HD HDMI router1 s81 (+0.76 / <= -1.23, 76.85 MHz; below the window but out of the
+  |hs| < 0.7 zone, with a wide data margin): `.heirloom_work/rb_saltire/skew/saltire_v013_spare_hd_hdmi_router1_s81.vmprog`.
+  v0.1.3 not flashed yet.

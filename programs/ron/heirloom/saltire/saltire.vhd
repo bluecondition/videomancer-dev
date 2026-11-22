@@ -674,7 +674,7 @@ begin
                     when 4  => z_k2sq <= f_acc(19 downto 0);
                     when 5  => c_bq <= f_acc(27 downto 14);
                     when 6  =>                                  -- e5 = -((k5 - 512) * 147 >> 8)
-                        v_e := 294 - signed(resize(f_acc(18 downto 8), 11));
+                        v_e := to_signed(294, 11) - signed(resize(f_acc(18 downto 8), 11));
                         z_e5 <= v_e; r_ex_a <= unsigned(v_e(7 downto 0));
                     when 7  => c_gq <= f_acc(19 downto 9);      -- spread gain
                     when 8  => z_s4sq <= f_acc(17 downto 0);
@@ -699,7 +699,7 @@ begin
                     when 18 => c_t4 <= signed(resize(f_acc(18 downto 8), 12));
                     when 19 => c_sh <= signed(resize(f_acc(14 downto 0), 17)) - 11264;   -- (k3 - 512) * 22, Q4 px
                     when 20 => c_thst <= resize(f_acc(20 downto 8), 16);
-                               c_ftw <= 30720 - c_sh;                -- twin: xg = (30720 - shift) - xv left of centre
+                               c_ftw <= to_signed(30720, 17) - c_sh;                -- twin: xg = (30720 - shift) - xv left of centre
                     when 21 =>                                  -- (4 step - shift) * 117 = 4 dx7 + 1317888 - k3 * 2574
                         c_x7s <= signed(resize(shift_left(resize(c_dx7, 15), 2), 24)) + 1317888 - signed(resize(f_acc(21 downto 0), 24));
                     when 22 => s_oys <= f_acc(17 downto 8);
