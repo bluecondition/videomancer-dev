@@ -186,3 +186,24 @@ top of K6; picture programs keep their logic. The K6 default is now 100 % (initi
   seed 2**, SD HDMI 85.30, SD Dual 90.16 (seed 1). On HD Dual and SD Analog, router1's seed 1 stalled (the
   600 s timeout); the duplicated-input LUTs in the Osc face path are still the likely cause. 7,200 .. 7,225 /
   7,680 LC (94.1 %), 24 / 32 EBR. vmprog: out/rev_b/ron/kinetic/louver.vmprog (v0.1.2). Not flashed.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 1147** (major): 8 - thin-face coverage, in eighths: nce = clamp(4 - e, 0, 8), e = signed distance to the
+  thin-face boundary (> 0 inside the thin face). Big-face coverage = min(slab coverage, nce): ribbons in palette A/B
+  with a gold … On hardware it was: nce = clamp(e - 4, 0, 8), inverted. With ct = 8 (thin face >= 1 px, the usual
+  case) the big face is drawn where the thin face should be and bc = 0 over the big-face region, so the accent
+  colour fills it. The default red/blue ribbons with gold edges render as gold ribbons with red/blue edge strips,
+  and narrow faces …
+
+**Build** v0.1.3, router2: HD Analog 85.00, SD Analog 77.64, HD HDMI 81.24 (s2), SD HDMI 85.09, HD Dual 82.45, SD Dual
+85.36. 7204-7231 / 7680 LC, 24 / 32 EBR; seeds other than 1: HD HDMI. iceunpack OK. Not simulated, not flashed.
+**HD skew**: HD HDMI builder seed kept router2 s2 (+1.17 / <= -1.10, 81.24 MHz) | hd_analog n/a -> router1 s7 (-1.49 /
+<= -1.64, 87.50 MHz) | hd_dual n/a -> router1 s10 (-1.91 / <= -1.90, 85.01 MHz) | spare HD HDMI router2 s27 (+2.11 /
+<= -1.01, 79.46 MHz):
+/home/ron/videomancer-dev/.heirloom_work/rb_louver/skew/louver_v013_spare_hd_hdmi_router2_s27.vmprog. A full builder
+rebuild re-routes seed 1: re-install the seeds with `.heirloom_work/skew_tools/install.sh` afterwards.

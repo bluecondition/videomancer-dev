@@ -1144,7 +1144,7 @@ begin
                 when 3      => v_a := shift_right(q22_fo, 4); v_e := shift_right(q22_fe, 4);
                 when others => v_a := shift_right(q22_fo, 5); v_e := shift_right(q22_fe, 5);
             end case;
-            v_a := v_a + 4; v_co := 4 - resize(v_e, 16);
+            v_a := v_a + 4; v_co := to_signed(4, 16) - resize(v_e, 16);
             if v_a < 0 then q23_co <= (others => '0'); elsif v_a > 8 then q23_co <= to_unsigned(8, 4); else q23_co <= unsigned(v_a(3 downto 0)); end if;
             if v_co < 0 then q23_nce <= (others => '0'); elsif v_co > 8 then q23_nce <= to_unsigned(8, 4); else q23_nce <= unsigned(v_co(3 downto 0)); end if;
             -- 24: big-face coverage = min(slab, 8 - thin); a face narrower than 2 .. 4 px fades into the other
