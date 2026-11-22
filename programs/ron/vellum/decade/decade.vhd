@@ -899,7 +899,7 @@ begin
             end if;
             if (s_zone = '1' and (s_zc = 3651 or s_zc = 3654)) or s_st(3) = '1' then
                 v_y := resize(shift_right(e_vy, 7), 16);
-                e_d <= 2160 - v_y - resize(c_y0h, 16);
+                e_d <= to_signed(2160, 16) - v_y - resize(c_y0h, 16);
             end if;
             if (s_zone = '1' and (s_zc = 3652 or s_zc = 3655)) or s_st(4) = '1' then
                 if e_d(15) = '1' then v_y := -e_d; else v_y := e_d; end if;

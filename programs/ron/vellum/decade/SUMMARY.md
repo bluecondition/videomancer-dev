@@ -113,3 +113,26 @@ the camera level: a lattice of nested rounded diamonds drawn by the curves.
   reach the flat-grey fade sooner (a grey band above the bottom edge at the defaults) and near-horizontal curves
   are a field line thick (wider than at HD).
 - Fit history: first RTL 9,912 LC (standalone); shipped 5,631 standalone, 6,965 with the SDK core (notes.md).
+
+## v0.1.1: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`2160 - y` as `y - 2160`); the
+simulator is right, so every render showed the intended picture, but the v0.1.0 bitstreams did not. One site:
+- decade.vhd line 902 (the y engine, p_yeng): `e_d <= 2160 - v_y - resize(c_y0h, 16)` ->
+  `to_signed(2160, 16) - v_y - resize(c_y0h, 16)`: the vertical distance |y - y0| in half-lines, measured
+  bottom-up (the following `- resize(c_y0h, 16)` is signed - signed and was already right).
+On hardware v0.1.0 (never flashed) the origin row was mirrored about the bottom edge: at the default it sat
+150 px ABOVE the bottom (a grey crowded-scale axis near the bottom with the paper mirrored beneath it), and K2
+ran backwards (up pushed the origin off the bottom, the centre was unreachable). v0.1.1: the origin sits 150 px
+below the bottom edge at the default, and K2 up brings it to the screen centre at +100 % (the log cross), as
+designed. No TOML remaps (group 1). Nothing left as-is. Backups (v0.1.0 vhd / toml / vmprog): .heirloom_work/rb_decade/.
+
+Build (2026-11-21, shared queue, router1): HD Analog 79.70 (s1), SD Analog 68.59 (s1), **HD HDMI 79.52 (seed 3:
+seeds 1 and 2 missed 74.25)**, SD HDMI 79.43 (s1), HD Dual 74.72 (s1, 0.47 MHz margin), SD Dual 74.31 (s1) MHz;
+6950-6972 LC (91 %), 25 / 32 EBR; all six pass iceunpack.
+
+HD HDMI skew: the builder's HD HDMI router1 s3 is in the window (+1.43 / <= -1.11, 79.52 MHz): kept. (The
+quick check routes seed 1, which misses timing here, so the full screen ran: router1 + router2 s1-40, 74 routed,
+29 timing-clean, 6 in the window; best alternatives router1 s24 +1.48 / <= -0.87 and router2 s23 +1.28 / <= -1.61.)
+HD Analog router1 s1 (-0.37 / <= -1.20) and HD Dual router1 s1 (-0.90 / <= -0.95) kept. No installs, no spare.
+Shipped vmprog: out/rev_b/ron/vellum/decade.vmprog (v0.1.1).
