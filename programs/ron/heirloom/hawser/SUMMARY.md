@@ -200,3 +200,44 @@ Ron dialled the look in on hardware (v0.1.2), captured with `./capture_preset.sh
 K1 Tubes 718, K2 Wave 486, K3 Cords 544, K4 Speed 763, K5 Glints 0, P12 Twist 678 (K6 Camera and S7-S11 unchanged).
 K5 is continuous (glided, bipolar), so 0 loads as dialled. The vmprog was repacked from the v0.1.2 bitstreams (only
 the settings block differs, 193 bytes), so timing, seeds and LC are as in v0.1.2. Presets are unchanged.
+
+## v0.1.4: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` becomes `x - N`); the GHDL simulator
+is correct, so sims showed the intended speed law. Audit list: `.heirloom_work/ghdl_sub_check/fix/lists/hawser.txt`.
+
+**Site fixed:**
+- **Line 546, K4 Speed left of the ±8 deadband:** `v_d := to_signed(504, 12) - v_d`, so d = 504 − k4 (1..504),
+  direction down, speed d² · 45 / 256.
+  - It had built as k4 − 504, and the 9-bit slice turned that into d = k4 + 8.
+- **Was on hardware:** just left of the deadband (k4 503) the S-curves jumped to about full speed downward. Turning
+  further left slowed them, almost to a stop at full left. The right half was correct.
+- **Now:** the left half mirrors the right. The curves are slow just left of centre and fastest at full left.
+
+**Remaps:** none. Ron's captured K4 default (763) is on the unaffected right half. The presets use K4 512 (deadband)
+and 820, so nothing changes at the defaults or in any preset.
+
+**Left as-is:** no other audited sites. `scan.py` lists nothing for hawser now.
+
+**Build:** router1, all six on seed 1 (log `.heirloom_work/ghdl_sub_check/fix/logs/hawser.log`).
+- Builder Fmax (MHz): HD Analog 85.34, SD Analog 85.34, HD HDMI 89.79, SD HDMI 88.07, HD Dual 89.95, SD Dual 82.39.
+- 6,842–6,862 / 7,680 LC (89 %), 22 / 32 EBR. iceunpack OK ×6.
+- **Shipped HD placements:**
+  - HD HDMI router1 s25 (hand-installed), 90.82 MHz.
+  - HD Analog and HD Dual builder s1.
+  - Worst shipped HD: 85.34 MHz (HD Analog).
+
+**HD HDMI skew.**
+- v0.1.3 shipped the v0.1.2 builder bitstreams (router1 s1 on all six). No pin-skew screen had been run.
+- The v0.1.4 builder's HD HDMI router1 s1 sat at +1.12 / ≤ **−0.24**: HSYNC was in the window but the data margin
+  was too small.
+- **Screen:** hd_hdmi router1 + router2 seeds 1–60, 104 routed (16 router2 timeouts), 103 timing-clean. Only 2 were in
+  the window.
+- **Installed HD HDMI router1 s25: +1.55 / ≤ −1.08, 90.82 MHz.**
+- **Spare:** router2 s58 (+1.32 / ≤ −1.06, 82.39 MHz) in
+  `.heirloom_work/rb_hawser/skew/hawser_v014_spare_hd_hdmi_router2_s58.vmprog`.
+- **HD Analog:** s1 (−0.66 / ≤ −0.85) kept.
+- **HD Dual:** s1 (−0.25 / ≤ −0.66) kept.
+- **Backups:** the v0.1.3 VHDL, TOML and vmprog are in `.heirloom_work/rb_hawser/hawser_v013.*`.
+- **Rebuilding:** a builder rebuild re-routes seed 1. Re-run `.heirloom_work/skew_tools/install.sh hawser router1 25`
+  afterwards.

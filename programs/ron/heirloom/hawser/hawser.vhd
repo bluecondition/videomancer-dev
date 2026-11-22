@@ -543,7 +543,7 @@ begin
                         v_d := signed(resize(s_g4(12 downto 3), 12));
                         -- (slices, not resize: a signed resize to 9 bits would fold |d| >= 256)
                         if v_d > 520 then v_d := v_d - 520; z_d <= unsigned(v_d(8 downto 0)); z_dn <= '0';
-                        elsif v_d < 504 then v_d := 504 - v_d; z_d <= unsigned(v_d(8 downto 0)); z_dn <= '1';
+                        elsif v_d < 504 then v_d := to_signed(504, 12) - v_d; z_d <= unsigned(v_d(8 downto 0)); z_dn <= '1';
                         else z_d <= (others => '0'); z_dn <= '0'; end if;
                     when 103 =>
                         v_p := f_acc(31 downto 0);
