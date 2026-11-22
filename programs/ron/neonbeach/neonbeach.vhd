@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.5.1 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.5.2 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -272,7 +272,9 @@ architecture neonbeach of program_top is
     signal k_ds  : unsigned(10 downto 0) := (others => '0');
     signal k_db, k_fm : unsigned(7 downto 0) := (others => '0');
     signal k_w   : std_logic := '0';
-    signal o_e, o_ks : unsigned(7 downto 0) := (others => '0');      -- swash envelope, shoreline knot
+    signal o_e  : unsigned(7 downto 0) := (others => '0');           -- swash envelope
+    signal o_ks : unsigned(7 downto 0) := x"80";                     -- shoreline knot (128 = none: the first sweep,
+                                                                     -- before the engine's first pass, wets nothing)
     signal o_cx, o_cy : unsigned(9 downto 0) := to_unsigned(540, 10);  -- the crab: centre x, top row
     signal o_cs : unsigned(7 downto 0) := (others => '0');           -- its sink (0 .. 96) | frame << 7
     signal o_ch : unsigned(10 downto 0) := (others => '0');          -- its hole's wetness cell
@@ -299,9 +301,14 @@ architecture neonbeach of program_top is
     signal ws_r1, ws_r2 : unsigned(4 downto 0) := (others => '0');
     signal ws_v1, ws_v2 : std_logic := '0';
     signal ws_p  : unsigned(2 downto 0) := (others => '0');
+    signal ws_a1, ws_a2, ws_l : unsigned(7 downto 0) := (others => '0');
     signal ws_dp : unsigned(4 downto 0) := (others => '0');
-    signal ws_fc, ws_dist : signed(8 downto 0) := (others => '0');
+    signal ws_fc, ws_dist, ws_sdist : signed(8 downto 0) := (others => '0');
+    signal ws_cap : signed(9 downto 0) := (others => '0');
     signal ws_reach, ws_rc2 : signed(9 downto 0) := (others => '0');
+    signal ws_r3 : unsigned(4 downto 0) := (others => '0');
+    signal ws_c3 : unsigned(5 downto 0) := (others => '0');
+    signal ws_v3 : std_logic := '0';
     signal ws_div : unsigned(3 downto 0) := (others => '0');
     signal ws_fr  : unsigned(2 downto 0) := (others => '0');       -- 8 x (fields since the step) / 12
 
@@ -1234,16 +1241,19 @@ begin
 
     ---------------------------------------------------------------------------
     -- [C] WET SAND: the RAM (one write statement; the pixel path reads it in active video) and the sweep (in
-    -- vblank, after the sky keys): per column a reach in quarter cells from the swash sheet (the engine's
-    -- envelope and shoreline, from its last pass), then its 32 cells read, updated and written back one a clock.
-    -- The wash wets only what the sheet touches: the top row of cells, whole under the sheet, the upper triangle
-    -- at its front column.  (v0.5.0 and earlier soaked e rows deep, about 112 at the defaults, under a sheet at
-    -- most 14 rows thick, with drifting lobes past its front: the top of the beach went water-coloured and then
-    -- dark where no water was, row after row as the swash drained.)
+    -- vblank, after the sky keys): per column a reach in quarter cells from the swash (the engine's envelope and
+    -- shoreline, from its last pass) plus two drifting triangle lobes, then its 32 cells read, updated and
+    -- written back one a clock.
+    --
+    -- The write-back tap: a cell's data is in wt_qf THREE clocks after its row is in ws_r0 (address register,
+    -- the RAM's output register, the fabric register), so the row / column / valid tags run three stages
+    -- (ws_r3).  Up to v0.5.1 they ran two: every cell was rewritten from the cell above it, so each field the
+    -- whole wetness map slid one row down the sand (and row 0 was fed from a stray cell), with the drying step
+    -- as an edge running down it every 12 fields: the "constant washing" down the top rows of the sand on
+    -- hardware since v0.3.0.  (Checked in RTL: `.neonbeach_work/tb6`, the sweep's writes against a model.)
     ---------------------------------------------------------------------------
     p_wet : process(clk)
         variable v_l9  : signed(8 downto 0);
-        variable v_rch : signed(9 downto 0);
         variable v_top : signed(9 downto 0);
         variable v_o, v_n : unsigned(3 downto 0);
     begin
@@ -1264,27 +1274,29 @@ begin
                 when others => ws_fr <= "111";
             end case;
 
-            -- the row pipeline: the cell issued two clocks ago is in wt_qf now
-            ws_r1 <= ws_r0(4 downto 0); ws_r2 <= ws_r1;
-            ws_c1 <= ws_col; ws_c2 <= ws_c1;
-            ws_v1 <= ws_rows and not ws_r0(5); ws_v2 <= ws_v1;
+            -- the row pipeline: the cell issued three clocks ago is in wt_qf now
+            ws_r1 <= ws_r0(4 downto 0); ws_r2 <= ws_r1; ws_r3 <= ws_r2;
+            ws_c1 <= ws_col; ws_c2 <= ws_c1; ws_c3 <= ws_c2;
+            ws_v1 <= ws_rows and not ws_r0(5); ws_v2 <= ws_v1; ws_v3 <= ws_v2;
             ws_rc2 <= ws_reach;
             wt_we <= '0';
-            if ws_v2 = '1' then
+            if ws_v3 = '1' then
                 v_o := unsigned(wt_qf);
-                v_top := signed(resize(ws_r2 & "00", 10));
+                v_top := signed(resize(ws_r3 & "00", 10));
                 if ws_rc2 >= v_top + 4 then v_n := to_unsigned(15, 4);
                 elsif ws_rc2 > v_top then v_n := to_unsigned(14, 4);
                 elsif v_o >= 14 then v_n := to_unsigned(12, 4);
                 elsif ws_tick = '1' and v_o /= 0 then v_n := v_o - 1;
                 else v_n := v_o; end if;
-                if ws_uw = '1' and ws_r2 = 0 then v_n := to_unsigned(13, 4); end if;    -- the sea bed's top row: damp
-                if o_cs(6 downto 0) >= 90 and (ws_r2 & ws_c2) = o_ch then v_n := to_unsigned(13, 4); end if;   -- the crab's hole
-                wt_we <= '1'; wt_wa <= ws_r2 & ws_c2; wt_wd <= std_logic_vector(v_n);
+                if ws_uw = '1' and ws_r3 = 0 then v_n := to_unsigned(13, 4); end if;    -- the sea bed's top row: damp
+                if o_cs(6 downto 0) >= 90 and (ws_r3 & ws_c3) = o_ch then v_n := to_unsigned(13, 4); end if;   -- the crab's hole
+                wt_we <= '1'; wt_wa <= ws_r3 & ws_c3; wt_wd <= std_logic_vector(v_n);
             end if;
 
             if s_zone = '1' and s_zc = 120 then
                 ws_run <= '1'; ws_rows <= '0'; ws_col <= (others => '0'); ws_p <= "000";
+                ws_a1 <= c_t(7 downto 0) + (c_t(6 downto 0) & '0');               -- lobes drift: 3 t and -2 t
+                ws_a2 <= to_unsigned(0, 8) - (c_t(6 downto 0) & '0');
                 ws_dp <= o_e(7 downto 3);
                 v_l9 := signed(resize(o_ks, 9)) - signed(resize(o_e(7 downto 3), 9));
                 ws_fc <= shift_right(v_l9, 1);                                     -- the run-up's front column
@@ -1293,18 +1305,26 @@ begin
                 if ws_rows = '0' then
                     case ws_p is
                         when "000" =>
+                            ws_l <= resize(f_tri7(ws_a1), 8) + resize(f_tri7(ws_a2), 8);
                             if (ws_col & '1') >= o_ks(6 downto 0) and o_ks(7) = '0' then ws_uw <= '1'; else ws_uw <= '0'; end if;
                             ws_dist <= ws_fc - signed(resize(ws_col, 9));
+                            ws_sdist <= signed(resize(o_ks(7 downto 1), 9)) - signed(resize(ws_col, 9));   -- columns to the shoreline
                             ws_p <= "001";
                         when "001" =>
-                            -- under the sheet: the whole top cell (4 quarter cells); its front column: the upper
-                            -- triangle (2); past the front, under the sea or no swash: nothing
-                            if ws_uw = '1' or ws_dp = 0 or ws_dist(8) = '0' then
-                                if ws_uw = '0' and ws_dp /= 0 and ws_dist = 0 then ws_reach <= to_signed(2, 10);
-                                else ws_reach <= (others => '0'); end if;
-                            else
-                                ws_reach <= to_signed(4, 10);
+                            v_l9 := signed(resize(ws_l, 9)) - 128;
+                            ws_reach <= signed(resize(ws_dp, 10)) + resize(shift_right(v_l9, 5), 10);
+                            ws_cap <= shift_left(resize(ws_sdist, 10), 3) - 4;                  -- thins over the last columns
+                            ws_p <= "010";
+                        when "010" =>
+                            if ws_uw = '1' then
+                                ws_reach <= (others => '0');
+                            elsif ws_dist > 0 then
+                                ws_reach <= ws_reach - shift_left(resize(ws_dist, 10), 3) - 4;
                             end if;
+                            ws_a1 <= ws_a1 + 37; ws_a2 <= ws_a2 + 23;
+                            ws_p <= "011";
+                        when "011" =>
+                            if ws_reach > ws_cap then ws_reach <= ws_cap; end if;
                             ws_p <= "100";
                         when others =>
                             ws_rows <= '1'; ws_r0 <= (others => '0');
