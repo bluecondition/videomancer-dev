@@ -505,7 +505,7 @@ begin
             if s_zone = '1' then
                 case to_integer(s_zc) is
                     when 18 =>                        -- cells exponent: 0.75 (512 - k1), Q8 octaves
-                        v_e := 512 - signed(resize(s_g1(12 downto 3), 11));
+                        v_e := to_signed(512, 11) - signed(resize(s_g1(12 downto 3), 11));
                         v_e := shift_right(v_e, 1) + shift_right(v_e, 2);
                         r_ex_a <= unsigned(v_e(7 downto 0)); z_sh1 <= v_e(10 downto 8);
                     when 20 =>
@@ -514,7 +514,7 @@ begin
                         if s_vneg = '1' then c_th0 <= c_th0 + c_dth; else c_th0 <= c_th0 - c_dth; end if;   -- + speed scrolls DOWN (the clip)
                         c_xb0 <= resize(s_x0, 12) + shift_left(resize(s_xs, 12), 3);
                     when 22 =>                        -- rows exponent
-                        v_e := 512 - signed(resize(s_g2(12 downto 3), 11));
+                        v_e := to_signed(512, 11) - signed(resize(s_g2(12 downto 3), 11));
                         v_e := shift_right(v_e, 1) + shift_right(v_e, 2);
                         r_ex_a <= unsigned(v_e(7 downto 0)); z_sh2 <= v_e(10 downto 8);
                     when 24 => z_mt2 <= r_ex_q;
@@ -886,7 +886,7 @@ begin
             -- 11: palette index = F/4 + 666 (the offset rides in l_v); Rings: fold about the top (entry 929.5, F = 1.03)
             --     so the saturated field reads the palette back down: every black oval becomes a ring cell
             v_i := shift_right(p10_f, 2);
-            if s_wrap = '1' and v_i > 929 then v_i := 1859 - v_i; end if;
+            if s_wrap = '1' and v_i > 929 then v_i := to_signed(1859, 16) - v_i; end if;
             if v_i < 0 then
                 r_pal_a <= (others => '0');
             elsif v_i > 1023 then

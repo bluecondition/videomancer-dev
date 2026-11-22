@@ -178,3 +178,30 @@ K1 Cells 807, K2 Rows 641, K3 Eyes 1023, K4 Speed 655, K5 Tilt 691, S9 Cells Dia
 S8, S10, S11 unchanged). K3 is continuous (glided, no zones), so 1023 loads as dialled. The vmprog was repacked from
 the v0.1.3 bitstreams (only the settings block differs, 210 bytes), so timing, seeds and LC are as in v0.1.3 (SD HDMI
 and HD Dual seed 2; HD Analog thin at 75.00 MHz). Presets are unchanged.
+
+## v0.1.5: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`512 - x` becomes `x - 512`); the simulator
+is correct, so every sim showed the intended picture while the hardware differed.
+- **Sites fixed** (same widths, now `to_signed(N, w) - x`):
+  - line 508, the K1 Cells exponent `0.75 (512 - k1)` (cell period);
+  - line 517, the K2 Rows exponent (row period);
+  - line 889, S10 Top = Rings: the palette fold `1859 - v_i`.
+- **On hardware, before -> after.**
+  - K1 and K2 ran mirrored about 512 (clockwise = smaller cells / shorter rows). Now clockwise = bigger cells and
+    taller rows (1/2.8 .. 2.8x the photo), as designed.
+  - Rings: on hardware the fold gave negative indices, so with S10 = Rings every black oval became a flat grey-green
+    blob (palette entry 0). Now the saturated field reads the palette back down and each oval becomes a nested ring
+    cell. The default (S10 Black) is unaffected; the Wrapped preset (S10 on) changes.
+- **Remaps (keep Ron's captured look exactly).** Both decodes are `512 - k` before the 0.75 scaling, so
+  `k -> 1024 - k` gives the identical exponent the hardware ran: defaults K1 Cells 807 -> 217, K2 Rows 641 -> 383;
+  presets Rapids K2 300 -> 724, Flat Field K1 350 -> 674.
+- **Left as-is:** no other audited sites in this program.
+- **Build:** router1, all six on seed 1 (the K6-pass needs for seed 2 on SD HDMI / HD Dual are gone). HD Analog
+  80.85, HD HDMI 83.59, HD Dual 76.39, SD Analog 80.48, SD HDMI 82.86, SD Dual 78.90 MHz (builder seeds);
+  6,787-6,808 / 7,680 LC, 17 / 32 EBR. iceunpack OK x6.
+- **Skew:** the builder's HD HDMI router1 s1 sat at +0.12 / <= -1.56 (the danger zone). Screen hd_hdmi r1 + r2
+  s1-40 (62 timing-clean, 2 in the window). Installed **HD HDMI router1 s37 (+1.41 / <= -1.11, 84.08 MHz)**;
+  HD Analog r1 s1 (-0.95 / <= -0.84) and HD Dual r1 s1 (-2.69 / <= -2.04) kept. Spare HD HDMI router1 s29
+  (+1.14 / <= -0.81, 84.85 MHz): `.heirloom_work/rb_frogspawn/skew/frogspawn_v015_spare_hd_hdmi_router1_s29.vmprog`.
+  v0.1.5 not flashed yet.

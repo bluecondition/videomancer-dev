@@ -7,7 +7,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.frogspawn"
 program_name = "Frogspawn"
-program_version = "0.1.4"
+program_version = "0.1.5"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -23,7 +23,7 @@ name_label = "Cells"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 807
+initial_value = 217
 display_float_digits = 0
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Rows"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 641
+initial_value = 383
 display_float_digits = 0
 suffix_label = "%"
 
@@ -142,11 +142,11 @@ rotary_potentiometer_5 = 900
 [[preset]]
 name = "Rapids"
 rotary_potentiometer_4 = 1023
-rotary_potentiometer_2 = 300
+rotary_potentiometer_2 = 724
 linear_potentiometer_12 = 350
 
 [[preset]]
 name = "Flat Field"
 rotary_potentiometer_5 = 512
 rotary_potentiometer_3 = 700
-rotary_potentiometer_1 = 350
+rotary_potentiometer_1 = 674
