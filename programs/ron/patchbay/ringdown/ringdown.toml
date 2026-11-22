@@ -1,0 +1,151 @@
+# Ringdown - Patchbay, 2026-11-22 (v0.1.0).  A square wave through eight resonant filters (dampings stepped heavy
+# to light), comparators against the V ramp, summed on a resistor ladder into a colouriser.
+# See ringdown.vhd, ringdown.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.ringdown"
+program_name = "Ringdown"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Curve", "Analysis", "Color"]
+program_type = "processing"
+description = "A square wave rings through eight resonant filters; the colour counts the traces below the beam."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Period"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 420
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Ring"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 260
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 650
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = -8
+display_max_value = 8
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Drive"
+value_labels = ["Square", "Pulse"]
+initial_value_label = "Square"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Look"
+value_labels = ["Bands", "Traces"]
+initial_value_label = "Bands"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Spectrum", "Neon"]
+initial_value_label = "Spectrum"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Resonance"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 800
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Ringdown"
+
+[[preset]]
+name = "Settling"
+rotary_potentiometer_2 = 330
+linear_potentiometer_12 = 120
+
+[[preset]]
+name = "Lace"
+rotary_potentiometer_2 = 330
+rotary_potentiometer_4 = 900
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Butterfly"
+rotary_potentiometer_1 = 330
+rotary_potentiometer_3 = 580
+toggle_switch_7 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Scope"
+rotary_potentiometer_2 = 380
+toggle_switch_9 = 1
+linear_potentiometer_12 = 880
+
+[[preset]]
+name = "Neon Bursts"
+rotary_potentiometer_1 = 520
+rotary_potentiometer_5 = 600
+toggle_switch_8 = 1
+toggle_switch_10 = 1
