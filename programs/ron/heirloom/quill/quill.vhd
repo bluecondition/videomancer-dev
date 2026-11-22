@@ -830,7 +830,7 @@ begin
                     if v_t > 2047 then e_a <= to_unsigned(2047, 11); else e_a <= unsigned(v_t(10 downto 0)); end if;
                 when 16 =>
                     e_u <= signed(resize(e_a, 13)) - 220;
-                    e_c <= 190 - signed(resize(e_a, 13));
+                    e_c <= to_signed(190, 13) - signed(resize(e_a, 13));
                 when 17 =>
                     if e_u < 0 then e_ua <= unsigned(-e_u(11 downto 0)); else e_ua <= unsigned(e_u(11 downto 0)); end if;
                     if e_c < 0 then e_c72 <= (others => '0');
@@ -871,8 +871,8 @@ begin
                     e_at <= v_cl;
                 when 182 =>
                     e_af <= v_cl;
-                    e_x1 <= 190 - signed(resize(e_at, 13));
-                    e_x3 <= 860 - signed(resize(e_at, 13));
+                    e_x1 <= to_signed(190, 13) - signed(resize(e_at, 13));
+                    e_x3 <= to_signed(860, 13) - signed(resize(e_at, 13));
                 when 183 =>                   -- band 0.625 (190 - at), dot fade 0.1875 (860 - at), far 0.406 (af - 780)
                     e_y1 <= shift_right(e_x1, 1) + shift_right(e_x1, 3);
                     e_y3 <= shift_right(e_x3, 3) + shift_right(e_x3, 4);

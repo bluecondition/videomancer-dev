@@ -163,3 +163,35 @@ Ron: K6 is the camera strength in every program, default 50 %. K6 here already w
 - **Change (v0.1.2):** the per-field warp gain is ×1.25. Its constant 6567 became 8209. Kept at the old scale, the gain would no longer fit `c_gw`'s 17 bits (or the product's 2^29), so `c_gw` now holds half the gain (`f_acc(29 .. 13)`, max 65 544). The pixel path shifts its luma × gain sum one place further (camera << 5, Osc << 7), so the pixel multipliers keep their widths and the cost is one LSB of gain precision. Peak `p5_lw` is 133.7 M, under its 28 bits. The body shift `p6_bsh` peaks at 2295, inside 12 bits. K6 default 1023 (TOML).
 - **Render check:** `.heirloom_work/rb_quill/k6b/k6b_cmp.png` (old vs new at K6 100 %, bear, 720p dec 4: the top-left crop of the spine band. At 100 % the quills are already chaotic, so the visible change is mostly the body edge; no wrap).
 - **Build:** router1, all six on seed 1. HD worst 95.97 MHz (HD Analog 95.97, HD HDMI 101.20, HD Dual 96.62), LC 7051.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`190 - a` comes out as `a - 190`). The
+simulator is correct, so every render showed the intended picture; only the hardware differed.
+- **Sites fixed** (all three in the per-line sequencer, `N - signed(resize(x, 13))` -> `to_signed(N, 13) - ...`):
+  - line 833 (state 16): `e_c <= 190 - a`, the cusp term of the barb FM exponent (E8 gets 0.28 (190 - a) near the
+    spine). K2 Curl scales it.
+  - line 874 (state 182): `e_x1 <= 190 - at`, the spine band level `lt = clamp(0.625 (190 - at), 0, 64)` that forces
+    the band key.
+  - line 875 (state 182): `e_x3 <= 860 - at`, the barb dot duty fade `wd = 16 + clamp(0.1875 (860 - at), 0, 48)`.
+- **What changes on hardware:**
+  - The full-blue spine band is back. Before, the band was gone near the spine and the band texture flooded the far
+    field (the plume layout was inverted at the default).
+  - Barb dots are fat near the spine and fade out by at = 860, as designed. Before, the fade was reversed: small dots
+    near the spine, fat dots far out.
+  - The barb cusp near the spine is restored, and the horizontal tear lines are gone. Before, the barb frequency
+    jumped every 256 lines far from the spine (a = 446, 702, 958 ...), shearing the barbs on those lines.
+- **Remaps:** none (never flashed).
+- **Left as-is:** nothing else listed by the audit.
+- **Build:** router1. HD Analog **s2** 94.45, SD Analog s1 97.01, HD HDMI **s2** 97.14, SD HDMI **s2** 89.39, HD
+  Dual s1 90.61, SD Dual s1 90.16 MHz (worst HD 90.61). The seed-1 routes of HD Analog / HD HDMI / SD HDMI stalled
+  the router at the 900 s timeout under a machine load of ~70-90 (v0.1.2 closed all six on seed 1). 7,027-7,075 /
+  7,680 LC, 16 / 32 EBR. iceunpack OK x6.
+- **HD HDMI skew:** the builder's router1 s2 sat at **-1.34** / data <= -1.21 (negative). This netlist sits low: r1
+  + r2 s1-40 had none in the window (best +0.46), so the screen was extended to router2 s41-180. That made 191
+  routed and 185 timing-clean (29 more routes hung, mostly router1), and **one** seed reached the window: installed
+  **router2 s108 (+1.01 / <= -0.93, 82.79 MHz)**, at the window's lower edge. The spare is router2 s77 (+0.86 /
+  <= -0.61, 90.79 MHz), **below the window** (no other qualified):
+  `.heirloom_work/rb_quill/skew/quill_v013_spare_hd_hdmi_router2_s77.vmprog`. The builder's HD Dual s1 data was
+  positive (-1.37 / <= +0.62), so HD Dual -> **router1 s3 (-2.21 / <= -1.15, 80.76 MHz)**. HD Analog r1 s2 (+0.68 /
+  <= -0.75) kept. Shipped worst HD 80.76 MHz. Not flashed.
