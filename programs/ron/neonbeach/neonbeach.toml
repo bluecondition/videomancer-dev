@@ -1,11 +1,11 @@
-# NEON BEACH (v0.5.4, 2026-11-22: sand shimmer back; sand darkens only under the wash; gulls flap out of step; the crab follows the sand's slope; its hole darkens 3 blocks part way).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+# NEON BEACH (v0.5.5, 2026-11-22: the sand's shimmer runs along its grid rows; v0.5.4: shimmer back, gulls out of step, crab on the slope).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 # See neonbeach.vhd, neonbeach.py and PLAN.md.
 
 [program]
 processing_delay_clks = 33
 program_id = "com.czartroniks.neonbeach"
 program_name = "Neon Beach"
-program_version = "0.5.4"
+program_version = "0.5.5"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

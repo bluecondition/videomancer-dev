@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.5.4 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.5.5 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -361,7 +361,9 @@ architecture neonbeach of program_top is
     signal l_ta, l_tb : unsigned(6 downto 0) := (others => '0');
     signal l_fill : std_logic_vector(7 downto 0) := (others => '0');
     signal l_rip, l_v1, l_v2 : std_logic := '0';
-    signal l_od, l_pc : unsigned(13 downto 0) := (others => '0');             -- sheen: per-line phase terms
+    signal l_od : unsigned(13 downto 0) := (others => '0');                   -- sheen: a per-line phase term
+    type t_sdp is array (10 to 17) of unsigned(8 downto 0);
+    signal w_sdp : t_sdp := (others => (others => '0'));                      -- the sand depth / 2, to the sheen
     signal n_xa0, n_xw0, n_pa0 : unsigned(13 downto 0) := (others => '0');
     signal n_x0  : signed(12 downto 0) := (others => '0');
 
@@ -673,6 +675,8 @@ begin
             wd_ss(10) <= w_xb(9)(5) & w9_sd(5) & '0';
             -- the wetness cell under this pixel (row of depth, column), its upper triangle, its hash
             wt_pa <= w9_sd(9 downto 5) & w_xb(9)(10 downto 5);
+            w_sdp(10) <= w9_sd(9 downto 1);                         -- for the sand's sheen (stage 17)
+            for i in 11 to 17 loop w_sdp(i) <= w_sdp(i - 1); end loop;
             -- (every cell has its diagonal, "/" or "\" by the cell's hash: both tested here, chosen at 11)
             if w9_sd(4 downto 0) < w_xb(9)(4 downto 0) then wd_up(10) <= '1'; else wd_up(10) <= '0'; end if;
             if w9_sd(4 downto 0) < not w_xb(9)(4 downto 0) then w10_upb <= '1'; else w10_upb <= '0'; end if;
@@ -972,9 +976,8 @@ begin
                 when 39 => l_arow(2) <= lr_qf;
                 when 40 =>
                     if e_aen = '1' then l_arow(3) <= lr_qf; else l_arow(3) <= (others => '0'); end if;
-                -- sheen: the other directions.  x + 4 t (the diagonal phase less y) and y - 2 t
+                -- sheen: the other direction, x + 4 t (the diagonal phase less y); the sand's comes from its depth
                 when 45 => l_od <= to_unsigned(0, 14) - resize(v_y & '0', 14);
-                when 46 => l_pc <= resize(v_y & '0', 14) - (c_t(11 downto 0) & "00");
                 when others => null;
             end case;
         end if;
@@ -1761,7 +1764,9 @@ begin
             -- read the diagonal phase with every pulse shown; water, foam, wash, sand and crab each read
             -- their own phase and scale, and a table keyed by the pulse's number and the object lets about
             -- three pulses in five through.
-            --   A  x + y + 4 t   "/" fronts      C  y - 2 t   bands moving down      D  x + 4 t   bands moving left
+            --   A  x + y + 4 t   "/" fronts      D  x + 4 t   bands moving left
+            --   C  the depth under the sand line - 2 t: bands along the sand's grid rows, curving with them,
+            --      moving down (v0.5.5; it was y - 2 t, flat bands across the sloping rows)
             ----------------------------------------------------------------
             case s17_ent(3 downto 0) is
                 when "0101" => v_src := "11"; v_sc := '0';       -- water          D, 256
@@ -1777,7 +1782,7 @@ begin
                 s18_ng <= '0';
             end if;
             if v_src = "11" then v_ph := b_pa + l_od; else v_ph := b_pa; end if;
-            if v_src = "10" then v_ph := l_pc; end if;
+            if v_src = "10" then v_ph := (resize(w_sdp(17), 12) - c_t(11 downto 0)) & "00"; end if;
             if v_sc = '1' then s18_np <= v_ph(9 downto 1); s18_ix <= v_ph(12 downto 10);
             else s18_np <= v_ph(8 downto 0); s18_ix <= v_ph(11 downto 9); end if;
             s18_wo <= s17_ent(2 downto 0);

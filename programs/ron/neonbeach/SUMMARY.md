@@ -8,7 +8,7 @@ turn white; under everything the sand, a mesh of quads. When a wave lands, a was
 it covers turn into triangles in the water's colour, and as it drains they revert a triangle at a time, leaving
 the sand dark and wet. A small faceted crab walks the sand and runs from the wash.
 
-**Status: v0.5.4 (2026-11-22): the sand's grid lines shimmer again; sand changes colour only where the wash
+**Status: v0.5.5 (2026-11-22): the sand's shimmer runs along its grid rows (see "v0.5.5"). v0.5.4: the sand's grid lines shimmer again; sand changes colour only where the wash
 touches it; the gulls flap out of step; the crab follows the sand's slope (a bitmap read at each pixel's depth
 under the sand line) and its hole darkens three blocks part way (see "v0.5.4" below). v0.5.3: every sand square keeps its diagonal, in a random
 direction per square. v0.5.2: the wet-sand sweep's write-back was one clock early, so the wetness map slid one
@@ -369,3 +369,24 @@ Built 2026-11-22 with **router1**, all six on seed 1, 30 / 32 block RAMs:
 | SD Dual | 1 | 96.47 MHz | 7221 |
 
 7,221 / 7,680 LC (94.0 %): the bitmap crab is smaller than the span slot it replaced.
+
+## v0.5.5: the sand's shimmer follows its grid rows (2026-11-22)
+
+Ron: "could the shimmer effect on the sand follow the single rows of grid lines so that it curves with the grid
+lines". The sand's sheen phase was the screen row less time (`y - 2 t`, a per-line term), so its bands were flat
+lines across the sloping rows. It is now each pixel's depth under the sand line (the value the grid rows come from)
+less time: `w9_sd / 2` carried from stage 9 to the sheen at stage 17 (`w_sdp`, 9 bits x 8 stages), so the bands
+run along the rows, curve with them and move down at the same speed as before. The per-line term `l_pc` is gone.
+
+Built 2026-11-22 with **router1**, all six on seed 1, 30 / 32 block RAMs:
+
+| Config | Seed | Post-route Fmax | LC |
+|---|---|---|---|
+| HD Analog | 1 | 83.06 MHz | 7265 |
+| SD Analog | 1 | 79.08 MHz | 7269 |
+| HD HDMI | 1 | 77.49 MHz | 7267 |
+| SD HDMI | 1 | 79.73 MHz | 7271 |
+| HD Dual | 1 | 82.50 MHz | 7264 |
+| SD Dual | 1 | 78.93 MHz | 7297 |
+
+7,297 / 7,680 LC (95.0 %).
