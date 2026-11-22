@@ -913,7 +913,7 @@ begin
             else
                 if s_inv = '1' then
                     c19_y <= to_unsigned(940, 10) - c18_vy;
-                    vc := 512 - resize(c18_cu, 12);
+                    vc := to_signed(512, 12) - resize(c18_cu, 12);
                 else
                     c19_y <= to_unsigned(64, 10) + c18_vy;
                     vc := 512 + resize(c18_cu, 12);
@@ -921,7 +921,7 @@ begin
                 if vc > 1023 then c19_u <= to_unsigned(1023, 10);
                 else              c19_u <= unsigned(vc(9 downto 0)); end if;
                 if s_inv = '1' then
-                    vc := 512 - resize(c18_cv, 12);
+                    vc := to_signed(512, 12) - resize(c18_cv, 12);
                 else
                     vc := 512 + resize(c18_cv, 12);
                 end if;

@@ -117,3 +117,28 @@ binary mezzotint** (luma vs dithered threshold, threshold span ±384). Other
 looks: d corroded pores, e sparkle, f 4-octave concrete, h film response,
 i carve-posterize. Weak: b amplitude-max (generic noise), c 64-px blocks
 (turns into a mosaic).
+
+## v0.3.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`512 - c` as `c - 512`); the simulator
+is right, so sims always showed the intended picture. Two sites, both S11 Invert in stage N19:
+- grist.vhd line 916 (U): `vc := 512 - resize(c18_cu, 12)` -> `vc := to_signed(512, 12) - resize(c18_cu, 12)`;
+- grist.vhd line 924 (V): `vc := 512 - resize(c18_cv, 12)` -> `vc := to_signed(512, 12) - resize(c18_cv, 12)`.
+On hardware v0.3.2 computed c - 512, whose 10-bit slice is 512 + c: Invert On left the chroma untouched, so it
+gave a luma-only negative that kept the original hues (blue sky went dark blue). v0.3.3 gives the full video
+negative that was designed: luma 940 - y AND the complementary hue (blue sky goes orange). With Mono on there is
+no difference. No default / preset remaps (a switch site; no knob ran reversed). Nothing left as-is.
+The community copy ~/videomancer-community/programs/czartroniks/grist/grist.vhd (v0.3.2, and so presumably the
+LZX-merged pack) carries the same lines 916 / 924 and was NOT edited. Backups (v0.3.2 vhd / toml / vmprog):
+.heirloom_work/rb_grist/.
+
+Build (2026-11-21, `build_programs.sh ron grist` via the shared queue, router2 default): HD Analog 83.15 (s1),
+SD Analog 85.57 (s1), **HD HDMI 82.30 (seed 2: seed 1 stalled router2 under heavy machine load)**, SD HDMI
+86.41 (s1), HD Dual 81.33 (s1), SD Dual 82.84 (s1) MHz; 5408-5419 LC (70 %), 0 EBR; all six pass iceunpack.
+
+HD HDMI skew: the builder's HD HDMI router2 s2 was +0.47 / <= +0.17 (outside the window, positive data).
+Screened HD HDMI router1 + router2 s1-60 (117 routed, 115 timing-clean): one seed in the window. Installed
+**HD HDMI router2 s5 (+1.40 / <= -0.80, 82.93 MHz)**. Spare (no second seed in the window): router2 s56
+(+0.92 / <= -1.05, 76.73 MHz, HSYNC 0.08 ns under the window),
+.heirloom_work/rb_grist/skew/grist_v033_spare_hd_hdmi_router2_s56.vmprog. HD Analog router2 s1 (-1.68 /
+<= -1.59) and HD Dual router2 s1 (-2.12 / <= -0.85) kept. Shipped vmprog: out/rev_b/ron/grist.vmprog (v0.3.3).
