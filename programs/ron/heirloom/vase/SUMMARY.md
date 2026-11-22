@@ -334,3 +334,38 @@ then repack the previewed diag bitstreams under the production TOML (copy
 `build/programs/ron/vase_diag/rev_b/bitstreams/*.bin` into the production build dir, regenerate
 `program_config.bin` from the production TOML, `vmprog_pack.py --no-sign --hardware rev_b`) instead of
 re-routing; update the production SUMMARY / README / PHASE2 row and commit only vase's files.
+
+## v0.6.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`36 - x` comes out as `x - 36`). The GHDL
+simulator is right, so every render showed the intended picture, but the hardware build did not. vase was never
+flashed, so the fix restores the simulated design.
+
+**Sites fixed** (rewritten as `to_signed(N, w) - x`; widths unchanged):
+- line 1034, `v_h := 36 - 2d` -> the grey halo `p2_hal` along the vase's left inside edge.
+- lines 1086 / 1087, `2048 - theta` / `-2048 - theta` -> the fold of the spun lathe angle into the sin table
+  (`p6_sneg`, `r_sna`, the lathe texture coordinate).
+
+**What changes on hardware** (the bitstreams before this fix vs now):
+- The halo: before, the halo was missing in the 18 px at the left inside edge and at full strength over the whole
+  vase interior, so the whole vase went grey-blue with the red key almost killed (the red bars, red block and magenta
+  block of the colour cycle nearly vanished, base hue pushed toward green; both vases in Twin). Now the halo is an
+  18-px grey fade at the left inside edge only, and the colour cycle's reds and magentas are back.
+- The fold: before, the texture coordinate was sin(theta) on the front half and -sin(theta) on the back half, so a
+  seam swept across the spinning vase where the sheens / stored-vase texture (Osc) and the line-RAM sheen (Video)
+  jumped to their mirror image. Now the texture slides round the vase without a seam. The camera address was never
+  affected.
+
+**Remaps:** none (group 1). **Sites left as-is:** none listed.
+
+**Build:** router1, all six on seed 1 (`NEXTPNR_ROUTER="--router router1" .heirloom_work/skew_tools/build_any.sh
+vase`). HD Analog 82.97, HD HDMI 81.61, HD Dual 81.57 (worst HD), SD Analog 87.64, SD HDMI 86.79, SD Dual 87.64 MHz;
+7,415-7,427 / 7,680 LC, 24 / 32 EBR. iceunpack OK on all six. Then re-seeded (below), so two configs ship non-1 seeds.
+
+**HD HDMI skew:** the builder's HD HDMI router1 s1 was **-0.14 / data <= -1.39** (a negative HSYNC, never shipped).
+Screen hd_hdmi router1 + router2 s1-40 (64 timing-clean, 8 in the window). Installed **HD HDMI router2 s25
+(+1.68 / <= -0.85, 79.67 MHz)**; spare HD HDMI router2 s37 (+1.57 / <= -1.12, 77.58 MHz):
+`.heirloom_work/rb_vase/skew/vase_v063_spare_hd_hdmi_router2_s37.vmprog`. HD Analog router1 s1 had data <= +0.57, so
+installed **HD Analog router1 s16 (-0.30 / <= -1.13, 79.54 MHz)**. HD Dual router1 s1 (-0.68 / <= -0.66) kept.
+**Shipped seeds: HD HDMI = router2 s25, HD Analog = router1 s16, the other four router1 s1.** Worst HD now 79.54 MHz.
+Not flashed.

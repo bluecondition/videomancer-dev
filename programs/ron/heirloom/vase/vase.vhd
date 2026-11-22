@@ -1031,7 +1031,7 @@ begin
             p2_d <= resize(shift_right(v_a, 2), 14);
             p2_feL <= f_fe(p1_eL); p2_feR <= f_fe(p1_eR);
             v_hd := shift_right(p1_eL, 2);
-            v_h := 36 - shift_left(resize(v_hd, 17), 1);
+            v_h := to_signed(36, 17) - shift_left(resize(v_hd, 17), 1);
             if p1_eL < 0 or v_h <= 0 then p2_hal <= (others => '0');
             elsif v_h >= 16 then p2_hal <= to_unsigned(14, 4);
             else
@@ -1083,8 +1083,8 @@ begin
 
             -- 6: fold (+ mirror); sin and camera addresses
             v_t2 := resize(p5_th2, 13);
-            if v_t2 > 1024 then v_tf := 2048 - v_t2;
-            elsif v_t2 < -1024 then v_tf := -2048 - v_t2;
+            if v_t2 > 1024 then v_tf := to_signed(2048, 13) - v_t2;
+            elsif v_t2 < -1024 then v_tf := to_signed(-2048, 13) - v_t2;
             else v_tf := v_t2; end if;
             v_t2m := v_t2;
             if v_tf < 0 then p6_sneg <= '1'; v_tf := -v_tf; else p6_sneg <= '0'; end if;
