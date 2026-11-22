@@ -430,7 +430,7 @@ begin
                             when others => c_inc <= v_m(14 downto 0) & '0';
                         end case;
                     when 53 =>                                        -- glow: index scale 252 * 2^((512 - k3) / 256)
-                        v_d := 512 - signed(resize(s_g3(12 downto 3), 12));
+                        v_d := to_signed(512, 12) - signed(resize(s_g3(12 downto 3), 12));
                         r_ex_a <= unsigned(v_d(7 downto 0)); z_sh <= v_d(10 downto 8);
                     when 55 => z_mt <= unsigned(r_ex_q);
                     when 56 =>
@@ -449,7 +449,7 @@ begin
                         if v_d > 8 then
                             f_b <= unsigned(resize(v_d - 8, 16)); z_neg <= '1';
                         elsif v_d < -8 then
-                            f_b <= unsigned(resize(-8 - v_d, 16)); z_neg <= '0';
+                            f_b <= unsigned(resize(to_signed(-8, 12) - v_d, 16)); z_neg <= '0';
                         else
                             f_b <= (others => '0'); z_neg <= '0';
                         end if;

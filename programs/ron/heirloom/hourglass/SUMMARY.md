@@ -181,3 +181,32 @@ Ron (2026-11-15): the camera effect at K6 = 100 % 25 % stronger; K6 default 100 
 - **Look check** (bear, 720p60 / 4, K6 1023, glide bypassed in scratch copies): `.heirloom_work/rb_hourglass/k6b/k6b_cmp.png`:
   the same picture with the lens regions pushed further; no wrap.
 - **Build:** router1; HD Analog s1 95.49, SD Analog s1 94.54, HD HDMI s1 97.01, SD HDMI s1 96.85, HD Dual s1 94.63, SD Dual s3 97.05 MHz; worst HD 94.63 MHz; 5686-5707 / 7680 LC; SD Dual seed 3. vmprog: out/rev_b/ron/heirloom/hourglass.vmprog.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`512 - v` comes out as `v - 512`). The
+simulator is correct, so every render showed the intended picture; only the hardware differed.
+- **Sites fixed:**
+  - line 433 (sequencer slot 53, K3 Glow): `v_d := 512 - k3` -> `to_signed(512, 12) - ...`, the exponent of the glow
+    index scale `c_gs = 252 * 2^((512 - k3) / 256)` (and its `z_sh` shift code).
+  - line 452 (slot 74, K4 Speed left of the deadband): `-8 - v_d` -> `to_signed(-8, 12) - v_d`, the magnitude of the
+    upward scroll step `c_dth`.
+- **What changes on hardware:**
+  - K3 Glow ran backwards: 0 gave the yellow haze over everything and 1023 the thin rim. Now 0 = a thin rim
+    (scale x4) and 1023 = haze over the whole background (x1/4), as designed. The default 512 looks the same.
+  - K4 Speed left of centre was broken. Just past the deadband the scroll jumped to ~0.55x the clip speed upward,
+    slowed as the knob went further left, stopped at ~405, then jumped to ~8.9x (~2800 lines/s) at 404. Now it
+    ramps smoothly from stopped at the deadband to 2.8x the clip speed upward at K4 = 0. The right half (downward)
+    and the default are unchanged.
+- **Remaps:** none (never flashed).
+- **Left as-is:** nothing else listed by the audit.
+- **Build:** router1. HD Analog **s2** 97.51 (seed 1 stalled the router at the 900 s timeout under a load of ~45),
+  SD Analog s1 101.46, HD HDMI s1 96.14, SD HDMI s1 97.05, HD Dual s1 101.75, SD Dual s1 94.86 MHz (worst HD 96.14
+  builder; the installed HD HDMI below is 85.73); 5,695-5,724 / 7,680 LC, 21 / 32 EBR. iceunpack OK x6.
+- **HD HDMI skew:** the builder's router1 s1 sat at **-2.74** / data <= -1.89 (negative). Screen hd_hdmi r1 + r2
+  s1-100: 168 routed, 166 timing-clean, 48 routes hung. The hangs were router1 frozen on its remaining-arcs count
+  and router2 stuck at overused = 2. dupin finds no CARRY I0==I1, and the 3 duplicate-input LUTs are also in the
+  v0.1.2 netlist. Only one seed landed in the window. Installed **router2 s63 (+1.56 / <= -0.78, 85.73 MHz)**.
+  The spare is router2 s84 (+0.81 / <= -1.47, 90.93 MHz), **below the window** (none other qualified):
+  `.heirloom_work/rb_hourglass/skew/hourglass_v013_spare_hd_hdmi_router2_s84.vmprog`. HD Analog r1 s2 (+0.94 /
+  <= -0.75) and HD Dual r1 s1 (-1.83 / <= -1.08) kept. Not flashed.
