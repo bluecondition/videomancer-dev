@@ -1,16 +1,16 @@
-# NEON BEACH (v0.4.0, 2026-11-22: HW feedback on v0.3.2: crab, gulls, sand, water, sunset).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+# NEON BEACH (v0.5.0, 2026-11-22: K6 Speed replaces the camera (no input video), crab switch Off/On, smooth sand drying).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 # See neonbeach.vhd, neonbeach.py and PLAN.md.
 
 [program]
 processing_delay_clks = 33
 program_id = "com.czartroniks.neonbeach"
 program_name = "Neon Beach"
-program_version = "0.4.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Render", "Demo"]
-program_type = "processing"
+program_type = "synthesis"
 description = "Side-on wireframe shorebreak: waves break on a mesh beach, the wash splits the sand into triangles."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
@@ -67,11 +67,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Camera"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -90,7 +90,7 @@ initial_value_label = "Neon"
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Crab"
-value_labels = ["On", "Off"]
+value_labels = ["Off", "On"]
 initial_value_label = "On"
 
 [[parameter]]
@@ -98,12 +98,6 @@ parameter_id = "toggle_switch_10"
 name_label = "Sky"
 value_labels = ["Day", "Night"]
 initial_value_label = "Day"
-
-[[parameter]]
-parameter_id = "toggle_switch_11"
-name_label = "Source"
-value_labels = ["Video", "Osc"]
-initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"

@@ -38,7 +38,8 @@ OPS = {'NOP': 0, 'LDI': 1, 'ADD': 2, 'SUB': 3, 'ADDI': 4, 'SHR': 5, 'SHL': 6, 'A
        'KST': 19, 'KWR': 20, 'OUT': 21, 'END': 22, 'TRI': 23, 'JP': 24, 'MIN': 25, 'MAX': 26, 'ABS': 27}
 
 # input ports
-P_K1, P_K3, P_K4, P_K5, P_SL, P_T, P_RND, P_COFF = 0, 1, 2, 3, 4, 5, 6, 7
+# (port 7: Speed (K6, glided) << 1 | crab off)
+P_K1, P_K3, P_K4, P_K5, P_SL, P_T, P_RND, P_KC = 0, 1, 2, 3, 4, 5, 6, 7
 # output ports: swash envelope, shoreline knot; the crab: centre x (virtual px from the canvas's left edge),
 # top row, sink (0 .. 96 rows into its hole) | frame << 7, its hole's wetness cell (row << 6 | column)
 O_E, O_KS, O_CX, O_CY, O_CS, O_CH = 0, 1, 2, 3, 4, 5
@@ -136,7 +137,7 @@ R_SN, R_BN = 8, 9                          # the previous (right-hand) knot's su
 T0, T1, T2, T3, T4, T5 = 10, 11, 12, 13, 14, 15
 # scratch RAM
 S_FOAM, S_SOFF, S_BEDT = 0, 128, 256    # per knot: last field's foam, the phase offset, the bed
-S_NSH, S_SZSH, S_NPREV, S_FIRST, S_D, S_CAP, S_EXC, S_TS, S_SRF, S_BED, S_PH = range(384, 395)
+S_NSH, S_SZSH, S_NPREV, S_FIRST, S_D, S_CAP, S_EXC, S_TS, S_SRF, S_BED, S_PH, S_SPD = range(384, 396)
 S_CX, S_CY, S_CS, S_CT, S_CD, S_CF, S_CW = range(400, 407)      # crab: x, y, sink, timer, step, frame clock, walking
 
 
@@ -146,6 +147,14 @@ def program():
     # ---- the phase: dP = 96 + Rhythm / 2, in 16ths of a phase unit ----
     a.IN(T0, P_K1); a.SHR(T0, T0, 1); a.ADDI(T0, T0, 96)
     a.ADD(T1, R_PF, T0); a.SHR(T2, T1, 4); a.AND(R_PF, T1, 15); a.ADD(R_P, R_P, T2)
+    # ---- Speed: the phase offsets x m / 128, m = 128 / (1 + 2 K6) (quadratic fit, q = K6 / 4): a wave runs to
+    # the shore 1 .. 3 times as fast, arriving as often (Rhythm), so it is that much longer ----
+    a.IN(T0, P_KC); a.SHR(T0, T0, 3)                   # q 0 .. 255
+    a.MUL(T0, T0); a.MRD(T1, 0); a.SHR(T1, T1, 8)      # q^2 / 256
+    a.LDI(T2, 85); a.MUL(T2, T1); a.MRD(T1, 7); a.SHR(T1, T1, 1)     # 85 q^2 / 65536
+    a.LDI(T2, 171); a.MUL(T2, T0); a.MRD(T2, 7); a.SHR(T2, T2, 1)    # 171 q / 256
+    a.SUB(T1, T1, T2); a.ADDI(T1, T1, 128)             # m: 128 (K6 0) .. 42 (K6 max)
+    a.LDI(T2, S_SPD); a.FWR(T2, T1)
     # ---- the surge: sg = (Swell >> 5) x (tri(2P) - 64) >> 6, signed ----
     a.SHL(T0, R_P, 1); a.TRI(T0, T0); a.ADDI(T0, T0, -64)
     a.ABS(T1, T0)
@@ -166,6 +175,7 @@ def program():
     a.SUB(T1, T0, R_SL)                                # d = bed - sea level
     a.LDI(T2, S_D); a.FWR(T2, T1)
     a.ADDI(T2, R_K, S_SOFF); a.FRD(T2, T2)             # phase offset
+    a.LDI(T3, S_SPD); a.FRD(T3, T3); a.MUL(T2, T3); a.MRD(T2, 7)     # x m / 128 (Speed)
     a.SUB(T2, R_P, T2)                                 # Pk = P - offset
     a.SHR(T3, T2, 5); a.AND(T3, T3, 127)               # ph = Pk[11:5]
     a.LDI(T4, S_PH); a.FWR(T4, T3)
@@ -301,7 +311,7 @@ def program():
     # at random, runs down the sand when the wash reaches its column and depth, sinks into a hole when switched
     # off and comes up somewhere new when switched on
     a.LDI(T5, S_CS); a.FRD(R_SL, T5)                   # sink (R_SL is free now)
-    a.IN(T0, P_COFF); a.JZ(T0, 'crab_on')
+    a.IN(T0, P_KC); a.AND(T0, T0, 1); a.JZ(T0, 'crab_on')
     a.ADDI(R_SL, R_SL, 3); a.LDI(T1, 96); a.MIN(R_SL, R_SL, T1)   # switched off: sink (to 96)
     a.JMP('crab_out')
     a.label('crab_on')

@@ -8,7 +8,9 @@ turn white; under everything the sand, a mesh of quads. When a wave lands, a was
 it covers turn into triangles in the water's colour, and as it drains they revert a triangle at a time, leaving
 the sand dark and wet. A small faceted crab walks the sand and runs from the wash.
 
-**Status: v0.4.0 (2026-11-22), Ron's first hardware feedback (on v0.3.2) applied; see "v0.4.0" below.** Flash
+**Status: v0.5.0 (2026-11-22): K6 is Speed (the camera and the input video are gone: a synthesis program now),
+the Crab switch reads Off / On like every other program, and drying sand fades back smoothly; see "v0.5.0"
+below.** Flash
 `out/rev_b/ron/neonbeach.vmprog`. Build plan and design history: `PLAN.md` (side-on version). v0.1.0 (ca04ddf)
 was the still scene, v0.3.0 (e419f45) the first with waves, wash and crab; v0.3.1 tapers the wash toward the
 shoreline and fixes the engine's timing; v0.3.2 (HW-captured defaults) was the first one flashed.
@@ -31,27 +33,35 @@ shoreline and fixes the engine's timing; v0.3.2 (HW-captured defaults) was the f
   deep with the rows parallel to the sand's surface.
 - **The waves** come from a small microcoded engine (`nbengine.py`: assembler, emulator, program) that fills the
   knot table bank that is not on screen, once a field, starting at the field start and running on through the
-  field (about 188k clocks worst case; an NTSC field is 225k). Per knot from the right edge: the wave phase
-  (Rhythm) less a per-knot offset that shortens the waves over the rising bed, the wave's size by its number
+  field (about 195k clocks worst case; an NTSC field is 225k). Per knot from the right edge: the wave phase
+  (Rhythm) less a per-knot offset that shortens the waves over the rising bed, scaled by Speed (x m / 128,
+  m = 128 / (1 + 2 K6) by a quadratic fit: longer waves at the same rhythm run in up to 3 times as fast), the
+  wave's size by its number
   (waves come in sets), a shoaling gain, the depth cap (a wave taller than 3/8 of the depth breaks: the excess
   becomes foam and the profile turns into a breaker), the profile from a shape table (4 classes x 128 phases),
   two short chop waves (Chop), the surge (slow, from Swell), and the foam (Foam): breaking, whitecaps on steep
   fronts, the shoreline, 5 a field of decay. On the beach the surface is a thin swash sheet tapering to the
   run-up's front; a crest reaching the shoreline starts a run-up (fast up, slow drain).
 - The engine: a 16-bit ALU (one adder for add / sub / abs / min / max), sixteen registers kept in the top of its
-  scratch block RAM (no register-file multiplexers), a serial 10 x 8 multiplier, the program in block RAM
+  scratch block RAM (no register-file multiplexers), a serial 16 x 8 multiplier (10 x 8 until v0.5.0, while
+  the emulator modelled 16 x 8: no product reached 2^10 until Speed), the program in block RAM
   (512 x 24). Ten clocks an instruction; every enable and select is decoded into a register two or more clocks
-  before it is used (v0.3.0's decode-to-result paths missed HD HDMI on three router2 seeds). The scratch RAM's initial contents hold the per-knot phase offsets
-  and the bed. Verified: the emulator matches a plain-Python statement of the maths over 600 fields at four knob
-  settings (0 mismatches), and the RTL matches the emulator word for word on every knot write (GHDL testbench,
-  `.neonbeach_work/tb`).
+  before it is used (v0.3.0's decode-to-result paths missed HD HDMI on three router2 seeds). The scratch RAM's
+  initial contents hold the per-knot phase offsets and the bed. Verified (v0.5.0): the emulator matches a
+  plain-Python statement of the maths over 750 fields at five knob settings including Speed 0 / 30 / 50 / 100 %
+  (0 mismatches, `proto/spec.py`), and the RTL matches the emulator word for word on every knot write at Speed
+  50 % (GHDL testbench `.neonbeach_work/tb5`, `cmp.py`: 0 mismatches over 3 fields; the same compare against
+  Speed 0 gives 204, so it discriminates).
 - **Wet sand**: a 4-bit counter per sand cell (2048 cells, block RAM). A sweep in vblank works out each column's
   reach from the engine's swash envelope and shoreline (plus two drifting triangle lobes) and rewrites every
-  cell: 15 = under the wash, 14 = only its upper triangle, then 13 .. 1 drying one step every 12 fields. The
+  cell: 15 = under the wash, 14 = only its upper triangle, then 12 .. 1 drying one step every 12 fields
+  (13 = damp and held: the sea bed's top row, the crab's hole). The
   reach thins over the last columns before the shoreline (v0.3.1; it ended in a vertical cut). The
   pixel path draws 15 and 14 as wash triangles; drying cells keep their diagonals (the upper triangle's longer)
   and lose them by a per-cell hash, so the triangles disappear piecemeal. Wet sand fills darker: 8 ramp steps a
-  wetness step, so fresh wet sand is dark brown and fades back to the (light) dry sand over about 2.6 s.
+  wetness step less the fields since the last step (round(8 x div / 12)), so fresh wet sand is dark brown and
+  fades back smoothly to the (light) dry sand over about 2.4 s. (v0.4 and earlier stepped every drying cell at
+  once, 5 times a second: Ron's "constant subtle pulsing" along the top of the sand.)
 - **Per-field colours.** The colour table is a block RAM (seeded from `C_NB_PAL`). In vblank the colour path is
   run on nine made-up pixels from the keyframe slot, and the results are written into the live palette as ramp
   segments: the water's five keys (keyframes night / dusk / golden / day over the slider's lower three quarters,
@@ -81,17 +91,16 @@ Spray and stars are overlays.
 
 | Control | Name | What it does |
 |---|---|---|
-| K1 | Rhythm | tempo of the waves, the chop and the surge (and so the wash) |
+| K1 | Rhythm | how often the waves come; also the chop's and the surge's tempo (and so the wash) |
 | K2 | Tide | the water level: moves the shoreline along the beach |
 | K3 | Foam | breaking foam, whitecaps on steep fronts, the shoreline foam, the spray |
 | K4 | Chop | two short waves riding on the swell |
 | K5 | Swell | wave height, the surge's depth, how far the wash runs |
-| K6 | Camera | camera (or Osc) strength, default 100 %: lights the sky, raises the water surface (up to 236 rows) and the sand (up to 118) |
+| K6 | Speed | how fast the waves run in to the shore, x1 .. x3 at the same rhythm (they get that much longer); default 50 % = x2 |
 | S7 | Fill | Wires / Fill (the gradients roll in object by object) |
 | S8 | Colour | Neon / Ice (each with day, low-sun and night palettes) |
-| S9 | Crab | On / Off (it burrows; on again it comes up somewhere new; its hole is a damp cell that dries) |
+| S9 | Crab | Off / On (1 = On since v0.5.0; it burrows; on again it comes up somewhere new; its hole is a damp cell) |
 | S10 | Sky | Day / Night |
-| S11 | Source | Video / Osc |
 | P12 | Sun | elevation of the sun or moon; the sky, the palette and the stars follow it; gulls roost when it is down |
 
 ## Resolution differences
@@ -152,7 +161,6 @@ wash shows in a three-frame render; `a_*` = v0.1.0. Motion was not rendered (the
 - Wires are not anti-aliased.
 - Where the water gets shallow its eight layers crowd into a solid bright edge (no level of detail: switching
   the layer count drew stair-step verticals).
-- The camera's lift has no vertical smoothing, so a busy picture makes a ragged surface.
 - Presets are hand-written placeholders: capture real ones with `./capture_preset.sh`.
 - Only the water, its wire and the wash (and the sky, as before) change colour gradually with the sun; the sun,
   sand, clouds, gulls, foam and crab still switch palettes at the day / low sun / night thresholds.
@@ -179,7 +187,7 @@ Ron's notes after flashing v0.3.2, and what changed:
 |---|---|
 | Crab 50 % smaller, more wireframe, less rounded | Redrawn in straight lines: hexagonal shell cut into facet bands (alternate bands fill darker) and a dark shoulder facet, legs as square-capped bars (thigh out, shin straight down), angular pincers, diamond eyes on stalks. Half size (about 122 x 48 virtual px): the pixel path doubles x into the ROM and reads one ROM row a line; its feet stay where v0.3's were. |
 | Gulls: no circle in the middle, two long rectangular planes | Each gull is two flat planks (34 units, 68 virtual px each) meeting at the centre, left and right wing in two shades; V up / droop down for the flap. |
-| A constant subtle pulsing down the sand | That was the sheen on the sand's wires (bands moving down); the sand no longer takes it. |
+| A constant subtle pulsing down the sand | Taken to be the sheen on the sand's wires (bands moving down); the sand no longer takes it. Wrong guess: see v0.5.0. |
 | Wash should discolour the sand more; lighten the sand | Dry sand ramps are lighter; wet sand darkens 8 ramp steps a wetness step (was 4). |
 | More dynamic water; crest / foam as full squares turning white; more blue / green colours fading down the grid (Pixel Beach's layers) | Each water layer its own flat colour on a five-key ramp (Pixel Beach's DEEP, MID, AQUA, SURF and a neon top); foam = 16 px squares turning white one by one; the water's columns sway with each passing wave. |
 | Waves should change colour gradually at sunset, not jump blue -> magenta | The water's colours (and its wire, and the wash) are written into the palette every field from four keyframes lerped by the sun's elevation. |
@@ -203,3 +211,29 @@ cost against v0.3.1 (standalone yosys): +56 LUT, -3 FF, block RAMs unchanged (th
 EBRs, no transparency logic). GHDL renders (720p, hardware hues) in `.neonbeach_work/prev/`: `e_day` (Ron's
 defaults), `e_sunset` (Sun 41 %, before the sunset keyframes were retuned to avoid a grey midpoint), `e_sunset2` (after;
 the wash was then moved from halfway to 3/4 of the way to the top key, also grey at sunset), `e_storm`.
+
+## v0.5.0: Ron's notes on v0.4.0 (2026-11-22)
+
+| Note | Change |
+|---|---|
+| The pulsing is on the sand itself, across the whole top edge, maybe the wash's discolouring | It was: every drying cell stepped one wetness step (8 ramp steps) in the same field, every 12 fields, so the whole wet strip brightened in a jump 5 times a second. The pixel path now subtracts the fields since the last step as a fraction (round(8 x div / 12), 0 .. 7), so the colour fades back smoothly. A retreating wash leaves 12 (drying at once); 13 is kept as the held damp value (the sea bed's top row, the crab's hole), which takes no fraction (it would saw-tooth). |
+| The crab switch is reversed | S9 labels are now Off / On (1 = On), as in every other program and Pixel Beach; the VHDL inverts the bit. |
+| Replace K6 with an option to make the water roll in faster; no incoming video | K6 Speed: the per-knot phase offsets are scaled by m / 128 (m 128 .. 42), so at the same Rhythm the waves are up to 3 times as long and run in up to 3 times as fast. Glided (the old camera glide slot). The camera, its sky lift, the Osc lattice and S11 Source are gone; `program_type = "synthesis"` (Pixel Beach and Damier run that way on hardware; the program already makes its own avid). S11 is free. |
+
+The engine's multiplier was widened from 10 x 8 to the 16 x 8 the emulator and the docstring always described
+(the phase offsets reach 52,788). Engine worst case 195k clocks a field (v0.4.0: 188k; +4 instructions and a
+multiply a knot, plus the per-field Speed fit); an NTSC field has 225k.
+
+Built 2026-11-22 with **router1**, 28 / 32 block RAMs:
+
+| Config | Seed | Post-route Fmax | LC |
+|---|---|---|---|
+| HD Analog | 1 | 87.83 MHz | 7214 |
+| SD Analog | 1 | 80.32 MHz | 7225 |
+| HD HDMI | **2** (seed 1: 73.66, a routing-bound path through the wave / wash logic, 10.3 ns routing to 3.3 logic) | 83.41 MHz | 7230 |
+| SD HDMI | 1 | 79.25 MHz | 7219 |
+| HD Dual | 1 | 79.25 MHz (v0.4.0: 74.40) | 7223 |
+| SD Dual | 1 | 75.75 MHz | 7237 |
+
+7,237 / 7,680 LC (94.2 %, down from 95.7 %): the camera path cost more than Speed, the wider multiplier and the
+drying fraction together.

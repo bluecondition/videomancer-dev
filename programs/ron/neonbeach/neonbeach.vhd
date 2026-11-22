@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.4.0 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.5.0 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -25,17 +25,19 @@
 --                    white one by one; spray over it.  The water's colours follow the sun's elevation gradually
 --                    (per-field palette entries, written in vblank from keyframes)
 --   waves           a small microcoded engine (nbengine.py) fills the knot table once a field: each wave's phase
---                    (Rhythm), its size (waves come in sets), shoaling, the depth cap (breaking: the excess is
+--                    (Rhythm: how often they come; Speed: how fast they run in, by stretching them), its size (waves come in sets), shoaling, the depth cap (breaking: the excess is
 --                    foam), the profile by class, two chop waves (Chop), the surge, foam (Foam), the swash sheet
 --                    running up the beach; it also runs the crab
 --   sand            under the bed line: cells 32 px wide and 32 rows deep, the rows parallel to the sand's
 --                    surface.  Wet sand (a 4-bit counter per cell, swept in vblank): the wash covers cells a
---                    triangle at a time; as it drains the cells keep their diagonals and lose them as they dry
+--                    triangle at a time; as it drains the cells keep their diagonals and lose them as they dry,
+--                    and their colour fades back smoothly (a per-field fraction between the counter's steps)
 --   crab            span-coded, folded about its centre line (slot B); walks, pauses, runs from the wash, burrows
 --                    when switched off and comes up somewhere new
 --
---   K1 Rhythm  K2 Tide  K3 Foam  K4 Chop  K5 Swell  K6 Camera
---   S7 Fill (Wires / Fill)  S8 Colour (Neon / Ice)  S9 Crab  S10 Sky (Day / Night)  S11 Source
+--   K1 Rhythm  K2 Tide  K3 Foam  K4 Chop  K5 Swell  K6 Speed
+--   S7 Fill (Wires / Fill)  S8 Colour (Neon / Ice)  S9 Crab (Off / On)  S10 Sky (Day / Night)
+--   (no input video: a synthesis program since v0.5.0)
 --   P12 Sun    elevation of the sun or moon; the sky, the palette and the stars follow it
 --
 -- Stage numbering: a register "at stage S" holds pixel n at T + S + n (T = the g_start clock).  One latency
@@ -168,10 +170,10 @@ architecture neonbeach of program_top is
     signal s_st       : std_logic_vector(1 to 16) := (others => '0');   -- s_st(k) = g_start delayed k
 
     -- [B] controls
-    signal s_fsw, s_theme, s_croff, s_night, s_src : std_logic := '0';
+    signal s_fsw, s_theme, s_croff, s_night : std_logic := '0';
     signal s_k2 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_gs : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);    -- sun glide (Q3)
-    signal s_g6 : unsigned(12 downto 0) := to_unsigned(1023 * 8, 13);         -- camera glide
+    signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);          -- Speed glide
     signal s_gp : unsigned(12 downto 0) := (others => '0');                   -- fill glide
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
@@ -186,7 +188,6 @@ architecture neonbeach of program_top is
     signal c_sunc : signed(11 downto 0) := to_signed(70, 12);     -- its centre, rows above the horizon
     signal c_sl   : unsigned(10 downto 0) := to_unsigned(C_SL0, 11);      -- sea level row
     signal c_fp   : unsigned(13 downto 0) := (others => '0');     -- fill position (Q3)
-    signal c_cgn  : unsigned(3 downto 0) := (others => '0');      -- camera gain
     signal c_sa1, c_sab : unsigned(13 downto 0) := (others => '0');   -- cloud and gull drift
     signal c_tod  : unsigned(1 downto 0) := "00";                 -- 0 day, 1 low sun, 2 night
     signal c_pal  : unsigned(2 downto 0) := "000";                -- theme & time of day
@@ -264,7 +265,7 @@ architecture neonbeach of program_top is
     signal sc_q, sc_wd : unsigned(15 downto 0) := (others => '0');
     signal sc_we : std_logic := '0';
     signal sh_q  : unsigned(7 downto 0) := (others => '0');
-    signal m_x, m_p : unsigned(17 downto 0) := (others => '0');
+    signal m_x, m_p : unsigned(23 downto 0) := (others => '0');
     signal m_y   : unsigned(7 downto 0) := (others => '0');
     signal m_c   : unsigned(3 downto 0) := (others => '0');
     signal k_srf, k_bed : unsigned(9 downto 0) := (others => '0');   -- the staged knot word
@@ -282,8 +283,10 @@ architecture neonbeach of program_top is
     signal s_k1, s_k3, s_k4, s_k5 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     -- [C] wet sand: Pixel Beach's per-cell counter.  2048 cells (32 rows of depth x 64 columns of 32 px), 4 bits:
-    -- 15 = under the wash, 14 = only the upper triangle, 13 .. 1 drying (one step every 12 fields), 0 dry.  A
-    -- sweep rewrites every cell in vblank; the pixel path reads it in active video.
+    -- 15 = under the wash, 14 = only the upper triangle, 13 = damp and held (the sea bed's top row, the crab's
+    -- hole), 12 .. 1 drying (one step every 12 fields; drawn with the fields since the step as a fraction, so
+    -- the colour fades back smoothly: v0.4 stepped every drying cell at once, 5 times a second, a pulse along
+    -- the whole wet edge), 0 dry.  A sweep rewrites every cell in vblank; the pixel path reads it in active video.
     type t_wt is array (0 to 2047) of std_logic_vector(3 downto 0);
     signal wt_ram : t_wt := (others => (others => '0'));
     attribute no_rw_check of wt_ram : signal is true;
@@ -302,6 +305,7 @@ architecture neonbeach of program_top is
     signal ws_cap : signed(9 downto 0) := (others => '0');
     signal ws_reach, ws_rc2 : signed(9 downto 0) := (others => '0');
     signal ws_div : unsigned(3 downto 0) := (others => '0');
+    signal ws_fr  : unsigned(2 downto 0) := (others => '0');       -- 8 x (fields since the step) / 12
 
     -- [C] line engine
     signal e_zk   : std_logic := '0';
@@ -341,16 +345,10 @@ architecture neonbeach of program_top is
     signal l_ta, l_tb : unsigned(6 downto 0) := (others => '0');
     signal l_fill : std_logic_vector(7 downto 0) := (others => '0');
     signal l_rip, l_v1, l_v2 : std_logic := '0';
-    signal l_oy : unsigned(6 downto 0) := (others => '0');
     signal l_od, l_pc : unsigned(13 downto 0) := (others => '0');             -- sheen: per-line phase terms
     signal n_xa0, n_xw0, n_pa0 : unsigned(13 downto 0) := (others => '0');
     signal n_xb0 : signed(13 downto 0) := (others => '0');
     signal n_x0  : signed(12 downto 0) := (others => '0');
-
-    -- [D] source (camera luma or the Osc lattice), smoothed and scaled
-    signal s_cin : unsigned(5 downto 0) := (others => '0');
-    signal s_cf  : unsigned(9 downto 0) := (others => '0');
-    signal s_cg  : unsigned(5 downto 0) := (others => '0');      -- the gained source, 0 .. 59
 
     -- [C] beam counters
     signal b_xw, b_xa, b_pa : unsigned(13 downto 0) := (others => '0');
@@ -387,6 +385,7 @@ architecture neonbeach of program_top is
     signal wd_ss : t_s3 := (others => (others => '0'));       -- sand facets: column, row, diagonal
     signal wd_inw, wd_ins, wd_cp : std_logic_vector(10 to 13) := (others => '0');
     signal w13_q : unsigned(2 downto 0) := (others => '0');
+    signal w13_stp : unsigned(7 downto 0) := (others => '0');      -- the sand's position + the drying fraction
     signal w5_fm, w6_fm, w7_fm, w8_fm : unsigned(7 downto 0) := (others => '0');
     signal w8_sph, w9_sph : unsigned(6 downto 0) := (others => '0');
     signal w9_up : std_logic := '0';
@@ -418,8 +417,6 @@ architecture neonbeach of program_top is
     signal t14_tw : unsigned(1 downto 0) := (others => '0');
     -- the sky's ramp positions, registered ahead of the merge
     signal k14_skt : unsigned(5 downto 0) := (others => '0');
-    signal k14_cg2 : unsigned(6 downto 0) := (others => '0');
-    signal k14_cam : std_logic := '0';
 
     -- sprite slots
     signal a12_xs, b12_xs : unsigned(7 downto 0) := (others => '0');
@@ -530,9 +527,8 @@ begin
                 s_w <= s_wmax; s_wmax <= (others => '0');
                 s_fsw   <= registers_in(6)(0);
                 s_theme <= registers_in(6)(1);
-                s_croff <= registers_in(6)(2);
+                s_croff <= not registers_in(6)(2);       -- S9: 1 = On
                 s_night <= registers_in(6)(3);
-                s_src   <= registers_in(6)(4);
                 s_k2    <= unsigned(registers_in(1));
                 s_k1    <= unsigned(registers_in(0));
                 s_k3    <= unsigned(registers_in(2));
@@ -547,7 +543,7 @@ begin
             end if;
             g_wm1 <= s_w - 1;
 
-            -- [B] shared glide (1/8 of the gap per field, +-2 deadband): fill (to the Fill switch), camera, sun
+            -- [B] shared glide (1/8 of the gap per field, +-2 deadband): fill (to the Fill switch), Speed, sun
             if s_zgo = '1' then
                 z_gp <= "00"; z_gc <= "00"; z_grun <= '1';
             elsif z_grun = '1' then
@@ -603,7 +599,6 @@ begin
                         c_sl <= unsigned(to_signed(C_SL0, 11) - v_c(10 downto 0));
                     when 43 =>
                         c_fp <= resize(s_gp, 14);
-                        c_cgn <= s_g6(12 downto 9);
                     when 52 =>                              -- the crab, from the engine's last pass: half
                         c_cry <= resize(o_cy, 11) + 48;     -- size, its feet where v0.3's were, sinking at half
                     when 54 =>                              -- rate (hidden under its hole line at 96)
@@ -851,7 +846,6 @@ begin
                     if e_mir = '1' and v_g32(3 downto 0) <= e_d(9 downto 6) then l_rip <= '1'; else l_rip <= '0'; end if;
                     if e_ln /= 0 then l_v1 <= '1'; else l_v1 <= '0'; end if;
                     if e_ln(1) = '1' and s_tv2 = '1' then l_v2 <= '1'; else l_v2 <= '0'; end if;
-                    l_oy <= f_tri7(v_y(9 downto 2) + c_t(8 downto 1));
                     lr_a <= "000" & e_sa(7 downto 1);
                 when 33 => lr_a <= "000" & e_sb(7 downto 1);
                 when 34 => lr_a <= e_aa;
@@ -1000,8 +994,8 @@ begin
         variable v_db  : signed(10 downto 0);
         variable v_n, v_sd, v_dd : signed(11 downto 0);
         variable v_r2  : unsigned(10 downto 0);
-        variable v_sk  : unsigned(6 downto 0);
         variable v_wv  : unsigned(3 downto 0);
+        variable v_st8, v_d8 : unsigned(7 downto 0);
         variable v_j   : unsigned(3 downto 0);
         variable v_cx  : unsigned(6 downto 0);
         variable v_fa, v_fb : unsigned(6 downto 0);
@@ -1027,14 +1021,14 @@ begin
             w5_b0 <= unsigned(kr_qf(26 downto 17));
             w5_db <= signed(kr_qf(16 downto 9));
             w5_fm <= unsigned(kr_qf(8 downto 1));
-            -- 6 (the camera raises the sand by up to 118 rows: folded into the bed's base here)
+            -- 6
             v_db := resize(w5_db, 11);
             w6_ps <= w5_ps1 + w5_ps2;
             w6_fm <= w5_fm;
             w6_pb1 <= f_gk(v_db, w_f(5)(0), 0) + f_gk(v_db, w_f(5)(1), 1);
             w6_pb2 <= f_gk(v_db, w_f(5)(2), 2) + f_gk(v_db, w_f(5)(3), 3);
-            w6_s0 <= signed(resize(w5_s0, 12)) - signed(resize(s_cg & "00", 12));   -- the surface up to 236 rows
-            w6_b0 <= signed(resize(w5_b0, 12)) - signed(resize(s_cg & '0', 12));    -- the sand up to 118
+            w6_s0 <= signed(resize(w5_s0, 12));
+            w6_b0 <= signed(resize(w5_b0, 12));
             -- 7
             w7_srf <= w6_s0 + resize(shift_right(w6_ps, 4), 12);
             w7_pb <= w6_pb1 + w6_pb2;
@@ -1127,6 +1121,7 @@ begin
             -- 13: always eight layers (switching the layer bit by depth drew stair-step verticals where the
             -- count changed); where they crowd near the shore they merge into a solid bright edge
             w13_q <= wd_q(12);
+            w13_stp <= resize(wd_st(12), 8) + resize(ws_fr, 8);
             -- 14
             w14_in <= wd_inw(13); w14_sub <= w13_q(0) & wd_cp(13); w14_q <= w13_q;
             s14_in <= wd_ins(13);
@@ -1144,8 +1139,14 @@ begin
                     s14_sub <= wd_ss(13)(2 downto 1) & '0';
                 end if;
             end if;
-            -- wet sand: 8 steps of the ramp a wetness step (v0.3: 4), so a fresh wash leaves the sand dark brown
-            if wd_st(13) > (v_wv & "000") then s14_t <= wd_st(13) - (v_wv & "000"); else s14_t <= (others => '0'); end if;
+            -- wet sand: 8 steps of the ramp a wetness step (v0.3: 4), so a fresh wash leaves the sand dark brown;
+            -- drying cells (12 .. 1) give back the fraction since their last step (no step in the colour)
+            if v_wv /= 0 and v_wv < 13 then v_st8 := w13_stp; else v_st8 := resize(wd_st(13), 8); end if;
+            if v_st8 > resize(v_wv & "000", 8) then
+                v_d8 := v_st8 - resize(v_wv & "000", 8); s14_t <= v_d8(6 downto 0);
+            else
+                s14_t <= (others => '0');
+            end if;
             f14_in <= wd_inf(13); f14_sub <= wd_ff(13); f14_t <= wd_ft(13); sp14 <= wd_sp(13);
 
             ----------------------------------------------------------------
@@ -1188,13 +1189,9 @@ begin
             if v_hh(7 downto 6) = c_t(6 downto 5) then t14_tw <= "00"; else t14_tw <= "11"; end if;
 
             ----------------------------------------------------------------
-            -- the sky's ramp positions: filled, the line's position lifted by the camera (clamped to the
-            -- segment); wires only, the camera alone
+            -- the sky's ramp position (filled)
             ----------------------------------------------------------------
-            v_sk := resize(l_tsky, 7) + resize(s_cg, 7);
-            if v_sk(6) = '1' then k14_skt <= (others => '1'); else k14_skt <= v_sk(5 downto 0); end if;
-            k14_cg2 <= s_cg & '0';
-            if s_cg /= 0 then k14_cam <= '1'; else k14_cam <= '0'; end if;
+            k14_skt <= l_tsky;
 
             ----------------------------------------------------------------
             -- sprite slots: span-coded rows.  A = clouds / gulls (2 virtual px a unit), B = the crab (folded)
@@ -1235,38 +1232,6 @@ begin
         end if;
     end process p_obj;
 
-    ---------------------------------------------------------------------------
-    -- [D] SOURCE: camera luma (or the Osc lattice), a one-pole smoother along the line, the K6 gain
-    ---------------------------------------------------------------------------
-    p_src : process(clk)
-        variable v_l : unsigned(5 downto 0);
-        variable v_o : unsigned(7 downto 0);
-        variable v_e : signed(10 downto 0);
-        variable v_p : unsigned(9 downto 0);
-    begin
-        if rising_edge(clk) then
-            v_l := unsigned(data_in.y(9 downto 4));
-            if s_src = '1' then
-                v_o := resize(f_tri7(unsigned(b_x(9 downto 2)) + c_t(7 downto 0)), 8) + resize(l_oy, 8);
-                s_cin <= v_o(7 downto 2);
-            elsif v_l > 4 then
-                s_cin <= v_l - 4;
-            else
-                s_cin <= (others => '0');
-            end if;
-            if s_avq = '1' then
-                v_e := signed(resize(s_cin & "0000", 11)) - signed(resize(s_cf, 11));
-                v_e := signed(resize(s_cf, 11)) + shift_right(v_e, 3);
-                s_cf <= unsigned(v_e(9 downto 0));
-            end if;
-            v_p := (others => '0');
-            if c_cgn(0) = '1' then v_p := v_p + resize(s_cf(9 downto 4), 10); end if;
-            if c_cgn(1) = '1' then v_p := v_p + resize(s_cf(9 downto 4) & '0', 10); end if;
-            if c_cgn(2) = '1' then v_p := v_p + resize(s_cf(9 downto 4) & "00", 10); end if;
-            if c_cgn(3) = '1' then v_p := v_p + resize(s_cf(9 downto 4) & "000", 10); end if;
-            s_cg <= v_p(9 downto 4);
-        end if;
-    end process p_src;
 
     ---------------------------------------------------------------------------
     -- [C] WET SAND: the RAM (one write statement; the pixel path reads it in active video) and the sweep (in
@@ -1285,6 +1250,17 @@ begin
             wt_q  <= wt_ram(to_integer(wt_a));
             wt_qf <= wt_q;
             if wt_we = '1' then wt_ram(to_integer(wt_wa)) <= wt_wd; end if;
+            -- the drying fraction: round(8 x ws_div / 12), quasi-static through the field
+            case to_integer(ws_div) is
+                when 0      => ws_fr <= "000";
+                when 1 | 2  => ws_fr <= "001";
+                when 3      => ws_fr <= "010";
+                when 4 | 5  => ws_fr <= "011";
+                when 6      => ws_fr <= "100";
+                when 7 | 8  => ws_fr <= "101";
+                when 9      => ws_fr <= "110";
+                when others => ws_fr <= "111";
+            end case;
 
             -- the row pipeline: the cell issued two clocks ago is in wt_qf now
             ws_r1 <= ws_r0(4 downto 0); ws_r2 <= ws_r1;
@@ -1297,7 +1273,7 @@ begin
                 v_top := signed(resize(ws_r2 & "00", 10));
                 if ws_rc2 >= v_top + 4 then v_n := to_unsigned(15, 4);
                 elsif ws_rc2 > v_top then v_n := to_unsigned(14, 4);
-                elsif v_o >= 14 then v_n := to_unsigned(13, 4);
+                elsif v_o >= 14 then v_n := to_unsigned(12, 4);
                 elsif ws_tick = '1' and v_o /= 0 then v_n := v_o - 1;
                 else v_n := v_o; end if;
                 if ws_uw = '1' and ws_r2 = 0 then v_n := to_unsigned(13, 4); end if;    -- the sea bed's top row: damp
@@ -1373,7 +1349,7 @@ begin
             -- the serial multiplier: one partial product a clock
             if m_c /= 0 then
                 if m_y(0) = '1' then m_p <= m_p + m_x; end if;
-                m_x <= m_x(16 downto 0) & '0';
+                m_x <= m_x(22 downto 0) & '0';
                 m_y <= '0' & m_y(7 downto 1);
                 m_c <= m_c - 1;
             end if;
@@ -1468,7 +1444,7 @@ begin
                             when 4      => d_in <= resize(c_sl, 16);
                             when 5      => d_in <= c_t;
                             when 6      => d_in <= u_lfsr;
-                            when others => d_in <= (0 => s_croff, others => '0');
+                            when others => d_in <= resize(s_g6(12 downto 3) & s_croff, 16);   -- Speed, crab off
                         end case;
                         u_ph <= to_unsigned(3, 4);
                     when 3 =>
@@ -1527,9 +1503,9 @@ begin
                         if d_fs(6) = '1' then
                             case to_integer(d_mrd) is
                                 when 0      => u_res <= m_p(15 downto 0);
-                                when 1      => u_res <= resize(m_p(17 downto 6), 16);
-                                when 2      => u_res <= resize(m_p(17 downto 7), 16);
-                                when others => u_res <= resize(m_p(17 downto 3), 16);
+                                when 1      => u_res <= m_p(21 downto 6);
+                                when 2      => u_res <= m_p(22 downto 7);
+                                when others => u_res <= m_p(18 downto 3);
                             end case;
                         end if;
                         p9 <= '1';
@@ -1543,7 +1519,7 @@ begin
             -- the units, gated by the registered phase strobes and the pre-decoded flags
             if p6 = '1' then
                 if d_mul = '1' then
-                    m_p <= (others => '0'); m_x <= resize(u_a(9 downto 0), 18); m_y <= u_b(7 downto 0);
+                    m_p <= (others => '0'); m_x <= resize(u_a, 24); m_y <= u_b(7 downto 0);
                     m_c <= to_unsigned(8, 4);
                 end if;
                 if d_fwr = '1' then sc_we <= '1'; sc_wa <= u_a(8 downto 0); sc_wd <= u_b; end if;
@@ -1605,12 +1581,9 @@ begin
             -- (no adds in this stage: every position arrives registered.  An add, a clamp and per-arm offsets
             -- here tripped yosys abc9's box-order assert in the full build.)
             v_obj := "0000"; v_sub := "0000";
-            if l_fill(0) = '1' then                      -- the sky's per-field colours (the camera lifts it): 19
+            if l_fill(0) = '1' then                      -- the sky's per-field colours: 19
                 v_fon := '1';
                 v_ent := to_unsigned(19, 5); v_t6 := k14_skt;
-            elsif k14_cam = '1' then                     -- wires only: the camera lights the sky ramp
-                v_fon := '1';
-                v_ent := "0000" & k14_cg2(6); v_t6 := k14_cg2(5 downto 0);
             else
                 v_fon := '0';
                 v_ent := (others => '0'); v_t6 := (others => '0');
