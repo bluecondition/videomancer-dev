@@ -179,3 +179,30 @@ Ron: K6 now loads at 100 % (initial_value 1023, set with the version bump), and 
   white, was 25 %): that copy's fill was already floored at black, so the larger offset cannot subtract. A darker
   camera or a lighter grade colour keeps closer to the intended contrast.
 - Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic slinky`): **router1, seed 1 except HD HDMI seed 2**. Post-route Fmax HD Analog 84.93, SD Analog 78.49, HD HDMI 75.68, SD HDMI 83.88, HD Dual 75.46, SD Dual 86.99 MHz (worst HD 75.46); 7,232 / 7,680 LC (94.2 %). Not flashed.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`16 - v` as `v - 16`); the simulator is
+right, so every render above showed the intended picture, but the v0.1.2 bitstreams did not. Fixed (each
+rewritten as `to_signed(N, 16) - x`, same operands and width, the value the simulator always computed):
+- lines 604 / 605 / 606 `c_dx0` (sequencer state 169, the three x-step branches SD 4 / 720p 3 / 1080 2): the start
+  slope of the shared x^2 DDA, D0 = s^2 - 2 xh s, which feeds every copy's disc test (x - centre)^2.
+On hardware v0.1.2 (never flashed) would have built D0 with the 2 xh s term's sign flipped: x_sq climbed from
+xh^2, passed 2^22 after ~66 px and wrapped ~8 times across a 1080 line (~5.5 at 720p), so every copy's disc test
+was garbage and the copies came out as curved vertical stripe bands at every setting, in all six configs.
+v0.1.3 draws the designed train of shapes along the swinging path. No TOML remaps (group 1). Nothing left as-is
+(no other audited site in this program). `scan.py` lists no site. Backups (v0.1.2 vhd / toml / vmprog):
+.heirloom_work/rb_slinky/.
+
+Build (2026-11-21, shared queue, router1): HD Analog 79.31 (seed 1), SD Analog 84.93 (seed 1), HD HDMI 88.04
+(seed 1), SD HDMI 79.29 (seed 1), **HD Dual 83.34 on seed 2** (seed 1 missed), SD Dual 85.49 (seed 1) MHz;
+7,196-7,207 / 7,680 LC (93.8 %), 17 / 32 EBR; all six pass iceunpack.
+
+HD HDMI skew: the builder's HD HDMI router1 s1 was +1.38 / <= -0.57 (closest data bit 0.03 ns outside the
+window). Screened HD HDMI router1 + router2 seeds 1-40 (76 routed, 4 router2 timeouts, 63 timing-clean, 7 in the
+window). Installed **HD HDMI router1 s21 (+1.66 / <= -0.82, 82.95 MHz)**. HD Analog router1 s1 had data <= +1.26:
+installed **HD Analog router1 s14 (-1.25 / <= -0.62, 85.24 MHz)** (s1-16 screened; the only other data <= -0.6
+seed, s6, put HSYNC at +0.14). HD Dual router1 s2 (-1.85 / <= -0.73) kept. So the shipped seeds are HD Analog
+r1 s14, HD HDMI r1 s21, HD Dual r1 s2, SD configs r1 s1. Spare: HD HDMI router2 s26 (+1.64 / <= -0.88, 79.85 MHz),
+.heirloom_work/rb_slinky/skew/slinky_v013_spare_hd_hdmi_router2_s26.vmprog. Replaced bins kept in
+.heirloom_work/rb_slinky/skew/. Shipped vmprog: out/rev_b/ron/kinetic/slinky.vmprog (v0.1.3). Not flashed.

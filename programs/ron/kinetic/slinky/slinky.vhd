@@ -601,9 +601,9 @@ begin
                         z_fa(8 downto 0) <= s_vm; z_fb <= to_unsigned(900, 14); z_ld <= '1';                       -- rate exponent
                     when 169 =>
                         case to_integer(s_xs) is
-                            when 4      => c_dx0 <= 16 - signed(resize(c_xh & "000", 16)); c_ddx <= to_unsigned(32, 6);
-                            when 3      => c_dx0 <= 9 - signed(resize(c_xh & "00", 16)) - signed(resize(c_xh & '0', 16)); c_ddx <= to_unsigned(18, 6);
-                            when others => c_dx0 <= 4 - signed(resize(c_xh & "00", 16)); c_ddx <= to_unsigned(8, 6);
+                            when 4      => c_dx0 <= to_signed(16, 16) - signed(resize(c_xh & "000", 16)); c_ddx <= to_unsigned(32, 6);
+                            when 3      => c_dx0 <= to_signed(9, 16) - signed(resize(c_xh & "00", 16)) - signed(resize(c_xh & '0', 16)); c_ddx <= to_unsigned(18, 6);
+                            when others => c_dx0 <= to_signed(4, 16) - signed(resize(c_xh & "00", 16)); c_ddx <= to_unsigned(8, 6);
                         end case;
                     -- rate: 2^(m * 6.9 / 503) / 3600 cycles per field
                     when 184 => z_e <= m_acc(18 downto 8);
