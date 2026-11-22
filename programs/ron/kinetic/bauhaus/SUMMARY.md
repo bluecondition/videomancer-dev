@@ -224,3 +224,53 @@ Ron: K6 now loads at 100 % (initial_value 1023, set with the version bump), and 
 - Look: `.kinetic_work/rb_bauhaus/k6b/k6b_cmp.png` (GHDL, bear, 720p60 / 4, K1 = 0 for more cells, K6 glide snapped in
   scratch copies): the same poster; some mid-grey cells move one step further toward the full box or the dot.
 - Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic bauhaus`): **router1, every config on seed 1**. Post-route Fmax HD Analog 75.25, SD Analog 66.92, HD HDMI 84.74, SD HDMI 76.73, HD Dual 79.54, SD Dual 76.52 MHz (worst HD 75.25); 7,080 / 7,680 LC (92.2 %). Not flashed.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 531** (none): Integer cell index of the first pixel, negated (= +ceil of the half-width in cells), as the
+  multiplier operand for Spread x first column (slot 5). On hardware it was: v_i = +floor(c_x0). Because c_x0 itself
+  is also reversed (line 639: +X instead of -X), this gives the first column of the HW's shifted grid, and line
+  641's second reversal makes c_si0 = +spread*first column. Net: consistent with the shifted origin, no visible
+  effect of its own.
+- **line 534** (none): Negated integer row of the first line, operand for Spread x first row (slot 6). On hardware
+  it was: Same as 531 for rows: cancels with 642 and tracks the shifted origin from 640. No visible effect of its
+  own.
+- **line 639** (major): First pixel's x in cells = -(c_du x (W/2 - 4)), so x = 0 (a cell boundary) sits on the
+  screen centre: Scale zooms about the centre, Mirrored layout mirrors about the centre column, Radial ripples from
+  the centre. On hardware it was: c_x0 = +X, so the column accumulator runs X .. ~3X: the cell origin lands about
+  half a screen to the LEFT of the left edge (and, with 640, half a screen above the top). On screen: K1 Scale zooms
+  about that off-screen top-left point (the grid flows toward/away from the upper-left instead of breathing about
+  the centre); …
+- **line 640** (major): First line's y in cells = -(c_dv x half height): row 0 on the screen centre. On hardware it
+  was: c_y0 = +Y: rows run Y .. 3Y, the origin sits about half a screen above the top edge. Vertical half of the 639
+  problem (zoom pivot, Mirrored has no top/bottom symmetry, Radial centre off-screen).
+- **line 641** (none): Spread x first column = -(c_s x v_i), seeds the per-line Spread-x-column accumulator q2_si.
+  On hardware it was: c_si0 = +(c_s x v_i); with v_i also reversed (531) this equals spread x the HW's (positive)
+  first column, so the wave term matches the shifted grid. No visible effect of its own.
+- **line 642** (none): Spread x first row, seeds the row term. On hardware it was: Cancels with 534 (see 641). No
+  visible effect of its own.
+- **line 891** (none): Spread x |row| for Mirrored / Radial: negate the (negative) spread term on rows above the
+  centre. On hardware it was: Would leave the term negative (no abs) on negative rows. On HW today rows are never
+  negative (origin moved above the top by 640), so this branch is never taken: no visible effect now. LATENT: if
+  639/640 are fixed without this, Radial and Mirrored break on the top half (wave phase wrong above the centre).
+- **line 949** (none): Spread x |column| for Mirrored / Radial (negate on columns left of the centre). On hardware
+  it was: Only reached on HW at the smallest Scale where columns wrap past 63; there q3_t is already positive (q2_si
+  does not wrap), so the missing negation happens to keep the wave continuous. Otherwise never taken: no visible
+  effect now. LATENT: once 639 is fixed, Radial/Mirrored break on the left half.
+- **line 1190** (visible): Outside-the-figure-box distance |v_fb| (1..127, 1/1024 cell) for the box clip s_cb = 8 -
+  ob*kq/64: a one-pixel anti-aliased edge where a figure is clipped by the box. On hardware it was: q22_ob = 128 -
+  |v_fb|: just outside the box the clip jumps straight to 0 (no AA), then about 1/8 cell (127/1024) outside the box
+  the coverage ramps back up to full for ~1 px and cuts hard. Wherever a figure overflows its box (quarter discs,
+  half discs, bars...), a thin ghost echo line of the figure appears in the …
+
+**Build** v0.1.3, router1: HD Analog 78.46, SD Analog 72.87, HD HDMI 76.17 (builder seed, replaced: see HD skew), SD HDMI 81.11, HD Dual 76.16, SD Dual
+74.83. 7243-7258 / 7680 LC, 23 / 32 EBR; all six seed 1. iceunpack OK. Not simulated, not flashed.
+**HD skew**: NO WINDOW SEED (this netlist places HSYNC low) in r1 s1-200 + r2 s1-100 (router2 deterministic on re-route, misses timing): HD
+HDMI router1 s90 (+1.74 / <= -0.42, 74.42 MHz; data 0.18 short, thin timing, cf. tartan); spare router1 s183 (+0.86 /
+<= -0.98, 81.47 MHz). A full builder rebuild re-routes seed 1: re-install the seeds with
+`.heirloom_work/skew_tools/install.sh` afterwards. If HD HDMI shows thin flashing lines or noise, try the spare
+(sub-window HSYNC but clean data and timing), then report which one is clean.

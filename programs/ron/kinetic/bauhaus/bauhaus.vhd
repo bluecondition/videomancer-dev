@@ -528,10 +528,10 @@ begin
                     when 3  => z_fa(15 downto 0) <= c_du;                 z_fb <= resize(s_w(11 downto 1) - 4, 24);   -- first pixel
                     when 4  => z_fa(17 downto 0) <= c_dv;                 z_fb <= resize(f_half(s_tid), 24);  -- first line
                     when 5  =>                                                                                -- spread * first column
-                        v_i := 0 - c_x0(26 downto 20);
+                        v_i := -c_x0(26 downto 20);
                         z_fa(14 downto 0) <= c_s;                         z_fb <= resize(unsigned(v_i), 24);
                     when 6  =>                                                                                -- spread * first row
-                        v_i := 0 - c_y0(26 downto 20);
+                        v_i := -c_y0(26 downto 20);
                         z_fa(14 downto 0) <= c_s;                         z_fb <= resize(unsigned(v_i), 24);
                     when 7  => z_fa(12 downto 0) <= s_gp;                 z_fb <= resize(s_gp, 24);           -- shuffle^2
                     when 8  => z_fa(8 downto 0)  <= s_vm;                 z_fb <= to_unsigned(900, 24);       -- rate exponent
@@ -636,10 +636,10 @@ begin
                         end case;
                     when 92  => c_s <= f_acc(19 downto 5);
                     when 124 => c_dv <= f_acc(33 downto 16);
-                    when 156 => c_x0 <= 0 - signed(f_acc(26 downto 0));
-                    when 188 => c_y0 <= 0 - signed(f_acc(26 downto 0));
-                    when 220 => c_si0 <= 0 - signed(f_acc(23 downto 0));
-                    when 252 => c_sj0 <= 0 - signed(f_acc(23 downto 0));
+                    when 156 => c_x0 <= -signed(f_acc(26 downto 0));
+                    when 188 => c_y0 <= -signed(f_acc(26 downto 0));
+                    when 220 => c_si0 <= -signed(f_acc(23 downto 0));
+                    when 252 => c_sj0 <= -signed(f_acc(23 downto 0));
                     when 284 => c_d <= to_unsigned(14, 8) + f_acc(26 downto 19);
                     -- rate: 2^(m * 6.9 / 503) / 3600 cycles per field
                     when 316 => z_e <= f_acc(18 downto 8);
@@ -888,7 +888,7 @@ begin
             else
                 l_t <= l_sj; l_an <= '0';
             end if;
-            if l_an = '1' then l_sja <= 0 - l_t; else l_sja <= l_t; end if;
+            if l_an = '1' then l_sja <= -l_t; else l_sja <= l_t; end if;
             v_d := signed(resize(l_vp, 11)) - signed(resize(c_m, 11));
             v_ab := unsigned(abs(v_d)); l_dy0 <= v_ab(9 downto 0);
             v_d := signed(resize(l_vp, 11)) - 512;
@@ -946,7 +946,7 @@ begin
                 q3_t <= q2_si; q3_an <= '0';
             end if;
             -- 4: Spread * |column|
-            if q3_an = '1' then q4_sa <= 0 - q3_t; else q4_sa <= q3_t; end if;
+            if q3_an = '1' then q4_sa <= -q3_t; else q4_sa <= q3_t; end if;
             q4_ih <= q3_ih;
             -- 5: compare with the row term
             if q4_sa >= l_sja then q5_ge <= '1'; else q5_ge <= '0'; end if;
@@ -1187,7 +1187,7 @@ begin
             if q21_bxd < l_byd then v_fb := q21_bxd; else v_fb := l_byd; end if;
             if v_fb(10) = '0' then q22_ob <= (others => '0');
             elsif v_fb < -127 then q22_ob <= (others => '1');
-            else v_ab := unsigned(0 - v_fb); q22_ob <= v_ab(6 downto 0); end if;
+            else v_ab := unsigned(-v_fb); q22_ob <= v_ab(6 downto 0); end if;
             if q21_gxd < l_gyd then v_g := q21_gxd; else v_g := l_gyd; end if;
             if v_g(8) = '1' then q22_g <= (others => '1'); else q22_g <= v_g(7 downto 0); end if;
 
