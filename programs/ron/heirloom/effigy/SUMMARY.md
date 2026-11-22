@@ -258,3 +258,24 @@ K1 Idol 0, K2 Stretch 445, K3 Speed 212, K4 Contours 530, K5 Bands 422, P12 Burn
 unchanged). K1 is continuous (shared glide), so 0 loads as dialled. The vmprog was repacked from the v0.1.2
 bitstreams (only the settings block differs, 143 bytes), so timing, seeds and LC are as in v0.1.2. Presets are
 unchanged.
+
+## v0.1.4: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`N - x` as `x - N`) while the GHDL
+simulator computes it correctly, so every render showed the intended picture and the hardware did not (CLAUDE.md
+VHDL traps; audit in `.heirloom_work/ghdl_sub_check/`). Rewritten as `to_signed(N, w) - x` / `-x + N`:
+
+- **line 653** (visible): K4 Contours: negated exponent 512 - k4 (clamped to 511) scales 1/lambda, so spacing = 62 /
+  140 px * 2^((K4 - 512)/256): dense fine outlines (0) .. a few broad ones (1023). On hardware it was: Exponent = k4
+  - 512: K4 runs backwards (0 = broad, 1023 = dense), full range, mirrored about 512 (the clamp is then never
+  needed). At Ron's captured K4 = 530 the difference from the sims is small: contour spacing x0.95 on hardware vs
+  x1.05 in sims (~10 %).
+- TOML changes besides the version (knob remaps so the captured look is reproduced): -initial_value = 530; +initial_value = 494; -rotary_potentiometer_4 = 420; +rotary_potentiometer_4 = 604; -rotary_potentiometer_4 = 600; +rotary_potentiometer_4 = 424
+
+**Build** v0.1.4, router1: HD Analog 87.34, SD Analog 86.39, HD HDMI 81.52, SD HDMI 79.39, HD Dual 90.47, SD Dual
+83.34. 7123-7160 / 7680 LC, 23 / 32 EBR; all six seed 1. iceunpack OK. Not simulated, not flashed.
+**HD skew**: HD HDMI router1 s1 (+0.79 / <= -1.11, 81.52 MHz) -> router1 s3 (+1.55 / <= -1.13, 84.20 MHz) | hd_analog
+kept router1 s1 (-0.95 / <= -2.73, 87.34 MHz) | hd_dual kept router1 s1 (-1.06 / <= -1.43, 90.47 MHz) | spare HD HDMI
+router1 s10 (+1.32 / <= -0.88, 82.41 MHz):
+/home/ron/videomancer-dev/.heirloom_work/rb_effigy/skew/effigy_v014_spare_hd_hdmi_router1_s10.vmprog. A full builder
+rebuild re-routes seed 1: re-install the seeds with `.heirloom_work/skew_tools/install.sh` afterwards.

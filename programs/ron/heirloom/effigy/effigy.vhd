@@ -650,7 +650,7 @@ begin
                         v_e := signed(resize(s_g(0)(12 downto 3), 11)) - 512;
                         z_sh1 <= v_e(10 downto 8); z_f1 <= unsigned(v_e(7 downto 0));
                         z_d2 <= signed(resize(s_g(1)(12 downto 3), 11)) - 512;
-                        v_e := 512 - signed(resize(s_g(2)(12 downto 3), 11));
+                        v_e := to_signed(512, 11) - signed(resize(s_g(2)(12 downto 3), 11));
                         if v_e > 511 then v_e := to_signed(511, 11); end if;
                         z_sh4 <= v_e(10 downto 8); z_f4 <= unsigned(v_e(7 downto 0));
                     when 39 =>

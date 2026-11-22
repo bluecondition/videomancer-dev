@@ -6,7 +6,7 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.effigy"
 program_name = "Effigy"
-program_version = "0.1.3"
+program_version = "0.1.4"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -52,7 +52,7 @@ name_label = "Contours"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 530
+initial_value = 494
 display_float_digits = 0
 suffix_label = "%"
 
@@ -136,7 +136,7 @@ name = "Inferno"
 rotary_potentiometer_1 = 600
 rotary_potentiometer_2 = 512
 rotary_potentiometer_3 = 760
-rotary_potentiometer_4 = 420
+rotary_potentiometer_4 = 604
 rotary_potentiometer_5 = 600
 rotary_potentiometer_6 = 450
 toggle_switch_7 = 1
@@ -151,7 +151,7 @@ name = "Jade Vase"
 rotary_potentiometer_1 = 640
 rotary_potentiometer_2 = 160
 rotary_potentiometer_3 = 620
-rotary_potentiometer_4 = 600
+rotary_potentiometer_4 = 424
 rotary_potentiometer_5 = 400
 rotary_potentiometer_6 = 450
 toggle_switch_7 = 0
