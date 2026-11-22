@@ -769,7 +769,7 @@ begin
     begin
         if rising_edge(clk) then
             -- 2: folded x (Twin: 1920 - |x - 1920|)
-            if s_twin = '1' then p2_xf <= 1920 - signed(resize(b_am, 14)); else p2_xf <= b_x; end if;
+            if s_twin = '1' then p2_xf <= to_signed(1920, 14) - signed(resize(b_am, 14)); else p2_xf <= b_x; end if;
             -- 3: distance to the eye centre, the fade ramp, the luma
             p3_d  <= resize(p2_xf, 15) - signed(resize(c_cxh, 15));
             p3_a  <= l_k - resize(p2_xf, 15);

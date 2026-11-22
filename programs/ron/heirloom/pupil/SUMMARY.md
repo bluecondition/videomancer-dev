@@ -273,3 +273,38 @@ Ron (Heirloom Preview Queue, rework on v0.1.0): "I do not like the beat effect b
   `SEED=29` for hd_hdmi, or re-install the bitstream.
 - **Defaults** (Ron dialled in on v0.2.0, `./capture_preset.sh --defaults`): K1 Eyes 759, K2 Squint 267, K3 Rings 1023,
   K4 Bricks 0 (clean rings), K5 Tilt 340, P12 Dilate 451 (K6 Bend and S7-S11 unchanged). Presets unchanged.
+
+## v0.2.2: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`1920 - x` became `x - 1920`); the simulator
+is correct, so every render showed the intended picture while the hardware did not.
+
+- **Fixed: line 772** (pixel stage 2), `p2_xf <= 1920 - signed(resize(b_am, 14))` -> `to_signed(1920, 14) - ...`:
+  the S9 Twin folded x.
+- **On hardware before / after.** With S9 Twin On the fold was negated (`|x - 1920| - 1920`), so the distance to the
+  eye centre was ≥ 1200 half-pixels everywhere: the eye columns sat off-screen beyond the left and right edges, and at
+  most the outer moire rings showed near the edges. Now Twin shows what the sims always did: two mirrored eye columns
+  gazing at each other, centred 600 px either side of the screen centre. Twin Off (the default) is unchanged.
+- **Remaps:** none (a switch; the default is Off).
+- **Left as is:** no other audited site in this program.
+- **Build** v0.2.2, router1:
+  - HD Analog 88.59 (**seed 2**), SD Analog 99.21, HD HDMI 85.82 (**seed 2**), SD HDMI 88.26, HD Dual 97.21, SD Dual
+    95.68 MHz (**seed 2**); worst HD 85.82. Seed 1 stalled router1 into the 900 s timeout on those three, under a
+    machine load of ~70. dupin finds 5 pre-existing sign-bit duplicate-input LUTs (output filter p12_du / dv / dy)
+    and no CARRY I0 == I1.
+  - 6392-6415 / 7680 LC (83 %), 13 / 32 EBR. iceunpack OK x6.
+  - Backups of v0.2.1 (vhd, toml, vmprog): `.heirloom_work/rb_pupil/pupil_v021.*`.
+- **Skew** (`QUICK=1 .heirloom_work/skew_tools/screen.sh pupil`, r1 + r2 s1-40, extended to s41-60: 98 HD HDMI
+  timing-clean, 24 route timeouts, 1 in the window):
+  - The builder's HD HDMI router1 s2 was **+0.12 / ≤ −1.03** (positive but sub-window, the danger zone). The v0.2.1
+    pick, router1 s29, lands at +0.16 / ≤ −1.53 on the new netlist, so it could not be kept.
+  - Installed HD HDMI **router2 s35 (+1.13 / ≤ −0.61, 77.46 MHz)**, the only placement in the window (thin on both
+    margins).
+  - HD Analog router1 s2 (−0.50 / ≤ −1.12) and HD Dual router1 s1 (−1.37 / ≤ −0.83) kept.
+  - Spare: HD HDMI router1 s35 (+1.33 / ≤ −0.51, 89.81 MHz; data just outside the rule), at
+    `.heirloom_work/rb_pupil/skew/pupil_v022_spare_hd_hdmi_router1_s35.vmprog`.
+  - The v0.2.1 screen and its spare moved to `.heirloom_work/rb_pupil/skew_v021/`. The replaced builder bin is in
+    `.heirloom_work/rb_pupil/skew/hd_hdmi_replaced_*.bin`.
+  - **A full rebuild re-routes the builder seeds.** After a rebuild of the same netlist run
+    `.heirloom_work/skew_tools/install.sh pupil router2 35` (router2 may not reproduce: re-screen if unsure).
+- Not flashed.

@@ -1,12 +1,13 @@
 # Pupil - Heirloom (video phase), v0.1.0 built 2026-11-09 from the clip WIN_20230408_23_11_38 (still at 3.5 s).
 # A column of almond eyes on flat green: cream moire rings on the left, a blue core with a violet ball keyed on the
 # rows where the eye is deep enough.  v0.2.0: the beat removed (Ron); K4 Bricks, K5 Tilt.  See pupil.vhd, pupil.py, SUMMARY.md.
+# v0.2.2 (2026-11-21): GHDL integer-minus-signed fix (S9 Twin put the eyes off-screen on hardware).
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.pupil"
 program_name = "Pupil"
-program_version = "0.2.1"
+program_version = "0.2.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
