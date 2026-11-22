@@ -149,3 +149,11 @@ wash shows in a three-frame render; `a_*` = v0.1.0. Motion was not rendered (the
 `.neonbeach_work/`: `sim.sh` (one GHDL render, hardware hues), `simsnap/` (glides snapped, the swash preset),
 `check6.sh`, `stat.sh`, `proto/model.py` (the look model), `proto/spec.py` (spec vs emulator), `tb/` (RTL vs
 emulator testbench).
+
+## v0.3.2: HW-captured defaults (2026-11-22)
+
+Ron dialled the look in on hardware (v0.3.1), captured with `./capture_preset.sh --defaults`:
+K1 Rhythm 580, K2 Tide 984, K3 Foam 449, K4 Chop 84, K5 Swell 152, K6 Camera 0, S7 Fill = Fill, P12 Sun 924
+(S8 Colour, S9 Crab, S10 Sky, S11 Source unchanged). The vmprog was repacked from the v0.3.1 bitstreams (only the
+settings block differs, 196 bytes), so timing, seeds and LC are as in v0.3.1. Presets are unchanged. The v0.3.1
+vmprog and TOML are in `.heirloom_work/rb_neonbeach/`.
