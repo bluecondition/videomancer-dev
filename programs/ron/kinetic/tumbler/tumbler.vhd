@@ -648,7 +648,7 @@ begin
                     when 252 => c_inSb <= f_acc(18 downto 6) + f_bias(c_shs);
                     when 284 => c_hwSb <= f_acc(18 downto 6) + f_bias(c_shs);
                     when 300 =>
-                        z_v <= 0 - signed(resize(z_v0, 20)); z_par <= '0'; z_sy <= (others => '0'); z_vrun <= '1';
+                        z_v <= -signed(resize(z_v0, 20)); z_par <= '0'; z_sy <= (others => '0'); z_vrun <= '1';
                         if s_sd = '1' then z_loc <= signed(resize(c_p, 19)) - 184320;      -- 720 px
                         else z_loc <= signed(resize(c_p, 19)) - 245760; end if;            -- 960 px
                         z_cx <= (others => '0'); z_sx <= (others => '0'); z_nrun <= '1';

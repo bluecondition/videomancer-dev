@@ -176,3 +176,31 @@ The orchestrator set the K6 default to 100 % (1023) and bumped the version; this
   HD Analog 82.43, HD HDMI 83.96, HD Dual 76.86, SD Analog 89.29, SD HDMI 85.06, SD Dual 88.79 MHz (worst HD
   76.86). 6,992 LC at most (91.0 %), 16 / 32 block RAMs. vmprog: out/rev_b/ron/kinetic/tumbler.vmprog. Not
   flashed.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`0 - v` as `+v`); the simulator is
+right, so every render above showed the intended picture, but the v0.1.2 bitstreams did not. Fixed (same operands
+and width, the value the simulator always computed):
+- line 651 `z_v <= -signed(resize(z_v0, 20))` (was `0 - ...`, sequencer state 300): the vertical origin. It starts
+  at -v0 (half the height in v units) and steps back by 3Hc until >= 0, toggling the row parity and row index sy,
+  so a cube sits centred on the screen centre and sy = 0 is the centre row.
+On hardware v0.1.2 (never flashed) z_v would have started at +v0, so the step-back loop exited at once (parity 0,
+sy 0, v unreduced): the per-line engine reduced it one wrap per line, scrambling the top ~v0/3Hc lines (about 3
+at the default Scale, ~13 at the smallest cubes); the lattice was not centred vertically and slid up and down as
+K1 Scale changed instead of zooming about the centre; and S8 Radial's octagonal rings centred on the top edge.
+v0.1.3 draws the designed lattice: clean top lines, zoom about the centre, Radial rings from the screen centre.
+Linear mode only loses an invisible wave phase offset. No TOML remaps (group 1). Nothing left as-is (no other
+audited site in this program). `scan.py` lists no site. Backups (v0.1.2 vhd / toml / vmprog):
+.heirloom_work/rb_tumbler/.
+
+Build (2026-11-21, shared queue, router1, every config seed 1): HD Analog 88.12, SD Analog 89.37, HD HDMI 88.70,
+SD HDMI 81.01, HD Dual 87.40, SD Dual 84.05 MHz; 7,014-7,027 / 7,680 LC (91.5 %), 16 / 32 EBR; all six pass
+iceunpack.
+
+HD HDMI skew: the builder's HD HDMI router1 s1 was -0.38 / <= -1.75 (a NEGATIVE HSYNC). Screened HD HDMI router1 +
+router2 seeds 1-40 (75 routed, 5 timeouts, 71 timing-clean, 17 in the window). Installed **HD HDMI router2 s7
+(+1.85 / <= -1.27, 79.59 MHz)**. HD Analog router1 s1 (+1.23 / <= -0.66) and HD Dual router1 s1 (-1.59 / <= -0.89)
+kept. So the shipped seeds are HD HDMI r2 s7, every other config r1 s1. Spare: HD HDMI router1 s6 (+1.51 / <= -1.24,
+84.03 MHz), .heirloom_work/rb_tumbler/skew/tumbler_v013_spare_hd_hdmi_router1_s6.vmprog. Replaced bin kept in
+.heirloom_work/rb_tumbler/skew/. Shipped vmprog: out/rev_b/ron/kinetic/tumbler.vmprog (v0.1.3). Not flashed.
