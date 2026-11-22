@@ -599,7 +599,7 @@ begin
                         if z_t1s = '1' then z_av <= signed(resize(c_ar, 16)) - signed(resize(m_acc(21 downto 10), 16));
                         else z_av <= signed(resize(c_ar, 16)) + signed(resize(m_acc(21 downto 10), 16)); end if;
                     when 75 =>
-                        v_f16 := 2048 - z_av;
+                        v_f16 := to_signed(2048, 16) - z_av;
                         if z_av < 1024 then c_a <= unsigned(v_f16(13 downto 0));
                         else c_a <= unsigned(z_av(13 downto 0)); end if;
                     when 76 =>            -- Linear: the phase is a * (theta - 8192), so the lattice is even about the centre
@@ -611,7 +611,7 @@ begin
                         if z_t2s = '1' then z_av <= signed(resize(c_br, 16)) + signed(resize(z_bv, 16));
                         else z_av <= signed(resize(c_br, 16)) - signed(resize(z_bv, 16)); end if;
                     when 100 =>
-                        v_f16 := 2048 - z_av;
+                        v_f16 := to_signed(2048, 16) - z_av;
                         if z_av < 1024 then c_b <= unsigned(v_f16(13 downto 0));
                         else c_b <= unsigned(z_av(13 downto 0)); end if;
                     -- phi step = 1.328 speed^2

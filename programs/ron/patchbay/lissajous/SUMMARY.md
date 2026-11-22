@@ -189,3 +189,32 @@ Lissajous figure and its glow bands; the picture itself is not shown.
 - **Build (router1, all six configs on seed 1):** HD Analog 76.93, SD Analog 87.64, HD HDMI 86.32, SD HDMI
   85.29, HD Dual 76.43, SD Dual 84.03 MHz (worst HD 76.43); 7,042 .. 7,062 / 7,680 LC, 19 / 32 EBR.
   `out/rev_b/ron/patchbay/lissajous.vmprog`. Not flashed.
+
+## v0.1.3: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`2048 - v` as `v - 2048`); the simulator
+is right, so every render above showed the intended picture, but the v0.1.2 bitstreams did not. Fixed (each
+rewritten as `v_f16 := to_signed(2048, 16) - z_av`, same operands and width, the value the simulator always
+computed):
+- line 602 (sequencer state 75): the fold of ratio a (generator A, K1 A plus LFO 1) at 1.0, 2 - a when the detuned
+  ratio drops below 1;
+- line 614 (state 100): the same fold for ratio b (generator B, K2 B minus 3/4 LFO 2).
+On hardware v0.1.2 (never flashed) the folded value came out as z_av - 2048 and the 14-bit slice gave a ratio of
+~12..15 instead of 1..2: whenever the detune LFO pulled a ratio below 1, the figure snapped to a dense ~12-15-lobe
+scribble for that part of the LFO cycle and snapped back. That never happens at the defaults (A 3, B 2, Detune
+260), but it does at high P12 Detune and whenever K1 or K2 sits at 1 with any detune (half of each 23 s / 37 s LFO
+cycle). v0.1.3 folds smoothly at 1, so the figure never degenerates, as designed. No TOML remaps (group 1).
+Nothing left as-is (no other audited site in this program). `scan.py` lists no site. Backups (v0.1.2 vhd / toml /
+vmprog): .heirloom_work/rb_lissajous/.
+
+Build (2026-11-21, shared queue, router1, every config seed 1): HD Analog 85.34, SD Analog 83.64, HD HDMI 82.67,
+SD HDMI 80.21, HD Dual 84.88, SD Dual 81.91 MHz; 7,057-7,094 / 7,680 LC (92.4 %), 19 / 32 EBR; all six pass
+iceunpack.
+
+HD HDMI skew: the builder's HD HDMI router1 s1 was +0.05 / <= -1.42 (HSYNC below the window). Screened HD HDMI
+router1 + router2 seeds 1-40 (77 routed, 3 timeouts, 67 timing-clean, 10 in the window). Installed **HD HDMI
+router2 s4 (+2.02 / <= -0.79, 77.89 MHz)**. HD Analog router1 s1 (-0.90 / <= -2.46) kept. HD Dual router1 s1 had
+data <= -0.44: installed **HD Dual router1 s7 (-2.52 / <= -1.50, 85.29 MHz)**. So the shipped seeds are HD Analog
+r1 s1, HD HDMI r2 s4, HD Dual r1 s7, SD configs r1 s1. Spare: HD HDMI router1 s35 (+1.15 / <= -0.97, 85.29 MHz),
+.heirloom_work/rb_lissajous/skew/lissajous_v013_spare_hd_hdmi_router1_s35.vmprog. Replaced bins kept in
+.heirloom_work/rb_lissajous/skew/. Shipped vmprog: out/rev_b/ron/patchbay/lissajous.vmprog (v0.1.3). Not flashed.
