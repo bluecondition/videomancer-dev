@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+# Copyright (C) 2026 czartroniks
+# SPDX-License-Identifier: GPL-3.0-only
+"""
+SEPARATRIX v0.1.0 - build hook.  Writes separatrix_pkg.vhd next to this file (pure python: the builder runs it
+with the system python3).  The integer model (.patchbay_work/rb_separatrix/imodel.py) imports the same tables.
+
+Package contents:
+  C_SX_SIN   512 x 16   round(1023 sin(2 pi k / 2048)), k = 0 .. 511 (k = 512 is 1023, handled in logic): the table
+                        writer's sine / cosine source (2048 steps per cycle)
+  C_SX_PAL   1024 x 32  {Y, U, V, 00} colouriser: index = colours * 512 + inside * 256 + class * 64 + phase
+                        phase = 6 bits over one palette cycle of 4 energy bands (16 steps a band);
+                        class = the band density (0: bands wider than 8 px .. 3: narrower than 2 px), each class
+                        box-filtered over its own phase window so dense bands fade to a flat blend, not moire
+  C_SX_K     the black outside the active picture; C_SX_WHITE / C_SX_GLOW the separatrix core and glow;
+  C_SX_ORB   12 x 32    Orbits look colours by colours * 6 + inside * 3 + {line, mid, dim}
+Colours are in the hardware convention (U register = Cr, V register = Cb).  Luma is pre-scaled 16/13 for the
+shell's 13/16 output scale (capped at 940).
+"""
+import math
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+K0 = (8, 6, 14)
+WHITE = (255, 255, 250)
+GLOW = (170, 225, 255)
+FRW = 0.10          # fringe: the outer tenth of every band
+NB = 4              # bands per palette cycle
+# families: [colours][inside] -> NB x (body, fringe)
+FAM = [
+    [  # 0 "Ember / Tide": outside (open orbits) deep water, inside (closed orbits) embers
+        [((4, 10, 50), (40, 120, 230)), ((0, 110, 170), (120, 240, 255)), ((10, 30, 120), (60, 90, 230)),
+         ((0, 160, 150), (160, 255, 220))],
+        [((120, 0, 30), (255, 90, 40)), ((230, 50, 0), (255, 170, 40)), ((255, 120, 0), (255, 230, 120)),
+         ((180, 0, 90), (255, 110, 170))],
+    ],
+    [  # 1 "Moss / Plum": outside plums, inside greens
+        [((40, 0, 40), (230, 60, 170)), ((150, 10, 90), (255, 150, 110)), ((70, 10, 110), (190, 110, 255)),
+         ((190, 40, 60), (255, 190, 140))],
+        [((0, 70, 40), (140, 255, 90)), ((30, 160, 40), (230, 255, 120)), ((170, 210, 0), (255, 255, 180)),
+         ((0, 120, 100), (120, 255, 210))],
+    ],
+]
+ORBLINE = [[(90, 200, 255), (255, 170, 60)], [(255, 110, 200), (180, 255, 100)]]
+CLASS_W = [1.0 / 16, 0.18, 0.36, None]   # box window (bands) per density class; None = the whole cycle
+
+
+def rgb_to_hw10f(rgb):
+    r, g, b = [c / 255.0 for c in rgb]
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    cb, cr = (b - y) / 1.772, (r - y) / 1.402
+    return (64 + y * 876, 512 + cr * 896, 512 + cb * 896)
+
+
+def prescale(yuv):
+    y, u, v = yuv
+    y2 = 64 + (y - 64) * 16.0 / 13.0
+    y2 = int(round(min(940, max(64, y2))))
+    u2 = int(round(u))
+    v2 = int(round(v))
+    return (y2, u2, v2)
+
+
+def word(yuv):
+    y, u, v = yuv
+    return (y << 22) | (u << 12) | (v << 2)
+
+
+def wrgb(rgb):
+    return word(prescale(rgb_to_hw10f(rgb)))
+
+
+def fam_at(col, ins, ph):
+    """colour (float yuv) of the family at phase ph (bands, any real)"""
+    f = FAM[col][ins]
+    ph = ph % NB
+    b = int(math.floor(ph))
+    fr = ph - b
+    c = f[b][1] if fr > 1 - FRW else f[b][0]
+    return rgb_to_hw10f(c)
+
+
+def pal_entry(col, ins, cls, p6):
+    ph = (p6 + 0.5) / 16.0
+    w = CLASS_W[cls]
+    if w is None:
+        lo, hi, n = 0.0, float(NB), 256
+    else:
+        lo, hi, n = ph - w / 2, ph + w / 2, 32
+    acc = [0.0, 0.0, 0.0]
+    for i in range(n):
+        x = lo + (hi - lo) * (i + 0.5) / n
+        c = fam_at(col, ins, x)
+        for j in range(3):
+            acc[j] += c[j]
+    return prescale(tuple(a / n for a in acc))
+
+
+def pal_rom():
+    out = []
+    for col in (0, 1):
+        for ins in (0, 1):
+            for cls in range(4):
+                for p6 in range(64):
+                    out.append(word(pal_entry(col, ins, cls, p6)))
+    return out
+
+
+def mix(a, b, t):
+    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
+
+
+def orb_rom():
+    out = []
+    for col in (0, 1):
+        for ins in (0, 1):
+            c = ORBLINE[col][ins]
+            for t in (1.0, 0.5, 0.3):
+                out.append(word(prescale(mix(rgb_to_hw10f(K0), rgb_to_hw10f(c), t))))
+    return out
+
+
+def sin_rom():
+    return [int(round(1023 * math.sin(2 * math.pi * k / 2048))) for k in range(512)]
+
+
+def vhd_table(name, typ, depth, width, vals):
+    lines = ["    type %s is array (0 to %d) of %s(%d downto 0);" % ("t_" + name.lower(), depth - 1, typ, width - 1),
+             "    constant %s : %s := (" % (name, "t_" + name.lower())]
+    items = ['x"%0*X"' % ((width + 3) // 4, v) for v in vals]
+    for i in range(0, len(items), 16):
+        lines.append("        " + ", ".join(items[i:i + 16]) + ("," if i + 16 < len(items) else ""))
+    lines.append("    );")
+    return "\n".join(lines)
+
+
+def main():
+    parts = ["-- Generated by separatrix.py -- DO NOT EDIT.",
+             "library ieee;", "use ieee.std_logic_1164.all;", "use ieee.numeric_std.all;", "",
+             "package separatrix_pkg is",
+             vhd_table("C_SX_SIN", "unsigned", 512, 16, sin_rom()),
+             vhd_table("C_SX_PAL", "std_logic_vector", 1024, 32, pal_rom()),
+             vhd_table("C_SX_ORB", "std_logic_vector", 12, 32, orb_rom()),
+             '    constant C_SX_K : std_logic_vector(31 downto 0) := x"%08X";' % wrgb(K0),
+             '    constant C_SX_WHITE : std_logic_vector(31 downto 0) := x"%08X";' % wrgb(WHITE),
+             '    constant C_SX_GLOW : std_logic_vector(31 downto 0) := x"%08X";' % wrgb(GLOW),
+             "end package separatrix_pkg;", ""]
+    with open(os.path.join(HERE, "separatrix_pkg.vhd"), "w") as f:
+        f.write("\n".join(parts))
+
+
+if __name__ == "__main__":
+    main()
