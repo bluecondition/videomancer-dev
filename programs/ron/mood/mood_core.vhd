@@ -999,7 +999,7 @@ begin
         begin
             if rising_edge(clk) then
                 if s_anc_d = '1' then
-                    fr_ka <= 32 - signed(resize(a_aaw(13 downto 2), 15));
+                    fr_ka <= to_signed(32, 15) - signed(resize(a_aaw(13 downto 2), 15));
                     fr_kb <= 32 + signed(resize(a_aaw(13 downto 2), 15));
                 end if;
             end if;

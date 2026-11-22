@@ -130,3 +130,26 @@ missed 74.25 on every seed (65–70 MHz). Its critical path was the coverage
 stage (compare/mux → ±W → clamp in one clock). Splitting it, pre-muxing the
 colour and splitting the colour multiply by m's bits brought it to 91–96 MHz.
 Sync latency: MOOD 12, MOOD HD 16 (`processing_delay_clks`).
+
+## MOOD HD v0.1.1: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`32 - w` as `w - 32`); the simulator is
+right. One site, in `gen_clean` (G_CLEAN only, so MOOD HD only):
+- mood_core.vhd line 1002 `fr_ka <= 32 - signed(resize(a_aaw(13 downto 2), 15))` -> `to_signed(32, 15) - ...`:
+  the per-field ring-core offset on the larger-distance side (the core = the HOLE band shrunk by W).
+Fixed in programs/ron/mood/mood_core.vhd (the source mood_hd.py copies) and in the copy in programs/ron/mood_hd/.
+On hardware v0.1.0 (never flashed) RING drew only the outline just outside the smaller diamond: the core reached
+past the band's outer edge and cancelled the larger diamond's outline. v0.1.1 draws RING as designed: uniform
+one-unit outlines on BOTH edges of the HOLE band (bands narrower than W still solid). Solid / Hole unchanged.
+MOOD (VINTAGE, G_CLEAN = false) does not synthesise this code: its bitstreams are unaffected and were not rebuilt
+(mood.toml stays 0.1.0). mood_hd.toml 0.1.0 -> 0.1.1; no TOML remaps (group 1); nothing left as-is.
+Backups (v0.1.0 mood_core.vhd / mood_hd.vhd / toml / vmprog): .heirloom_work/rb_mood_hd/.
+
+Build (2026-11-21, `build_programs.sh ron mood_hd` via the shared queue, router1, every config seed 1):
+HD Analog 97.82, SD Analog 97.75, HD HDMI 96.66, SD HDMI 97.07, HD Dual 96.88, SD Dual 95.62 MHz;
+5334-5350 LC (70 %), 21 / 32 EBR; all six pass iceunpack.
+
+HD HDMI skew: the builder's HD HDMI router1 s1 is in the window (+1.56 / <= -0.60, 96.66 MHz): kept, no screen
+needed. HD Analog router1 s1 (+1.07 / <= -0.80) kept. HD Dual router1 s1 had data <= -0.39: screened router1
+s1-12, installed **HD Dual router1 s6 (-1.74 / <= -1.36, 98.77 MHz)**. No spare (HD HDMI unchanged). Shipped
+vmprog: out/rev_b/ron/mood_hd.vmprog (v0.1.1).
