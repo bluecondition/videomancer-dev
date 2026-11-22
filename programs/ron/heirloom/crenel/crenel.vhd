@@ -660,7 +660,7 @@ begin
                     when 11 =>
                         if m_neg = '1' then e_dc <= 0 - v_pr(15 downto 0); else e_dc <= v_pr(15 downto 0); end if;
                     when 12 | 13 =>
-                        if m_neg = '1' then v_sg := 0 - signed(resize(v_pr(19 downto 4), 17));
+                        if m_neg = '1' then v_sg := -signed(resize(v_pr(19 downto 4), 17));
                         else v_sg := signed(resize(v_pr(19 downto 4), 17)); end if;
                         if m_neg = '1' and v_pr(3 downto 0) /= 0 then v_sg := v_sg - 1; end if;
                         if q_job = 12 then e_lin0 <= unsigned(v_sg(15 downto 0)); else e_lin1 <= unsigned(v_sg(15 downto 0)); end if;

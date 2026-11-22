@@ -257,3 +257,15 @@ v0.6.2 (Ron's rule: K6 is the camera strength in every Heirloom / Kinetic / Patc
 ## K6 top +25 % and default 100 % (2026-11-15)
 
 Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).
+
+## v0.6.4: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`0 - x` as `+x`), while the GHDL simulator computes it correctly, so every render showed the intended picture and the hardware ran the reversed one.
+- **Fixed (1 site):** line 663, `v_sg := -signed(resize(v_pr(19 downto 4), 17))` (was `0 - signed(...)`): the negative slanted pulse edges e_lin0 / e_lin1 = ±dy·slope for band 4 (the slipped row 412–478 carrying the top of a pink V, slopes −839 / −629) and band 5 (the pink V's, left edge +1028, right edge −1395, closing to tips at y 557).
+- **On hardware before → now:** every negative edge slope ran positive. The band-4 V-top block leaned right instead of left, and in band 5 the right edge moved right, so the pink V's opened into right-leaning fans widening downward. Now both band-4 edges lean left and the pink V's close to their tips at y 557, as rendered.
+- No default or preset remaps (group 1, never flashed). Left as-is (correct): the neighbouring `0 - v_pr(...)` lines (jobs 10, 11, 16) are natural − unsigned, which synthesises correctly.
+- **Build** (router1, `.heirloom_work/skew_tools/build_any.sh crenel`): all six configs seed 1. Post-route Fmax: HD Analog 90.94, SD Analog 87.97, HD HDMI 83.28, SD HDMI 90.83, HD Dual 89.61, SD Dual 82.87 MHz (HD values are the builder seeds, all three replaced, see below). 7,219–7,246 / 7,680 LC, 23 / 32 EBR, iceunpack OK ×6.
+- **HD skew:** the builder's HD HDMI router1 s1 was **−0.20 / ≤ −1.29** (negative HSYNC, in the danger zone). Screen router1 + router2 s1–40 (50 timing-clean; 15 routes timed out under machine load): 4 in the window. Installed **HD HDMI router1 s29 (+1.17 / ≤ −0.99, 85.92 MHz)**. HD Analog r1 s1 had HDMI data to +0.94 → **router1 s4 (−2.85 / ≤ −1.14, 84.38 MHz)**; HD Dual r1 s1 had data to −0.49 → **router1 s12 (−2.43 / ≤ −1.17, 90.79 MHz)**. Spare HD HDMI router1 s30 (+1.19 / ≤ −0.87, 84.78 MHz): `.heirloom_work/rb_crenel/skew/crenel_v064_spare_hd_hdmi_router1_s30.vmprog`. The builder's .bins are `skew/hd_{hdmi,analog,dual}_replaced_202611212315.bin`.
+- **Seeds to record:** shipped HD HDMI = router1 s29, HD Analog = router1 s4, HD Dual = router1 s12 (hand-installed; a plain rebuild gives seed 1).
+- The v0.6.0 skew screen, its scripts and `crenel_v060_builder.vmprog` (referenced in Status above) moved to `.heirloom_work/rb_crenel/skew_v060/`.
+- `out/rev_b/ron/heirloom/crenel.vmprog` (v0.6.4). Backups of v0.6.3 (vhd, toml, vmprog) in `.heirloom_work/rb_crenel/`. Not flashed.
