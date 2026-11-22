@@ -895,13 +895,13 @@ begin
                 v_s2 := signed(resize(c1_sb & '0', 9));
                 v_sb := signed(resize(c1_sb, 9));
                 v_ei := v_es + signed(resize(c_t8, 9));
-                c2_a  <= f_cl8(4 - v_es);
+                c2_a  <= f_cl8(to_signed(4, 9) - v_es);
                 c2_b  <= f_cl8(4 + v_es - v_s2);
-                c2_ia <= f_cl8(4 - v_ei);
+                c2_ia <= f_cl8(to_signed(4, 9) - v_ei);
                 c2_ib <= f_cl8(4 + v_ei - v_s2);
                 c2_ax <= f_cl8(4 + signed(resize(c_th8, 9)) - v_sb);
-                c2_xa <= f_cl8(4 - v_sb);
-                c2_xd <= f_cl8(4 - signed(resize(c1_dw, 9)));
+                c2_xa <= f_cl8(to_signed(4, 9) - v_sb);
+                c2_xd <= f_cl8(to_signed(4, 9) - signed(resize(c1_dw, 9)));
                 c2_q <= c1_q;
                 -- c3: coverage; Bold: the facet's light coverage, Fine: the outline and the axis line
                 if c2_a > c2_b then v_cs := c2_a - c2_b; else v_cs := (others => '0'); end if;

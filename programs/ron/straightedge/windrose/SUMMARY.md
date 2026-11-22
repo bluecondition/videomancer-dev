@@ -155,3 +155,33 @@ NOT SURE OF ON HARDWARE
   first).
 - The line count is measured (g_start pulses per field); a source whose fields differ by two or more lines would
   move the centre every field.
+
+## v0.1.1: GHDL integer-minus-signed fix (2026-11-21)
+
+This toolchain's GHDL synthesis builds `<integer> - <signed>` reversed (`4 - v` as `v - 4`); the simulator is
+right, so every render and model check above showed the intended picture, but the v0.1.0 bitstreams did not.
+Fixed in the coverage clamp stage c2 (p_back), each rewritten as `to_signed(4, 9) - x` (same width, same
+operands, the value the simulator always computed):
+- line 898 `c2_a`: the star coverage clamp(1/2 - E);
+- line 900 `c2_ia`: the Fine outline's inner-offset coverage clamp(1/2 - (E + t8));
+- line 903 `c2_xa`: the facet anti-aliasing across a point's axis clamp(1/2 - b);
+- line 904 `c2_xd`: the anti-aliasing across the swap line between two points clamp(1/2 - dw).
+On hardware v0.1.0 (never flashed) would have shown hollow star outlines (a ~6 px band hugging the outside of
+each star) over a flat 3/8 grey veil crossed by every point's axis line, the camera echo lines hidden almost
+everywhere, Ink a flat 4/8 grey, Fine lines overdriven, Bold's light / dark halves swapped and hard facet
+boundaries. v0.1.1 draws the designed figure: solid faceted stars with 1-px anti-aliased edges, the light half
+on the correct side, the echo lines visible around the rose, correct Fine outlines. No TOML remaps (group 1).
+Nothing left as-is (no other audited site in this program). `scan.py` lists no site.
+Backups (v0.1.0 vhd / toml / vmprog): .heirloom_work/rb_windrose/.
+
+Build (2026-11-21, shared queue, router1, every config seed 1): HD Analog 79.35, SD Analog 83.69, HD HDMI
+82.03, SD HDMI 74.79, HD Dual 80.26, SD Dual 78.06 MHz; 7131-7146 LC (93 %), 21 / 32 EBR; all six pass
+iceunpack.
+
+HD HDMI skew: the builder's HD HDMI router1 s1 was -0.70 / <= -1.06 (a NEGATIVE HSYNC). Screened HD HDMI
+router1 + router2 seeds 1-60 (112 routed, 96 timing-clean): one seed in the window. Installed **HD HDMI
+router2 s30 (+2.04 / <= -0.82, 78.57 MHz)**. HD Analog router1 s1 had data <= -0.31: installed **HD Analog
+router1 s12 (-2.61 / <= -0.97, 83.15 MHz)**. HD Dual router1 s1 (-1.17 / <= -1.58) kept. Spare (no second seed
+in the window): HD HDMI router2 s28 (+1.61 / <= -0.51, 80.12 MHz, data 0.09 ns outside the window),
+.heirloom_work/rb_windrose/skew/windrose_v011_spare_hd_hdmi_router2_s28.vmprog. Replaced bins kept in
+.heirloom_work/rb_windrose/skew/. Shipped vmprog: out/rev_b/ron/straightedge/windrose.vmprog (v0.1.1).
