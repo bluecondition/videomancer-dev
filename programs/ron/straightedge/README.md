@@ -33,6 +33,8 @@ S7 Glide, S9 Tone (Grey / Ink), S10 Weight (Bold / Fine), S11 Source (Video / Os
 | 14 | [brilliant](brilliant/) | A brilliant-cut gem facet diagram, every facet one flat tone, flashing as a light circles it | Cut: a wide table to a starburst of needle facets | v0.1.0 built 2026-11-22 (wave 2), router1 seed 1 all configs (router2 stalls HD HDMI), HD 78.3-87.4 MHz, 90.5 % LC, 26 EBR; model = RTL (0 px: 720p, NTSC, motion, Glide On); camera = +-2 tone steps per facet plus a dot halftone round the stone (Pave: stone size per cell); culet star removed; knobs act one field late; not flashed |
 | 15 | [hatch](hatch/) | LeWitt panels: every combination of fine lines in four directions; the camera becomes a cross-hatch | Layers: one direction per panel to the full lattice | v0.1.0 built 2026-11-22 (wave 2), router1 seed 1 all configs (router2 thin / stalled), HD 79.0-82.0 MHz, 91 % LC, 14 EBR; model = RTL (0 px, 720p + NTSC); camera = quarter-panel cells blend toward a luma layer ladder (cross-hatch portrait); no 22.5-degree families; not flashed |
 
+**Wave 2 (2026-11-22):** rows 11-15 (stitch, tans, gnomon, brilliant, hatch) were planned by Fable and built overnight by Opus agents from the specs in `.straightedge_work/prompts/`; shared overrides in `.setwave2_work/addendum.txt`. The mosaic camera rule is kept; hatch and tans read the bear clearly, the others as a silhouette. None flashed.
+
 Each program's K4, S8, camera target and P12 are in its spec (`.straightedge_work/prompts/<name>.txt`) until it is
 built, then in its `SUMMARY.md`.
 

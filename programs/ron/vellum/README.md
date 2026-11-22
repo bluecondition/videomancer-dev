@@ -32,6 +32,8 @@ S7 Glide, S9 Tone (Grey / Ink), S10 Weight (Bold / Fine), S11 Source (Video / Os
 | 14 | [steiner](steiner/) | A Steiner chain: discs packed between two circles, circulating without ever losing a tangency (sangaku) | Eccentric: a ring of equal discs to one giant and a string of pearls | v0.1.0 built 2026-11-22 (wave 2), router1 seed 1 all configs, HD 91.6-97.4 MHz, 93 % LC, 22 EBR; model = RTL (0 px: 720p, NTSC, motion, K4 ends); tangencies within 0.29 px; Nested shares the 12 chain slots (K4 steps outer / nested pairs); camera = rho^2 dent only (bear not recognisable); per-field engine with a serial divider, unflashed; not flashed |
 | 15 | [ogee](ogee/) | Lantern-tile tessellation: every edge an S of two arcs, with inset bands | Curve: straight diamonds, lanterns, circles and stars | v0.1.0 built 2026-11-22 (wave 2), router1 seed 1 all configs (router2 marginal), HD 81.5-92.5 MHz, 92 % LC, 18 EBR; model = RTL (0 px: 720p, NTSC, motion, Glide On); Double layer cut for fit (S8 = Inset Bands / Lines); camera = luma^2 moves the insets (bear a coarse silhouette); Osc at 1x; not flashed |
 
+**Wave 2 (2026-11-22):** rows 11-15 (corolla, lunation, limacon, steiner, ogee) were planned by Fable and built overnight by Opus agents from the specs in `.vellum_work/prompts/`; shared overrides in `.setwave2_work/addendum.txt`. None flashed.
+
 Each program's K4, S8, camera target and P12 are in its spec (`.vellum_work/prompts/<name>.txt`) until it is
 built, then in its `SUMMARY.md`.
 

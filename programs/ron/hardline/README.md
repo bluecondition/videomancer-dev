@@ -33,6 +33,8 @@ the ramp (Bold = 4 steps, Fine = smooth).
 | 14 | [guilloche](guilloche/) | Banknote lace: stacked bands of phase-shifted waves filled by parity, three laces overlaid | Cam: straight diamonds, sine lace, pointed arches | v0.1.0 built 2026-11-22 (wave 2), router1 seed 1 all configs, HD 82.1-88.7 MHz, 91.6 % LC, 14 EBR; model = RTL (0 px: 720p, NTSC, Drift both ways, Lines at both ends, Glide easing); K5 Drift; edge smoothing from the nearest stripe edge; camera displacement fixed in pixels (face only faintly legible); Osc at a quarter level; not flashed |
 | 15 | [kagome](kagome/) | Triaxial basket weave: white strips in three directions, truly over and under, with hexagonal eyes | Weave: a hairline star lattice to a tight basket | v0.1.0 built 2026-11-22 (wave 2), router1 seed 1 all configs (router2 misses / stalls), HD 81.6-91.7 MHz, 91 % LC, 15 EBR; model = RTL (0 px: 720p, NTSC, knobs at both ends, motion); K5 Drift (turn + glide, capped 1.4 deg / field); triple overlaps by a pinwheel rule; P12 top 0.75 pitch; camera = luma widens the strips; thin pinwheel seams may shimmer while turning; not flashed |
 
+**Wave 2 (2026-11-22):** rows 11-15 (dipole, streamline, precess, guilloche, kagome) were planned by Fable and built overnight by Opus agents from the specs in `.hardline_work/prompts/`; shared overrides in `.setwave2_work/addendum.txt`. Unlike the first ten they move on their own: K5 is Drift on all five (Ron, 2026-11-16: motion is allowed). None flashed.
+
 Each program's own K4, K5, S8, S9 and camera target are in its spec (`.hardline_work/prompts/<name>.txt`)
 until it is built, then in its `SUMMARY.md`.
 
