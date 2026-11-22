@@ -1,0 +1,146 @@
+# Corolla - Vellum (v0.1.0, 2026-11-22).  The overlapping-circles grid (Flower of Life, Japanese shippo):
+# translucent discs on every point of a triangular or square lattice, the overlaps building petals in four
+# stepped greys; the lattice glides and turns slowly; the camera swells the discs.  See corolla.vhd, corolla.py
+# and SUMMARY.md.
+
+[program]
+processing_delay_clks = 32
+program_id = "com.czartroniks.corolla"
+program_name = "Corolla"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Grid", "Shape"]
+program_type = "processing"
+description = "Translucent discs on a hex or square lattice overlap into the Flower of Life in stepped greys; video swells the discs."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "X"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Y"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 740
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Oval"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 650
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Lattice"
+value_labels = ["Hex", "Square"]
+initial_value_label = "Hex"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Tone"
+value_labels = ["Grey", "Ink"]
+initial_value_label = "Grey"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Bloom"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 716
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Flower of Life"
+
+[[preset]]
+name = "Kissing Coins"
+rotary_potentiometer_3 = 620
+linear_potentiometer_12 = 160
+
+[[preset]]
+name = "Shippo"
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Compass"
+rotary_potentiometer_3 = 640
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Lace"
+rotary_potentiometer_3 = 600
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Woven Ovals"
+rotary_potentiometer_4 = 720
+toggle_switch_9 = 1
+linear_potentiometer_12 = 600
