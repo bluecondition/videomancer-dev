@@ -1,11 +1,11 @@
-# NEON BEACH (v0.6.1, 2026-11-22: the wash comes with the larger swells at the waves' pace, a 3-4 square foam tip, the crab digs).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+# NEON BEACH (v0.6.2, 2026-11-23: uneven foam all along the wash's lower edge (0-3 squares by column), the wash 1.5x deeper).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 # See neonbeach.vhd, neonbeach.py and PLAN.md.
 
 [program]
 processing_delay_clks = 33
 program_id = "com.czartroniks.neonbeach"
 program_name = "Neon Beach"
-program_version = "0.6.1"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

@@ -8,7 +8,8 @@ turn white; under everything the sand, a mesh of quads. When a wave lands, a was
 it covers turn into triangles in the water's colour, and as it drains they revert a triangle at a time, leaving
 the sand dark and wet. A small faceted crab walks the sand and runs from the wash.
 
-**Status: v0.6.1 (2026-11-22): the wash comes with the larger swells at the waves' own pace, with a 3-4 square
+**Status: v0.6.2 (2026-11-23): uneven foam (0 .. 3 squares by column) all along the wash's lower edge, the wash
+1.5x deeper; see "v0.6.2". v0.6.1: the wash comes with the larger swells at the waves' own pace, with a 3-4 square
 foam tip; the crab digs (fast legs and claws) going down and up; see "v0.6.1". v0.6.0: a longer beach (half the screen at Tide 96 %), a wash 4x as long that wets only
 what it touches and pushes in with a foam front, 1 to 3 gulls per strip; see "v0.6.0". v0.5.6: v0.5.5 re-placed (HD HDMI router1 s25, HD Analog router1 s10) after Ron saw
 per-line U/V-swapped lines on v0.5.5; see "v0.5.6". v0.5.5: the sand's shimmer runs along its grid rows. v0.5.4: the sand's grid lines shimmer again; sand changes colour only where the wash
@@ -468,3 +469,29 @@ r2 s1-40; 51 clean HD HDMI routes, 3 in the window): the builder's seed-1 placem
 (-1.78 / <= -1.21, 89.02 MHz).** Spare HD HDMI router1 s38 (+1.28 / <= -1.11, 88.36 MHz):
 `.heirloom_work/rb_neonbeach/skew/neonbeach_v061_spare_hd_hdmi_router1_s38.vmprog`. (v0.6.0's screen:
 `rb_neonbeach/skew_v060/`.) Re-screen after any rebuild.
+
+## v0.6.2: foam all along the wash's lower edge, uneven (2026-11-23)
+
+Ron: "when i say i want 3-4 squares of the white foam at the front of the wash, i mean across the entire edge of the
+wash that is moving down into the sand, not just the left side but all the way across, but it should be
+inconsistent, not just 3 white lines across. sometimes there will only be 1, 2 or none".
+
+- New cell code 6 = the wash covers the whole cell as FOAM (the upper-only drying range is now 5 .. 1). Per column the
+  sweep draws F full foam rows above the wash's lower edge (`ws_rfm` = reach - 4 F; a covered row whose bottom is
+  below it is foam), plus the edge's own foam triangle (13). F comes from `C_FN` (64 x 2 bits: 0 one time in five,
+  1 a third, 2 a third, 3 one in nine) indexed by the column xor a slot that changes about every 8.5 s, at a
+  different moment in each column (`c_t / 16 + 4 col`).
+- The left-tip foam band of v0.6.1 is gone (the tip's shallow columns are mostly foam now anyway).
+- The wash soaks 1.5x as deep (reach e x 3/2 rows, was e) so there is water above the foam: at the defaults a big
+  swell reaches about 4 .. 5 cells.
+- Verified: RTL wet-sweep check against the updated model with the wash pushing in: 0 / 16,384 (foam per column
+  0 .. 3 squares). 720p render: `.neonbeach_work/prev/k_day.png`, `k_day_wash.png`.
+
+Built 2026-11-23 with **router1**, all six on seed 1 (HD Analog 88.36, SD Analog 75.95, HD HDMI 87.72, SD HDMI
+80.20, HD Dual 89.65, SD Dual 88.64 MHz), 7,438 / 7,680 LC (96.8 %), 30 / 32 block RAMs. HDMI pin-skew screen (r1 +
+r2 s1-40; 47 clean HD HDMI routes, 4 in the window): seed-1 placements HD HDMI -0.47 / <= -0.71 (danger zone), HD
+Analog +0.70 / <= -0.08, HD Dual -0.78 / <= +0.40. **Installed HD HDMI router1 s17 (+1.35 / <= -1.32, 82.72 MHz),
+HD Analog router1 s8 (HDMI +0.90 / <= -0.64, analog -1.68 / <= -0.68, 89.51 MHz; no seed of 16 was in the +1.0
+window with clean data), HD Dual router1 s11 (-2.27 / <= -1.15, 89.09 MHz).** Spare HD HDMI router1 s39 (+1.31 /
+<= -1.08, 83.57 MHz): `.heirloom_work/rb_neonbeach/skew/neonbeach_v062_spare_hd_hdmi_router1_s39.vmprog`. (v0.6.1's
+screen: `rb_neonbeach/skew_v061/`.) Re-screen after any rebuild.
