@@ -290,8 +290,11 @@ def crab_canvas(frame):
         foot = (foot[0] + 5 * l, foot[1] - 5 * l)
         bar(cv, root, knee, 6, 3)
         bar(cv, knee, foot, 6, 3)
-    bar(cv, (50, 40), (72, 24), 6, 3)                                                             # arm
-    poly(cv, [(68, 26), (84, 4), (110, 2), (94, 13), (114, 18), (92, 30)], 3)                    # pincer
+    # (v0.6.1) frame 1 dips the arm and pincer 4 units (a texel row): the claws work when it digs (fast frames)
+    # and bob a little as it walks
+    da = 4 if frame == 1 else 0
+    bar(cv, (50, 40), (72, 24 + da), 6, 3)                                                        # arm
+    poly(cv, [(68, 26 + da), (84, 4 + da), (110, 2 + da), (94, 13 + da), (114, 18 + da), (92, 30 + da)], 3)   # pincer
     bar(cv, (8, 32), (12, 16), 4, 1)                                                              # eye stalk
     poly(cv, [(12, 6), (19, 12), (12, 18), (5, 12)], 2)                                          # eye
     poly(cv, [(0, 30), (34, 30), (58, 42), (62, 54), (54, 70), (0, 70)], 1)                      # shell

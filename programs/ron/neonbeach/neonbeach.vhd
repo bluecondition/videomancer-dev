@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.6.0 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.6.1 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -314,8 +314,9 @@ architecture neonbeach of program_top is
     -- sand must not look wet until the water has touched it, then darkest brown as the water leaves, then fade):
     --   15     the wash covers the whole cell
     --   14     it covers the upper triangle; the lower one was wet already (drawn darkest)
-    --   13     it covers the upper triangle; the lower one is dry (as the wash pushes in: its front column and its
-    --          lower edge draw the covered triangle as FOAM)
+    --   13     it covers the upper triangle; the lower one is dry (the wash's lower edge as it pushes in: drawn as
+    --          FOAM).  The wash's tip, the covered cells within 1 column ahead of and 2 behind its front column, is
+    --          drawn as foam too, whole squares (v0.6.1: Ron, 2 .. 3 squares of white foam at the tip)
     --   12 .. 7  the whole cell drying, level 6 .. 1 (18 ramp steps a level, darkest first)
     --   6 .. 1   only the upper triangle drying (the wash touched only that), level 6 .. 1
     --   0      dry
@@ -328,8 +329,7 @@ architecture neonbeach of program_top is
     signal wt_a, wt_wa, wt_pa : unsigned(10 downto 0) := (others => '0');
     signal wt_q, wt_qf, wt_wd : std_logic_vector(3 downto 0) := (others => '0');
     signal wt_we : std_logic := '0';
-    signal ws_run, ws_rows, ws_tick, ws_uw, ws_hon, ws_adv, ws_front : std_logic := '0';
-    signal ws_pe : unsigned(7 downto 0) := (others => '0');         -- last sweep's swash envelope (advancing?)
+    signal ws_run, ws_rows, ws_tick, ws_uw, ws_hon : std_logic := '0';
     signal ws_col, ws_c1, ws_c2 : unsigned(5 downto 0) := (others => '0');
     signal ws_r0 : unsigned(5 downto 0) := (others => '0');
     signal ws_r1, ws_r2 : unsigned(4 downto 0) := (others => '0');
@@ -435,6 +435,7 @@ architecture neonbeach of program_top is
     signal wd_ff : t_s2 := (others => "00");                               -- foam square: knot, row parities
     signal wd_ft : t_t7 := (others => (others => '0'));
     signal f14_in, sp14 : std_logic := '0';
+    signal wd_fb : std_logic_vector(10 to 13) := (others => '0');          -- in the wash's foam tip
     signal wd_up : std_logic_vector(10 to 13) := (others => '0');          -- the upper triangle of a sand cell
     signal w10_upb, w10_flp : std_logic := '0';                            -- the other diagonal; this cell takes it
     signal k14_wash, k14_wfm : std_logic := '0';
@@ -595,6 +596,7 @@ begin
         variable v_hh  : unsigned(11 downto 0);
         variable v_cell : unsigned(3 downto 0);
         variable v_cax : unsigned(11 downto 0);
+        variable v_dc  : signed(8 downto 0);
         variable v_ds  : signed(10 downto 0);
         variable v_db  : signed(10 downto 0);
         variable v_n, v_sd, v_dd : signed(11 downto 0);
@@ -701,6 +703,9 @@ begin
             -- the wetness cell under this pixel (row of depth, column), its upper triangle, its hash
             wt_pa <= w9_sd(9 downto 5) & w_xb(9)(10 downto 5);
             w_sdp(10) <= w9_sd(9 downto 1);                         -- for the sand's sheen (stage 17)
+            -- the wash's foam tip: this column against the run-up's front column (quasi-static through the field)
+            v_dc := signed(resize(w_xb(9)(10 downto 5), 9)) - ws_fc;
+            if v_dc >= -1 and v_dc <= 2 then wd_fb(10) <= '1'; else wd_fb(10) <= '0'; end if;
             for i in 11 to 17 loop w_sdp(i) <= w_sdp(i - 1); end loop;
             -- (every cell has its diagonal, "/" or "\" by the cell's hash: both tested here, chosen at 11)
             if w9_sd(4 downto 0) < w_xb(9)(4 downto 0) then wd_up(10) <= '1'; else wd_up(10) <= '0'; end if;
@@ -730,7 +735,7 @@ begin
                 wd_st(i) <= wd_st(i - 1); wd_ss(i) <= wd_ss(i - 1);
                 wd_inw(i) <= wd_inw(i - 1); wd_ins(i) <= wd_ins(i - 1); wd_cp(i) <= wd_cp(i - 1);
                 wd_inf(i) <= wd_inf(i - 1); wd_sp(i) <= wd_sp(i - 1); wd_ff(i) <= wd_ff(i - 1); wd_ft(i) <= wd_ft(i - 1);
-                wd_up(i) <= wd_up(i - 1);
+                wd_up(i) <= wd_up(i - 1); wd_fb(i) <= wd_fb(i - 1);
             end loop;
             if w10_flp = '1' then wd_up(11) <= w10_upb; end if;
             -- 13: always eight layers (switching the layer bit by depth drew stair-step verticals where the
@@ -745,7 +750,11 @@ begin
             -- last step while drying; a triangle the water has not touched stays dry (v0.6)
             v_wv := unsigned(wt_qf);
             if v_wv = 15 or (v_wv >= 13 and wd_up(13) = '1') then k14_wash <= '1'; else k14_wash <= '0'; end if;
-            if v_wv = 13 and wd_up(13) = '1' then k14_wfm <= '1'; else k14_wfm <= '0'; end if;
+            if (v_wv = 13 and wd_up(13) = '1') or (wd_fb(13) = '1' and (v_wv = 15 or (v_wv >= 13 and wd_up(13) = '1'))) then
+                k14_wfm <= '1';
+            else
+                k14_wfm <= '0';
+            end if;
             s14_sub <= wd_ss(13)(2 downto 1) & wd_up(13);
             v_dk := C_WDK(to_integer(v_wv));
             if wd_up(13) = '0' and ((v_wv /= 0 and v_wv <= 6) or v_wv = 13) then v_dk := (others => '0'); end if;
@@ -1112,11 +1121,9 @@ begin
             if ws_v3 = '1' then
                 v_o := unsigned(wt_qf);
                 v_top := signed(resize(ws_r3 & "00", 10));
-                -- covered: the whole cell, or its upper triangle (the lower one keeps whether it was wet: 14 / 13).
-                -- Pushing in (the envelope rising), the front two columns show foam (13)
+                -- covered: the whole cell, or its upper triangle (the lower one keeps whether it was wet: 14 / 13)
                 if ws_rc2 > v_top then v_cov := '1'; else v_cov := '0'; end if;
-                if v_cov = '1' and ws_front = '1' then v_n := to_unsigned(13, 4);
-                elsif ws_rc2 >= v_top + 4 then v_n := to_unsigned(15, 4);
+                if ws_rc2 >= v_top + 4 then v_n := to_unsigned(15, 4);
                 elsif v_cov = '1' then
                     if v_o >= 14 or (v_o >= 7 and v_o <= 12) then v_n := to_unsigned(14, 4); else v_n := to_unsigned(13, 4); end if;
                 -- uncovered: darkest first (whole, or only the upper triangle if that is all it touched), then a level
@@ -1141,8 +1148,6 @@ begin
                 ws_a2 <= to_unsigned(0, 8) - (c_t(6 downto 0) & '0');
                 ws_dp <= o_e(7 downto 3);
                 if o_cs(6 downto 0) = 3 or o_cs(6 downto 0) = 93 then ws_hon <= '1'; else ws_hon <= '0'; end if;   -- its first step down / up
-                if o_e > ws_pe then ws_adv <= '1'; else ws_adv <= '0'; end if;                  -- the wash pushing in
-                ws_pe <= o_e;
                 v_l9 := signed(resize(o_ks, 9)) - signed(resize(o_e(7 downto 1), 9));   -- (v0.6: e / 2 knots, was e / 8)
                 ws_fc <= shift_right(v_l9, 1);                                     -- the run-up's front column
                 if ws_div = 23 then ws_div <= (others => '0'); ws_tick <= '1'; else ws_div <= ws_div + 1; ws_tick <= '0'; end if;
@@ -1156,7 +1161,6 @@ begin
                             ws_sdist <= signed(resize(o_ks(7 downto 1), 9)) - signed(resize(ws_col, 9));   -- columns to the shoreline
                             ws_p <= "001";
                         when "001" =>
-                            if ws_adv = '1' and ws_uw = '0' and (ws_dist = 0 or ws_dist = -1) then ws_front <= '1'; else ws_front <= '0'; end if;
                             v_l9 := signed(resize(ws_l, 9)) - 128;
                             ws_reach <= signed(resize(ws_dp, 10)) + resize(shift_right(v_l9, 5), 10);
                             if ws_sdist(8) = '0' and ws_sdist(7 downto 5) /= "000" then ws_cap <= to_signed(511, 10);

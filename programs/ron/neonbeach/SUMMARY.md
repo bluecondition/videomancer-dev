@@ -8,7 +8,8 @@ turn white; under everything the sand, a mesh of quads. When a wave lands, a was
 it covers turn into triangles in the water's colour, and as it drains they revert a triangle at a time, leaving
 the sand dark and wet. A small faceted crab walks the sand and runs from the wash.
 
-**Status: v0.6.0 (2026-11-22): a longer beach (half the screen at Tide 96 %), a wash 4x as long that wets only
+**Status: v0.6.1 (2026-11-22): the wash comes with the larger swells at the waves' own pace, with a 3-4 square
+foam tip; the crab digs (fast legs and claws) going down and up; see "v0.6.1". v0.6.0: a longer beach (half the screen at Tide 96 %), a wash 4x as long that wets only
 what it touches and pushes in with a foam front, 1 to 3 gulls per strip; see "v0.6.0". v0.5.6: v0.5.5 re-placed (HD HDMI router1 s25, HD Analog router1 s10) after Ron saw
 per-line U/V-swapped lines on v0.5.5; see "v0.5.6". v0.5.5: the sand's shimmer runs along its grid rows. v0.5.4: the sand's grid lines shimmer again; sand changes colour only where the wash
 touches it; the gulls flap out of step; the crab follows the sand's slope (a bitmap read at each pixel's depth
@@ -447,3 +448,23 @@ the Abacus failure); 7 of 46 clean routes in the window. **Installed HD HDMI rou
 `.heirloom_work/rb_neonbeach/skew/neonbeach_v060_spare_hd_hdmi_router1_s31.vmprog`. HD Analog r1 s1 (-1.05 /
 <= -1.35) and HD Dual r1 s1 (-1.80 / <= -0.74) kept. (v0.5.5's screen moved to `rb_neonbeach/skew_v055/`.) A
 default rebuild routes seed 1 again: re-screen after any rebuild.
+
+## v0.6.1: the wash with the big swells, at the waves' pace; a foam tip; the crab digs (2026-11-22)
+
+| Ron's note | Change |
+|---|---|
+| "more white foam at the tip of the wash, at least 2-3 squares worth" | The tip is now drawn by position: covered cells within 1 column ahead of and 2 behind the run-up's front column (`ws_fc`, quasi-static through the field) draw in the foam colour as whole squares, so the tip is a 3-4 square band. The sweep no longer forces the front columns to 13; 13 (the lower edge pushing in) still draws foam. |
+| "the cadence of the wash should align with the rate of the swell and speed of the waves ... too fast ... the wash happening when the larger swells reach the left side and crash over" | Only swells of size 8 or more (7 of the 16 in a set cycle) start a run-up, when their crest reaches the shoreline. The envelope moves at the waves' own pace: rise = dP x (64 + K6/8) >> 11 sixteenths of e a field (Rhythm's phase step times Speed's factor), drain half that; at the defaults about 1.5 e a field in (was 4), 0.75 out (was 1). The target is 16 + Swell/16 + 8 x size (was 48 + Swell/8 + 8 x size), so at the defaults a size-8 swell runs about 3/4 of the way up the beach and the biggest nearly all of it, and the foam tip stays on screen. |
+| "the crab should be animated as it goes down or up out of the hole, the legs and arms should move maybe quicker than normal like it's digging" | Its frame clock steps 3 a field while it sinks or rises (as when fleeing: about 11 frame swaps a second), and frame 1 dips its arm and pincer 4 canvas units, so the claws work while it digs. (They also dip a little with each walking step.) |
+
+- Verified: spec vs emulator 0 mismatches / 750 fields. RTL wet-sweep check with the wash pushing in: 0 / 16,384.
+  720p render with the wash mid-beach: `.neonbeach_work/prev/j_day.png` (`j_day_wash.png`: the foam tip).
+
+Built 2026-11-22 with **router1**, all six on seed 1 (HD Analog 80.50, SD Analog 81.44, HD HDMI 88.87, SD HDMI
+85.41, HD Dual 80.73, SD Dual 79.96 MHz), 7,408 / 7,680 LC (96.5 %), 30 / 32 block RAMs. HDMI pin-skew screen (r1 +
+r2 s1-40; 51 clean HD HDMI routes, 3 in the window): the builder's seed-1 placements were HD HDMI -1.35 / <= -2.45
+(negative), HD Analog -0.18 / <= -0.26, HD Dual -0.53 / <= -1.47. **Installed HD HDMI router1 s12 (+1.35 / <= -1.09,
+87.16 MHz), HD Analog router1 s14 (HDMI -0.96 / <= -1.20, analog -2.13 / <= -1.53, 77.94 MHz), HD Dual router1 s6
+(-1.78 / <= -1.21, 89.02 MHz).** Spare HD HDMI router1 s38 (+1.28 / <= -1.11, 88.36 MHz):
+`.heirloom_work/rb_neonbeach/skew/neonbeach_v061_spare_hd_hdmi_router1_s38.vmprog`. (v0.6.0's screen:
+`rb_neonbeach/skew_v060/`.) Re-screen after any rebuild.

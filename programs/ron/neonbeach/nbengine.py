@@ -137,7 +137,7 @@ R_SN, R_BN = 8, 9                          # the previous (right-hand) knot's su
 T0, T1, T2, T3, T4, T5 = 10, 11, 12, 13, 14, 15
 # scratch RAM
 S_FOAM, S_SOFF, S_BEDT = 0, 128, 256    # per knot: last field's foam, the phase offset, the bed
-S_NSH, S_SZSH, S_NPREV, S_FIRST, S_D, S_CAP, S_EXC, S_TS, S_SRF, S_BED, S_PH, S_SPD = range(384, 396)
+S_NSH, S_SZSH, S_NPREV, S_FIRST, S_D, S_CAP, S_EXC, S_TS, S_SRF, S_BED, S_PH, S_SPD, S_EF = range(384, 397)
 S_CX, S_CY, S_CS, S_CT, S_CD, S_CF, S_CW = range(400, 407)      # crab: x, y, sink, timer, step, frame clock, walking
 
 
@@ -292,18 +292,31 @@ def program():
     a.LDI(T0, 128); a.SUB(T0, R_KS, T0); a.JP(T0, 'env'); a.JZ(T0, 'env')       # no shoreline: no swash
     a.LDI(T1, S_NSH); a.FRD(T1, T1); a.LDI(T2, S_NPREV); a.FRD(T3, T2); a.FWR(T2, T1)
     a.SUB(T3, T1, T3); a.JZ(T3, 'env')
-    # target = min(255, 48 + Swell / 8 + size x 8); rise flag = bit 8 of R_RT
-    a.IN(T0, P_K5); a.SHR(T0, T0, 3); a.ADDI(T0, T0, 48)
+    # (v0.6.1) only the larger swells wash up: size >= 8, about 7 waves in 16 (Ron: the wash when the larger swells
+    # reach the left side and crash over)
+    a.LDI(T1, S_SZSH); a.FRD(T1, T1); a.ADDI(T1, T1, -8); a.JN(T1, 'env')
+    # target = min(255, 16 + Swell / 16 + size x 8): at the defaults a size-8 swell runs about 3/4 of the way up
+    # the beach, the biggest (11) nearly all of it, so its foam tip stays on screen; rise flag = bit 8 of R_RT
+    a.IN(T0, P_K5); a.SHR(T0, T0, 4); a.ADDI(T0, T0, 16)
     a.LDI(T1, S_SZSH); a.FRD(T1, T1); a.SHL(T1, T1, 3); a.ADD(T0, T0, T1)
     a.LDI(T1, 255); a.MIN(T0, T0, T1, T2)
     a.ADDI(R_RT, T0, 256)
     a.label('env')
-    a.SHR(T0, R_RT, 8); a.JZ(T0, 'falling')
-    a.ADDI(R_E, R_E, 4); a.LDI(T1, 255); a.MIN(R_E, R_E, T1, T2)                # rising: e += 4 (to 255)
+    # the pace (v0.6.1): the waves' own, rise16 = dP x (64 + K6 / 8) >> 11 sixteenths of e a field (Rhythm's phase
+    # step times Speed's factor (1 + 2 K6) / 2), so the wash rushes in at about the waves' speed and drains at half
+    # that; the sixteenths carry in S_EF
+    a.IN(T0, P_K1); a.SHR(T0, T0, 1); a.ADDI(T0, T0, 96)
+    a.IN(T1, P_KC); a.SHR(T1, T1, 4); a.ADDI(T1, T1, 64)
+    a.MUL(T0, T1); a.MRD(T0, 7); a.SHR(T0, T0, 4)
+    a.SHR(T1, R_RT, 8); a.JZ(T1, 'falling')
+    a.LDI(T5, S_EF); a.FRD(T1, T5); a.ADD(T1, T1, T0); a.SHR(T2, T1, 4); a.AND(T1, T1, 15); a.FWR(T5, T1)
+    a.ADD(R_E, R_E, T2); a.LDI(T1, 255); a.MIN(R_E, R_E, T1, T2)                # rising (to 255)
     a.AND(T1, R_RT, 255); a.SUB(T1, R_E, T1); a.JN(T1, 'out')                    # until e >= target
     a.AND(R_RT, R_RT, 255); a.JMP('out')
     a.label('falling')
-    a.ADDI(R_E, R_E, -1); a.MAX(R_E, R_E, 0, T1)                               # draining: e -= 1
+    a.SHR(T0, T0, 1)
+    a.LDI(T5, S_EF); a.FRD(T1, T5); a.ADD(T1, T1, T0); a.SHR(T2, T1, 4); a.AND(T1, T1, 15); a.FWR(T5, T1)
+    a.SUB(R_E, R_E, T2); a.MAX(R_E, R_E, 0, T1)                                 # draining
     a.label('out')
     a.OUT(R_E, O_E); a.OUT(R_KS, O_KS)
     # ---- the crab ----
@@ -313,6 +326,7 @@ def program():
     a.LDI(T5, S_CS); a.FRD(R_SL, T5)                   # sink (R_SL is free now)
     a.IN(T0, P_KC); a.AND(T0, T0, 1); a.JZ(T0, 'crab_on')
     a.ADDI(R_SL, R_SL, 3); a.LDI(T1, 96); a.MIN(R_SL, R_SL, T1)   # switched off: sink (to 96)
+    a.LDI(T5, S_CF); a.FRD(T3, T5); a.ADDI(T3, T3, 3); a.FWR(T5, T3)   # digging down: legs and claws fast
     a.JMP('crab_out')
     a.label('crab_on')
     a.JZ(R_SL, 'crab_live')
@@ -324,6 +338,7 @@ def program():
     a.LDI(T2, S_CY); a.FWR(T2, T1)
     a.label('crab_rise')
     a.ADDI(R_SL, R_SL, -3); a.MAX(R_SL, R_SL, 0)
+    a.LDI(T5, S_CF); a.FRD(T3, T5); a.ADDI(T3, T3, 3); a.FWR(T5, T3)   # digging up: legs and claws fast
     a.JMP('crab_out')
     a.label('crab_live')
     a.LDI(T5, S_CX); a.FRD(R_K, T5)                    # x (R_K is free now)
