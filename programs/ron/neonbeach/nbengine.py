@@ -188,8 +188,8 @@ def program():
     a.LDI(T4, S_NSH); a.FWR(T4, T2)
     a.LDI(T4, S_SZSH); a.FWR(T4, T3)
     a.label('beach_sheet')
-    # th = clamp((e - 8 (ks - k)) >> 1, 0, 14); surface = bed - th
-    a.SUB(T4, R_KS, R_K); a.SHL(T4, T4, 3)
+    # th = clamp((e - 2 (ks - k)) >> 1, 0, 14); surface = bed - th  (v0.6: the run-up reaches e / 2 knots, was e / 8)
+    a.SUB(T4, R_KS, R_K); a.SHL(T4, T4, 1)
     a.AND(T5, R_E, 255); a.SUB(T4, T5, T4)
     a.LDI(T5, 0); a.JN(T4, 'th_done')
     a.SHR(T5, T4, 1); a.LDI(T4, 14); a.MIN(T5, T5, T4, T2)
@@ -299,11 +299,11 @@ def program():
     a.ADDI(R_RT, T0, 256)
     a.label('env')
     a.SHR(T0, R_RT, 8); a.JZ(T0, 'falling')
-    a.ADDI(R_E, R_E, 6); a.LDI(T1, 255); a.MIN(R_E, R_E, T1, T2)                # rising: e += 6 (to 255)
+    a.ADDI(R_E, R_E, 4); a.LDI(T1, 255); a.MIN(R_E, R_E, T1, T2)                # rising: e += 4 (to 255)
     a.AND(T1, R_RT, 255); a.SUB(T1, R_E, T1); a.JN(T1, 'out')                    # until e >= target
     a.AND(R_RT, R_RT, 255); a.JMP('out')
     a.label('falling')
-    a.ADDI(R_E, R_E, -2); a.MAX(R_E, R_E, 0, T1)
+    a.ADDI(R_E, R_E, -1); a.MAX(R_E, R_E, 0, T1)                               # draining: e -= 1
     a.label('out')
     a.OUT(R_E, O_E); a.OUT(R_KS, O_KS)
     # ---- the crab ----
@@ -328,9 +328,9 @@ def program():
     a.label('crab_live')
     a.LDI(T5, S_CX); a.FRD(R_K, T5)                    # x (R_K is free now)
     a.LDI(T5, S_CY); a.FRD(R_SN, T5)                   # y
-    # the wash at its column?  front column = (ks - e / 8) / 2, its column = x / 32, the wash to e rows deep
+    # the wash at its column?  front column = (ks - e / 2) / 2, its column = x / 32, the wash to e rows deep
     a.SHR(T0, R_K, 5)
-    a.SHR(T1, R_E, 3); a.SUB(T1, R_KS, T1); a.SHR(T1, T1, 1)
+    a.SHR(T1, R_E, 1); a.SUB(T1, R_KS, T1); a.MAX(T1, T1, 0); a.SHR(T1, T1, 1)     # (past the left edge: 0)
     a.SUB(T1, T0, T1); a.JN(T1, 'no_flee')             # left of the front
     a.SHL(T1, T0, 1); a.SUB(T1, T1, R_KS); a.JP(T1, 'no_flee'); a.JZ(T1, 'no_flee')     # under the water side
     a.SHR(T2, R_K, 4); a.ADDI(T2, T2, S_BEDT); a.FRD(T2, T2)       # the bed at its knot

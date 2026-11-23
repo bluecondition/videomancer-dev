@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- NEON BEACH v0.5.6 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+-- NEON BEACH v0.6.0 -- Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 --
 -- A cross-section of a beach: sky with a sun or moon, clouds, gulls and stars; under the horizon a strip of
 -- distant sea that mirrors them; in front of it the water cut through like a glass tank, its layers following
@@ -64,6 +64,20 @@ architecture neonbeach of program_top is
 
     constant C_CM1 : std_logic_vector(15 downto 0) := x"5A93";   -- clouds
     constant C_BM  : std_logic_vector(15 downto 0) := x"1242";   -- gulls
+    -- wet sand: darkness (ramp steps) by cell code (see [C] wet sand)
+    type t_wdk is array (0 to 15) of unsigned(6 downto 0);
+    constant C_WDK : t_wdk := (to_unsigned(0, 7), to_unsigned(18, 7), to_unsigned(36, 7), to_unsigned(54, 7),
+        to_unsigned(72, 7), to_unsigned(90, 7), to_unsigned(108, 7), to_unsigned(18, 7), to_unsigned(36, 7),
+        to_unsigned(54, 7), to_unsigned(72, 7), to_unsigned(90, 7), to_unsigned(108, 7), to_unsigned(0, 7),
+        to_unsigned(108, 7), to_unsigned(0, 7));
+    -- gulls: which of a strip's three gulls fly (bit 0 the top one), by its absolute lattice cell (v0.6: Ron, randomly
+    -- 1, 2 or 3 gulls, not always the same pattern); only the cells C_BM marks have gulls
+    type t_gs is array (0 to 63) of std_logic_vector(2 downto 0);
+    constant C_GSUB : t_gs := (
+        "111", "001", "111", "111", "111", "111", "011", "111", "111", "111", "111", "111", "001", "111", "111", "111",
+        "111", "010", "111", "111", "111", "111", "101", "111", "111", "110", "111", "111", "101", "111", "111", "111",
+        "111", "110", "111", "111", "111", "111", "101", "111", "111", "010", "111", "111", "101", "111", "111", "111",
+        "111", "001", "111", "111", "111", "111", "111", "111", "111", "011", "111", "111", "111", "111", "111", "111");
     -- spray: a hand-picked aperiodic mask (a coordinate-bit hash tiles a visible motif)
     constant C_DOT   : std_logic_vector(0 to 63) := "1011000000101000000000001000000110000000000100000000000110000000";
     -- foam squares: each square's threshold jitter (0 .. 15 rows), by knot (4 bits, reshuffled in time) & square row
@@ -193,7 +207,8 @@ architecture neonbeach of program_top is
     signal c_sunc : signed(11 downto 0) := to_signed(70, 12);     -- its centre, rows above the horizon
     signal c_sl   : unsigned(10 downto 0) := to_unsigned(C_SL0, 11);      -- sea level row
     signal c_fp   : unsigned(13 downto 0) := (others => '0');     -- fill position (Q3)
-    signal c_sa1, c_sab : unsigned(13 downto 0) := (others => '0');   -- cloud and gull drift
+    signal c_sa1, c_sab : unsigned(15 downto 0) := (others => '0');   -- cloud and gull drift (16 bits: the gulls'
+                                                                      -- absolute cell, 64 before it repeats)
     signal c_tod  : unsigned(1 downto 0) := "00";                 -- 0 day, 1 low sun, 2 night
     signal c_pal  : unsigned(2 downto 0) := "000";                -- theme & time of day
     signal c_sden : unsigned(1 downto 0) := "00";                 -- star density
@@ -295,20 +310,26 @@ architecture neonbeach of program_top is
     signal u_lfsr : unsigned(15 downto 0) := x"ACE1";
     signal s_k1, s_k3, s_k4, s_k5 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
-    -- [C] wet sand: Pixel Beach's per-cell counter.  2048 cells (32 rows of depth x 64 columns of 32 px), 4 bits:
-    -- 15 = under the wash, 14 = only the upper triangle, 13 = the crab's hole, held part dark (drawn as 6, no
-    -- fraction) on its three cells while it goes down or comes up, 6 at the next drying step after, 12 .. 1 drying (one
-    -- step every 12 fields, drawn with the fields since the step as a fraction so the colour fades back smoothly),
-    -- 0 dry.  The sea bed's top row is not held damp (v0.5.4: Ron, the top line of sand changes colour only where
-    -- water washes over it); the crab's hole darkens its three cells only part way (Ron, v0.5.4).  A sweep rewrites every cell in
-    -- vblank; the pixel path reads it in active video.
+    -- [C] wet sand: a 4-bit state per cell.  2048 cells (32 rows of depth x 64 columns of 32 px).  v0.6 codes (Ron:
+    -- sand must not look wet until the water has touched it, then darkest brown as the water leaves, then fade):
+    --   15     the wash covers the whole cell
+    --   14     it covers the upper triangle; the lower one was wet already (drawn darkest)
+    --   13     it covers the upper triangle; the lower one is dry (as the wash pushes in: its front column and its
+    --          lower edge draw the covered triangle as FOAM)
+    --   12 .. 7  the whole cell drying, level 6 .. 1 (18 ramp steps a level, darkest first)
+    --   6 .. 1   only the upper triangle drying (the wash touched only that), level 6 .. 1
+    --   0      dry
+    -- One level every 24 fields (2.4 s from darkest to dry), drawn with the fields since the step as a fraction so
+    -- the colour fades smoothly.  The crab's hole: its three cells set once to whole level 3 as it starts down or up.
+    -- A sweep rewrites every cell in vblank; the pixel path reads it in active video.
     type t_wt is array (0 to 2047) of std_logic_vector(3 downto 0);
     signal wt_ram : t_wt := (others => (others => '0'));
     attribute no_rw_check of wt_ram : signal is true;
     signal wt_a, wt_wa, wt_pa : unsigned(10 downto 0) := (others => '0');
     signal wt_q, wt_qf, wt_wd : std_logic_vector(3 downto 0) := (others => '0');
     signal wt_we : std_logic := '0';
-    signal ws_run, ws_rows, ws_tick, ws_uw, ws_hon : std_logic := '0';
+    signal ws_run, ws_rows, ws_tick, ws_uw, ws_hon, ws_adv, ws_front : std_logic := '0';
+    signal ws_pe : unsigned(7 downto 0) := (others => '0');         -- last sweep's swash envelope (advancing?)
     signal ws_col, ws_c1, ws_c2 : unsigned(5 downto 0) := (others => '0');
     signal ws_r0 : unsigned(5 downto 0) := (others => '0');
     signal ws_r1, ws_r2 : unsigned(4 downto 0) := (others => '0');
@@ -322,8 +343,8 @@ architecture neonbeach of program_top is
     signal ws_r3 : unsigned(4 downto 0) := (others => '0');
     signal ws_c3 : unsigned(5 downto 0) := (others => '0');
     signal ws_v3 : std_logic := '0';
-    signal ws_div : unsigned(3 downto 0) := (others => '0');
-    signal ws_fr  : unsigned(2 downto 0) := (others => '0');       -- 8 x (fields since the step) / 12
+    signal ws_div : unsigned(4 downto 0) := (others => '0');       -- fields since the last drying step, 0 .. 23
+    signal ws_fr  : unsigned(4 downto 0) := (others => '0');       -- 18 x (fields since the step) / 24
 
     -- [C] line engine
     signal e_zk   : std_logic := '0';
@@ -342,7 +363,8 @@ architecture neonbeach of program_top is
     signal e_rm   : unsigned(8 downto 0) := (others => '0');
     signal e_aa : unsigned(9 downto 0) := (others => '0');
     signal e_aen, e_son, e_bon : std_logic := '0';
-    signal e_asc  : unsigned(13 downto 0) := (others => '0');
+    signal e_asc  : unsigned(15 downto 0) := (others => '0');
+    signal e_gb, l_gb : unsigned(1 downto 0) := (others => '0');      -- the gull band (which of three) of the line
     signal e_x0   : signed(13 downto 0) := (others => '0');
     signal e_fc   : unsigned(13 downto 0) := (others => '0');
 
@@ -364,11 +386,13 @@ architecture neonbeach of program_top is
     signal l_od : unsigned(13 downto 0) := (others => '0');                   -- sheen: a per-line phase term
     type t_sdp is array (10 to 17) of unsigned(8 downto 0);
     signal w_sdp : t_sdp := (others => (others => '0'));                      -- the sand depth / 2, to the sheen
-    signal n_xa0, n_xw0, n_pa0 : unsigned(13 downto 0) := (others => '0');
+    signal n_xw0, n_pa0 : unsigned(13 downto 0) := (others => '0');
+    signal n_xa0 : unsigned(15 downto 0) := (others => '0');
     signal n_x0  : signed(12 downto 0) := (others => '0');
 
     -- [C] beam counters
-    signal b_xw, b_xa, b_pa : unsigned(13 downto 0) := (others => '0');
+    signal b_xw, b_pa : unsigned(13 downto 0) := (others => '0');
+    signal b_xa : unsigned(15 downto 0) := (others => '0');
     signal b_x  : signed(12 downto 0) := (others => '0');
     signal b_px : unsigned(10 downto 0) := (others => '0');
     signal s18_np : unsigned(8 downto 0) := (others => '0');
@@ -413,7 +437,7 @@ architecture neonbeach of program_top is
     signal f14_in, sp14 : std_logic := '0';
     signal wd_up : std_logic_vector(10 to 13) := (others => '0');          -- the upper triangle of a sand cell
     signal w10_upb, w10_flp : std_logic := '0';                            -- the other diagonal; this cell takes it
-    signal k14_wash : std_logic := '0';
+    signal k14_wash, k14_wfm : std_logic := '0';
     signal f14_sub : std_logic_vector(1 downto 0) := "00";
     signal f14_t : unsigned(6 downto 0) := (others => '0');
     signal w14_in, s14_in : std_logic := '0';
@@ -575,7 +599,8 @@ begin
         variable v_db  : signed(10 downto 0);
         variable v_n, v_sd, v_dd : signed(11 downto 0);
         variable v_r2  : unsigned(10 downto 0);
-        variable v_wv, v_wd : unsigned(3 downto 0);
+        variable v_wv : unsigned(3 downto 0);
+        variable v_dk : unsigned(6 downto 0);
         variable v_st8, v_d8 : unsigned(7 downto 0);
         variable v_j   : unsigned(3 downto 0);
         variable v_cx  : unsigned(6 downto 0);
@@ -715,17 +740,18 @@ begin
             -- 14
             w14_in <= wd_inw(13); w14_sub <= w13_q(0) & wd_cp(13); w14_q <= w13_q;
             s14_in <= wd_ins(13);
-            -- the wash: 15 = the whole cell, 14 = its upper triangle.  Every sand cell keeps its diagonal, wet or
-            -- dry (v0.5.3: Ron liked the diagonal through every square; up to v0.5.2 only damp cells had it)
+            -- the wash: 15 the whole cell, 14 / 13 its upper triangle (13 as foam: pushing in).  Every sand cell keeps
+            -- its diagonal (v0.5.3).  Wet sand: the level's darkness (18 ramp steps a level), less the fraction since its
+            -- last step while drying; a triangle the water has not touched stays dry (v0.6)
             v_wv := unsigned(wt_qf);
-            if v_wv = 15 or (v_wv = 14 and wd_up(13) = '1') then k14_wash <= '1'; else k14_wash <= '0'; end if;
+            if v_wv = 15 or (v_wv >= 13 and wd_up(13) = '1') then k14_wash <= '1'; else k14_wash <= '0'; end if;
+            if v_wv = 13 and wd_up(13) = '1' then k14_wfm <= '1'; else k14_wfm <= '0'; end if;
             s14_sub <= wd_ss(13)(2 downto 1) & wd_up(13);
-            -- wet sand: 8 steps of the ramp a wetness step (v0.3: 4), so a fresh wash leaves the sand dark brown;
-            -- drying cells (12 .. 1) give back the fraction since their last step (no step in the colour)
-            if v_wv /= 0 and v_wv < 13 then v_st8 := w13_stp; else v_st8 := resize(wd_st(13), 8); end if;
-            if v_wv = 13 then v_wd := to_unsigned(6, 4); else v_wd := v_wv; end if;   -- the crab's hole: part dark
-            if v_st8 > resize(v_wd & "000", 8) then
-                v_d8 := v_st8 - resize(v_wd & "000", 8); s14_t <= v_d8(6 downto 0);
+            v_dk := C_WDK(to_integer(v_wv));
+            if wd_up(13) = '0' and ((v_wv /= 0 and v_wv <= 6) or v_wv = 13) then v_dk := (others => '0'); end if;
+            if v_wv /= 0 and v_wv <= 12 and v_dk /= 0 then v_st8 := w13_stp; else v_st8 := resize(wd_st(13), 8); end if;
+            if v_st8 > resize(v_dk, 8) then
+                v_d8 := v_st8 - resize(v_dk, 8); s14_t <= v_d8(6 downto 0);
             else
                 s14_t <= (others => '0');
             end if;
@@ -781,7 +807,8 @@ begin
             -- 12: lattice cell, presence, x inside the sprite
             v_cell := b_xa(13 downto 10);
             a12_xs <= b_xa(9 downto 2);
-            if l_asel = '0' then a12_pr <= C_CM1(to_integer(v_cell)); else a12_pr <= C_BM(to_integer(v_cell)); end if;
+            if l_asel = '0' then a12_pr <= C_CM1(to_integer(v_cell));
+            else a12_pr <= C_BM(to_integer(v_cell)) and C_GSUB(to_integer(b_xa(15 downto 10)))(to_integer(l_gb)); end if;
             -- 13: thermometer against the six boundaries
             for i in 0 to 2 loop
                 if a12_xs >= l_arow(i)(7 downto 0)  then a13_g(2 * i) <= '1';     else a13_g(2 * i) <= '0'; end if;
@@ -907,7 +934,7 @@ begin
                     v_b := e_dyu + 128;
                     e_tb <= unsigned(v_b(7 downto 2));
                     -- slot A: the cloud or gull band this line crosses
-                    e_aen <= '0'; e_asel <= '0'; e_asc <= c_sa1;
+                    e_aen <= '0'; e_asel <= '0'; e_asc <= c_sa1; e_gb <= "00";
                     e_aa <= (others => '0');
                     if e_c1(10 downto 7) = "0000" and e_c1(6 downto 5) /= "11" then          -- 0 <= e_c1 < 96 as bit tests
                         v_row := to_unsigned(47, 8) - unsigned(e_c1(8 downto 1));
@@ -917,7 +944,9 @@ begin
                         -- the three gulls never share a row (rows 0 .. 10, 11 .. 21, 22 .. 31): each row
                         -- takes its own gull's flap frame
                         v_row := to_unsigned(31, 8) - unsigned(e_bd(8 downto 1));
-                        if v_row < 11 then v_gfl := c_gf(0); elsif v_row < 22 then v_gfl := c_gf(1); else v_gfl := c_gf(2); end if;
+                        if v_row < 11 then v_gfl := c_gf(0); e_gb <= "00";
+                        elsif v_row < 22 then v_gfl := c_gf(1); e_gb <= "01";
+                        else v_gfl := c_gf(2); e_gb <= "10"; end if;
                         if v_gfl = '1' then e_aa <= to_unsigned(448, 10) + (v_row(7 downto 0) & "00");
                         else e_aa <= to_unsigned(320, 10) + (v_row(7 downto 0) & "00"); end if;
                         e_asel <= '1'; e_asc <= c_sab;
@@ -938,7 +967,7 @@ begin
                     end if;
                     e_x0 <= w_x0 + resize(v_w, 14);
                 when 6 =>
-                    n_xa0 <= unsigned(e_x0) + e_asc;
+                    n_xa0 <= unsigned(resize(e_x0, 16)) + e_asc;
                     n_xw0 <= unsigned(w_x0 + 1920);          -- water and sand: half units from the canvas's left
                 when 7 =>
                     n_x0 <= e_x0(12 downto 0);
@@ -949,7 +978,7 @@ begin
                     l_d <= e_d; l_ab <= e_ab; l_mir <= e_mir; l_row <= v_y;
                     l_slr <= c_sl(7 downto 0) - v_y(7 downto 0);
                     l_son <= e_son; l_bon <= e_bon; l_tsun <= e_tsun;
-                    l_asel <= e_asel;
+                    l_asel <= e_asel; l_gb <= e_gb;
                     -- slot A's ramp positions: zone 1, zone 2 (gulls: wings, body; clouds: top, shelf)
                     if e_asel = '1' then l_ta <= to_unsigned(70, 7); l_tb <= to_unsigned(93, 7);
                     else l_ta <= to_unsigned(104, 7); l_tb <= to_unsigned(127, 7); end if;
@@ -1037,7 +1066,7 @@ begin
             if s_st(10) = '1' then                                                       -- stage 11
                 b_xa <= n_xa0; b_x <= n_x0;
             else
-                b_xa <= b_xa + s_xs;
+                b_xa <= b_xa + resize(s_xs, 16);
                 b_x <= b_x + signed(resize(s_xs, 13));
             end if;
             if s_st(12) = '1' then b_px <= (others => '0'); else b_px <= b_px + 1; end if;   -- stage 13
@@ -1062,23 +1091,17 @@ begin
         variable v_l9  : signed(8 downto 0);
         variable v_top : signed(9 downto 0);
         variable v_o, v_n : unsigned(3 downto 0);
+        variable v_fr : unsigned(6 downto 0);
+        variable v_cov : std_logic;
     begin
         if rising_edge(clk) then
             if s_zone = '1' and ws_rows = '1' then wt_a <= ws_r0(4 downto 0) & ws_col; else wt_a <= wt_pa; end if;
             wt_q  <= wt_ram(to_integer(wt_a));
             wt_qf <= wt_q;
             if wt_we = '1' then wt_ram(to_integer(wt_wa)) <= wt_wd; end if;
-            -- the drying fraction: round(8 x ws_div / 12), quasi-static through the field
-            case to_integer(ws_div) is
-                when 0      => ws_fr <= "000";
-                when 1 | 2  => ws_fr <= "001";
-                when 3      => ws_fr <= "010";
-                when 4 | 5  => ws_fr <= "011";
-                when 6      => ws_fr <= "100";
-                when 7 | 8  => ws_fr <= "101";
-                when 9      => ws_fr <= "110";
-                when others => ws_fr <= "111";
-            end case;
+            -- the drying fraction: round(18 x ws_div / 24), quasi-static through the field
+            v_fr := resize(ws_div, 7) + shift_left(resize(ws_div, 7), 1);       -- 3 div (0 .. 69)
+            ws_fr <= resize(shift_right(v_fr + 2, 2), 5);                       -- / 4, rounded (0 .. 17)
 
             -- the row pipeline: the cell issued three clocks ago is in wt_qf now
             ws_r1 <= ws_r0(4 downto 0); ws_r2 <= ws_r1; ws_r3 <= ws_r2;
@@ -1089,18 +1112,25 @@ begin
             if ws_v3 = '1' then
                 v_o := unsigned(wt_qf);
                 v_top := signed(resize(ws_r3 & "00", 10));
-                if ws_rc2 >= v_top + 4 then v_n := to_unsigned(15, 4);
-                elsif ws_rc2 > v_top then v_n := to_unsigned(14, 4);
+                -- covered: the whole cell, or its upper triangle (the lower one keeps whether it was wet: 14 / 13).
+                -- Pushing in (the envelope rising), the front two columns show foam (13)
+                if ws_rc2 > v_top then v_cov := '1'; else v_cov := '0'; end if;
+                if v_cov = '1' and ws_front = '1' then v_n := to_unsigned(13, 4);
+                elsif ws_rc2 >= v_top + 4 then v_n := to_unsigned(15, 4);
+                elsif v_cov = '1' then
+                    if v_o >= 14 or (v_o >= 7 and v_o <= 12) then v_n := to_unsigned(14, 4); else v_n := to_unsigned(13, 4); end if;
+                -- uncovered: darkest first (whole, or only the upper triangle if that is all it touched), then a level
+                -- every 24 fields
                 elsif v_o >= 14 then v_n := to_unsigned(12, 4);
-                elsif v_o = 13 then                                       -- the hole, let go: 6 at a step
-                    if ws_tick = '1' then v_n := to_unsigned(6, 4); else v_n := v_o; end if;
-                elsif ws_tick = '1' and v_o /= 0 then v_n := v_o - 1;
+                elsif v_o = 13 then v_n := to_unsigned(6, 4);
+                elsif ws_tick = '1' and v_o /= 0 then
+                    if v_o = 7 then v_n := (others => '0'); else v_n := v_o - 1; end if;
                 else v_n := v_o; end if;
-                -- the crab going down or coming up: its hole's row, its column and the two beside it, held
-                -- part dark (never lighter than the wash left them)
-                if ws_hon = '1' and ws_r3 = o_ch(10 downto 6) and v_n <= 6
+                -- the crab starting down or up: its hole's row, its column and the two beside it, whole level 3
+                -- (part dark), once, where they are drier than that
+                if ws_hon = '1' and ws_r3 = o_ch(10 downto 6) and v_n <= 8
                    and (ws_c3 = o_ch(5 downto 0) or ws_c3 = o_ch(5 downto 0) - 1 or ws_c3 = o_ch(5 downto 0) + 1) then
-                    v_n := to_unsigned(13, 4);
+                    v_n := to_unsigned(9, 4);
                 end if;
                 wt_we <= '1'; wt_wa <= ws_r3 & ws_c3; wt_wd <= std_logic_vector(v_n);
             end if;
@@ -1110,10 +1140,12 @@ begin
                 ws_a1 <= c_t(7 downto 0) + (c_t(6 downto 0) & '0');               -- lobes drift: 3 t and -2 t
                 ws_a2 <= to_unsigned(0, 8) - (c_t(6 downto 0) & '0');
                 ws_dp <= o_e(7 downto 3);
-                if o_cs(6 downto 0) /= 0 and o_cs(6 downto 0) /= 96 then ws_hon <= '1'; else ws_hon <= '0'; end if;
-                v_l9 := signed(resize(o_ks, 9)) - signed(resize(o_e(7 downto 3), 9));
+                if o_cs(6 downto 0) = 3 or o_cs(6 downto 0) = 93 then ws_hon <= '1'; else ws_hon <= '0'; end if;   -- its first step down / up
+                if o_e > ws_pe then ws_adv <= '1'; else ws_adv <= '0'; end if;                  -- the wash pushing in
+                ws_pe <= o_e;
+                v_l9 := signed(resize(o_ks, 9)) - signed(resize(o_e(7 downto 1), 9));   -- (v0.6: e / 2 knots, was e / 8)
                 ws_fc <= shift_right(v_l9, 1);                                     -- the run-up's front column
-                if ws_div = 11 then ws_div <= (others => '0'); ws_tick <= '1'; else ws_div <= ws_div + 1; ws_tick <= '0'; end if;
+                if ws_div = 23 then ws_div <= (others => '0'); ws_tick <= '1'; else ws_div <= ws_div + 1; ws_tick <= '0'; end if;
             elsif ws_run = '1' then
                 if ws_rows = '0' then
                     case ws_p is
@@ -1124,6 +1156,7 @@ begin
                             ws_sdist <= signed(resize(o_ks(7 downto 1), 9)) - signed(resize(ws_col, 9));   -- columns to the shoreline
                             ws_p <= "001";
                         when "001" =>
+                            if ws_adv = '1' and ws_uw = '0' and (ws_dist = 0 or ws_dist = -1) then ws_front <= '1'; else ws_front <= '0'; end if;
                             v_l9 := signed(resize(ws_l, 9)) - 128;
                             ws_reach <= signed(resize(ws_dp, 10)) + resize(shift_right(v_l9, 5), 10);
                             if ws_sdist(8) = '0' and ws_sdist(7 downto 5) /= "000" then ws_cap <= to_signed(511, 10);
@@ -1560,8 +1593,8 @@ begin
                         v_g5 := c_t(4 downto 0) - c_t(6 downto 2) + 11;
                         c_gf(2) <= v_g5(4);
                     when 44 =>                              -- clouds and gulls drift on their own
-                        c_sa1 <= c_t(13 downto 0);
-                        c_sab <= c_t(11 downto 0) & "00";
+                        c_sa1 <= resize(c_t(13 downto 0), 16);
+                        c_sab <= c_t(13 downto 0) & "00";
                     when 45 =>                              -- time of day (with hysteresis): day, low sun, night
                         if s_night = '1' then c_tod <= "10";
                         elsif c_hi = '1' then c_tod <= "00";
@@ -1672,8 +1705,10 @@ begin
                 end case;
                 v_fon := l_fill(7);
             elsif s14_in = '1' and k14_wash = '1' then   -- the wash: the water's top colour (3/4 of K3 -> K4;
-                v_obj := "0111"; v_sub := '0' & s14_sub; -- halfway went grey at sunset)
-                v_ent := to_unsigned(7, 5); v_t6 := to_unsigned(48, 6); v_fon := l_fill(4);
+                v_obj := "0111"; v_sub := '0' & s14_sub; -- halfway went grey at sunset); its pushing front: foam
+                if k14_wfm = '1' then v_ent := to_unsigned(29, 5); v_t6 := to_unsigned(40, 6);
+                else v_ent := to_unsigned(7, 5); v_t6 := to_unsigned(48, 6); end if;
+                v_fon := l_fill(4);
             elsif s14_in = '1' then
                 v_obj := "1000"; v_sub := '0' & s14_sub;
                 v_ent := "0101" & s14_t(6); v_t6 := s14_t(5 downto 0); v_fon := l_fill(5);

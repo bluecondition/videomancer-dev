@@ -8,7 +8,8 @@ turn white; under everything the sand, a mesh of quads. When a wave lands, a was
 it covers turn into triangles in the water's colour, and as it drains they revert a triangle at a time, leaving
 the sand dark and wet. A small faceted crab walks the sand and runs from the wash.
 
-**Status: v0.5.6 (2026-11-22): v0.5.5 re-placed (HD HDMI router1 s25, HD Analog router1 s10) after Ron saw
+**Status: v0.6.0 (2026-11-22): a longer beach (half the screen at Tide 96 %), a wash 4x as long that wets only
+what it touches and pushes in with a foam front, 1 to 3 gulls per strip; see "v0.6.0". v0.5.6: v0.5.5 re-placed (HD HDMI router1 s25, HD Analog router1 s10) after Ron saw
 per-line U/V-swapped lines on v0.5.5; see "v0.5.6". v0.5.5: the sand's shimmer runs along its grid rows. v0.5.4: the sand's grid lines shimmer again; sand changes colour only where the wash
 touches it; the gulls flap out of step; the crab follows the sand's slope (a bitmap read at each pixel's depth
 under the sand line) and its hole darkens three blocks part way (see "v0.5.4" below). v0.5.3: every sand square keeps its diagonal, in a random
@@ -418,3 +419,31 @@ kept. SD configs unchanged. Installed with `skew_tools/install.sh`; the replaced
 
 **Rebuilding this RTL: the builder routes seed 1, which brings the bad placement back.** After a rebuild, re-run
 the screen (or route hd_hdmi router1 s25 / hd_analog router1 s10 if the netlist is unchanged) and install.
+
+## v0.6.0: a longer beach, a longer wash, wet only where touched, gulls 1 to 3 (2026-11-22)
+
+Ron's notes on v0.5.6:
+
+| Note | Change |
+|---|---|
+| "make the seagulls randomly 1, 2 or 3 seagulls and not always in the same pattern" | Each gull strip shows a subset of its three gulls (`C_GSUB`, 64 entries, by the strip's absolute lattice cell: the slot-A lattice x is 16 bits now, so 64 cells pass before the pattern repeats; 16 of them are gull strips: 5 with one gull, 8 with two, 3 with three, no two neighbours alike). The row band of each line (`l_gb`) picks the gull's bit. |
+| "there is the darkest brown sand preceding [the wash] - we shouldn't see darker brown until the water has touched a sand triangle, and when it goes away it should be darkest brown, which will then fade" | The lower triangle of a cell whose upper triangle the wash covers was drawn at code 14 = 112 steps dark. New codes (see the VHDL's [C] wet sand): 13 = upper covered, lower dry (drawn dry); 14 = upper covered, lower already wet; uncovered cells go to their darkest level (108 steps) and fade a level every 24 fields with the smooth fraction; a cell the wash touched only in its upper triangle dries only there (codes 6 .. 1). |
+| "it should have some of the wet foam triangles at the front of it as it's pushing over into the sand" | While the swash envelope rises, the front two columns of the wash write 13, and 13's covered triangle draws in the foam colour (entry 29, t 40); the wash's lower edge (13 cells) also shows foam. As the front moves on they turn into wash (15). |
+| "widen [the wash] to 50 %" (asked: reshape the beach, Ron's choice) | `BED_PTS` reshaped: a long flat beach (row 468 at the left to 532 at x 900, then down to the deep bed), so at Tide 96 % the shoreline sits at knot 58 (48 %), at 50 % Tide at 62 %, at Tide 0 at 73 %. The run-up reaches e / 2 knots (was e / 8: the engine's swash sheet, the crab's flee test, the sweep's front column), so at Ron's settings it crosses the whole beach. The swash rises 4 a field (was 6) and drains 1 (was 2), so the front pushes across in about half a second and drains over about 2 s. The beach slope where the crab walks is now 4.6 deg. |
+
+- The crab's flee test shifts `ks - e/2` right: clamped at 0 first (a negative value made the front column huge).
+- The crab's hole: its three cells are set once to whole level 3 when it starts down (sink 3) or up (sink 93), then
+  fade like wet sand.
+- Verified: spec vs emulator 0 mismatches / 750 fields (worst engine field 175k clocks: fewer water knots). RTL
+  wet-sweep check against the updated model: 0 / 16,384 with the wash draining, 0 / 16,384 with it pushing in
+  (foam cells follow the front: column 28 -> 22 over six fields). 720p render: `.neonbeach_work/prev/i_day.png`
+  (wash preset rising; `i_day_wash.png` the foam along its lower edge).
+
+Built 2026-11-22 with **router1**, all six on seed 1 (HD Analog 85.64, SD Analog 83.54, HD HDMI 90.65, SD HDMI
+77.11, HD Dual 80.08, SD Dual 86.60 MHz), 7,406 / 7,680 LC (96.4 %), 30 / 32 block RAMs. HDMI pin-skew screen
+(`skew_tools/screen.sh neonbeach`, r1 + r2 s1-40): the builder's HD HDMI r1 s1 sat at -1.53 / <= -1.76 (negative,
+the Abacus failure); 7 of 46 clean routes in the window. **Installed HD HDMI router1 s30 (+1.63 / <= -1.26,
+86.02 MHz)**; spare router1 s31 (+1.27 / <= -0.78, 88.11 MHz) packed as
+`.heirloom_work/rb_neonbeach/skew/neonbeach_v060_spare_hd_hdmi_router1_s31.vmprog`. HD Analog r1 s1 (-1.05 /
+<= -1.35) and HD Dual r1 s1 (-1.80 / <= -0.74) kept. (v0.5.5's screen moved to `rb_neonbeach/skew_v055/`.) A
+default rebuild routes seed 1 again: re-screen after any rebuild.

@@ -405,7 +405,9 @@ def line_rom():
 # ---------------------------------------------------------------------------------------------------------
 # Sea bed and beach: row (from the top of the 1080-row canvas) at x = 16 k virtual px
 # ---------------------------------------------------------------------------------------------------------
-BED_PTS = [(0, 512), (300, 516), (520, 548), (860, 626), (1180, 730), (1440, 800), (1640, 828), (2048, 832)]
+# v0.6: a longer, flatter beach (Ron: the wash should cover half the screen): at Tide 96 % (sea level 538) the
+# shoreline sits at knot 58 (48 % across), at Tide 50 % at 62 %, at Tide 0 at 73 %.  (v0.5: knot 27 at Tide 96 %.)
+BED_PTS = [(0, 468), (300, 480), (600, 500), (900, 532), (1050, 560), (1250, 640), (1450, 740), (1650, 810), (2048, 832)]
 
 
 def bed_row(x):
