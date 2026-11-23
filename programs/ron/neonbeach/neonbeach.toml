@@ -1,11 +1,11 @@
-# NEON BEACH (v0.5.5, 2026-11-22: the sand's shimmer runs along its grid rows; v0.5.4: shimmer back, gulls out of step, crab on the slope).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
+# NEON BEACH (v0.5.6, 2026-11-22: v0.5.5's RTL re-placed: HD HDMI router1 s25, HD Analog router1 s10 (HDMI pin skew); v0.5.5: shimmer along the grid rows).  Pixel Beach's side-on shorebreak drawn by Neonscape's wire engine.
 # See neonbeach.vhd, neonbeach.py and PLAN.md.
 
 [program]
 processing_delay_clks = 33
 program_id = "com.czartroniks.neonbeach"
 program_name = "Neon Beach"
-program_version = "0.5.5"
+program_version = "0.5.6"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

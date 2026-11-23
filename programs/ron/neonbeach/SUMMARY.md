@@ -8,7 +8,8 @@ turn white; under everything the sand, a mesh of quads. When a wave lands, a was
 it covers turn into triangles in the water's colour, and as it drains they revert a triangle at a time, leaving
 the sand dark and wet. A small faceted crab walks the sand and runs from the wash.
 
-**Status: v0.5.5 (2026-11-22): the sand's shimmer runs along its grid rows (see "v0.5.5"). v0.5.4: the sand's grid lines shimmer again; sand changes colour only where the wash
+**Status: v0.5.6 (2026-11-22): v0.5.5 re-placed (HD HDMI router1 s25, HD Analog router1 s10) after Ron saw
+per-line U/V-swapped lines on v0.5.5; see "v0.5.6". v0.5.5: the sand's shimmer runs along its grid rows. v0.5.4: the sand's grid lines shimmer again; sand changes colour only where the wash
 touches it; the gulls flap out of step; the crab follows the sand's slope (a bitmap read at each pixel's depth
 under the sand line) and its hole darkens three blocks part way (see "v0.5.4" below). v0.5.3: every sand square keeps its diagonal, in a random
 direction per square. v0.5.2: the wet-sand sweep's write-back was one clock early, so the wetness map slid one
@@ -390,3 +391,30 @@ Built 2026-11-22 with **router1**, all six on seed 1, 30 / 32 block RAMs:
 | SD Dual | 1 | 78.93 MHz | 7297 |
 
 7,297 / 7,680 LC (95.0 %).
+
+## v0.5.6: v0.5.5 re-placed for the HDMI encoder (2026-11-22)
+
+Ron on v0.5.5 (HD HDMI, with a capture): thin cyan / orange lines over the whole picture, colours swapped (sand
+cyan, water maroon) and the water's verticals jagged a pixel per line. "The last version looked fine." That is a
+per-line Cb/Cr swap at the ADV7513: the core forwards its clock through a fabric LUT and drives HSYNC / data
+from fabric FFs, so the pin skew moves with placement and nextpnr does not check it (memory
+`hdmi_tx_placement_skew`). The GHDL render of v0.5.5 was clean, and the shipped HD HDMI route reproduced
+byte-exact from the netlist.
+
+`.heirloom_work/skew_tools/screen.sh neonbeach` (QUICK, then router1 + router2 s1-40, HD Analog s1-16, HD Dual
+s1-12), HSYNC minus forwarded clock / closest data bit:
+
+| Build | HD HDMI | On hardware |
+|---|---|---|
+| v0.5.4 router1 s1 | -0.20 / <= +0.57, 95.01 MHz | fine (Ron) |
+| v0.5.5 router1 s1 | -0.60 / <= -2.06, 77.49 MHz | lines |
+| **v0.5.6 router1 s25** | **+1.59 / <= -0.88, 85.36 MHz** | pending |
+
+Only 2 of 34 timing-clean HD HDMI routes were in the window (+1.0 .. +2.3, data <= -0.6); the other is router1 s6
+(+1.08 / <= -1.11, 74.72 MHz, thin). HD Analog router1 s1 had a data bit at -0.08 on its HDMI encoder: now
+**router1 s10** (HDMI +1.07 / <= -0.71, analog -1.79 / <= -1.77, 88.04 MHz). HD Dual router1 s1 (-1.04 / <= -0.74)
+kept. SD configs unchanged. Installed with `skew_tools/install.sh`; the replaced bins are in
+`.heirloom_work/rb_neonbeach/skew/`.
+
+**Rebuilding this RTL: the builder routes seed 1, which brings the bad placement back.** After a rebuild, re-run
+the screen (or route hd_hdmi router1 s25 / hd_analog router1 s10 if the netlist is unchanged) and install.
