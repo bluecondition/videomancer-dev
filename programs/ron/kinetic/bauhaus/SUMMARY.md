@@ -1,7 +1,7 @@
 # Bauhaus (Kinetic)
 
-v0.1.1 (K6 camera pass) built 2026-11-15, all six configs, not flashed. Flash `out/rev_b/ron/kinetic/bauhaus.vmprog`.
-(v0.1.0 built 2026-11-14; its build notes are kept below.)
+**v0.2.0 (2026-11-23): K4 Rate -> Contrast** (see the last section). Flash `out/rev_b/ron/kinetic/bauhaus.vmprog`.
+v0.1.3 sources + vmprog kept in `.heirloom_work/rb_bauhaus/*.v0.1.3`. (Older build notes are kept below.)
 
 ## What it draws
 
@@ -43,9 +43,9 @@ a different colour.
 | K1 | Scale | cell pitch 38 .. 332 virtual lines, exponential, glided (default 135: 14 x 8 cells) |
 | K2 | Shape | figure inset: 0 % = full-bleed (default) .. 100 % = figures at 40 % of the cell with margins of the cell colour |
 | K3 | Mix | share of straight motifs, 0 (all curved) .. 16 sixteenths (all straight); default 5/16 |
-| K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
+| K4 | Contrast | v0.2.0 (was Rate, now fixed at 640 = about 19 s per wave cycle): the camera halftone's contrast about the middle level, x 0.25 (0 %) .. x 1 (50 %, default: the v0.1.0 linear mapping) .. x 5 (100 % = the v0.1.3 default look), one octave per knob quarter, glided |
 | K5 | Colour | the 16 shared palettes with hysteresis (ground, A, B, accent: all four are used as cell and figure colours). Was K6 until v0.1.1 |
-| K6 | Camera | camera / Osc strength, default 50 % (v0.1.1, see "K6 camera pass"). 0 % = the poster alone, 25 % = the v0.1.0 halftone, 50 % / 100 % = its contrast x 2 / x 4 |
+| K6 | Camera | camera / Osc strength, default 100 % (v0.2.0): the luma threshold that hands cells from the poster to the halftone, brightest first. 0 % = the poster alone, 100 % = every cell above black |
 | S7 | Wave | Smooth / Snap (the grid dwells, then re-rolls in bursts) |
 | S8 | Field | Linear (diagonal sweep) / Radial (octagonal ripple from the centre) |
 | S9 | Gutters | Off / On: ground-colour lines between the cells, 4 px + 1/8 of the cell wide |
@@ -274,3 +274,38 @@ HDMI router1 s90 (+1.74 / <= -0.42, 74.42 MHz; data 0.18 short, thin timing, cf.
 <= -0.98, 81.47 MHz). A full builder rebuild re-routes seed 1: re-install the seeds with
 `.heirloom_work/skew_tools/install.sh` afterwards. If HD HDMI shows thin flashing lines or noise, try the spare
 (sub-window HSYNC but clean data and timing), then report which one is clean.
+
+## v0.2.0: K4 Rate -> Contrast (2026-11-23)
+
+Ron (after flashing v0.1.3): replace K4 Rate with a Contrast control to dial in the camera better.
+
+- **K4 Contrast** takes over the contrast law that K6 carried since the camera pass: level = (held x g - off) / 256 with
+  off = (g - 20) x 90, pivoting on level 7 at held 90 (about 41 % luma). The old K6 glide (1/8 per field, +-4 deadband)
+  now reads K4. g = b + m u / 256 over four knob quarters (u = k mod 256), one octave each, linear inside:
+  0 % x 0.25 (g 5), 25 % x 0.5, **50 % x 1 (default, g 20 = the v0.1.0 linear luma -> level mapping)**, 75 % x 2,
+  100 % x 5 (g 99). Below 50 % off goes negative: everything drifts toward the middle-size figure (a flat halftone).
+  One adder (60u = 64u - 4u by an inverted operand + carry-in). c_off is now signed (14 bits).
+- **K6 Camera** stays the strength (default 100 %), now as the threshold that hands cells from the poster to the
+  halftone: held < c_t keeps the hash poster, every other cell takes a level >= 1 at K4's contrast.
+  c_t = 13 + (1023 - k) x 7/32 = 237 (0 %: the poster alone) .. 13 (100 %: every cell above black, v0.1.3's rule).
+  The halftone fades in from the brightest cells. +-4 deadband, latched unconditionally on the first field.
+- The floor (held >= 13 -> level >= 1) now applies at every contrast, and black (held < 13) always keeps the poster,
+  so a black input still shows the wave poster at any K4.
+- Checked in Python at RTL widths: g monotone 5 .. 99; **K4 50 % + K6 100 % = v0.1.0's levels exactly; K4 100 % +
+  K6 100 % = v0.1.3's default levels exactly** (turn K4 to the top for the old look).
+- **Rate is fixed at 640** (the old default, `C_KFIX_4`): about 19 s per wave cycle at 60 Hz, always forward. The
+  Flip Board (Rate 720) and Slot Machine (Rate 800) presets lose their faster waves and take the default contrast.
+- Pixel path: the level decision compares k_held with c_t instead of the constant 13; same stages, latency 42.
+- Not simulated (build + hardware check).
+
+**Build v0.2.0** (2026-11-23, `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic bauhaus`): **router1, all six
+seed 1**. Post-route Fmax: HD Analog 75.20 MHz, SD Analog 73.81, HD HDMI 77.57, SD HDMI 78.45, HD Dual 79.02, SD Dual
+82.27. 7,291 .. 7,302 / 7,680 LC (95.1 %, v0.1.3 7,258), 23 / 32 EBR. iceunpack OK on all six. Log
+`.heirloom_work/rb_bauhaus/build_v0.2.0.log`. Not flashed.
+**HD skew** (`QUICK=1 .heirloom_work/skew_tools/screen.sh bauhaus`, r1 + r2 s1-40): the builder's HD HDMI router1 s1 sat
+outside the window (hs -1.15 / data <= -1.20). Unlike v0.1.3, this netlist has window seeds: **shipped HD HDMI router1
+s21 (+1.64 / <= -0.64, 81.10 MHz)**; spare router1 s11 (+1.14 / <= -1.07, 78.49 MHz) at
+`.heirloom_work/rb_bauhaus/skew/bauhaus_v020_spare_hd_hdmi_router1_s11.vmprog`. Also in the window: router2 s21
+(+2.19 / -0.73), router1 s22 (+1.00 / -1.38). HD Analog r1 s1 (+1.05 / <= -0.67) and HD Dual r1 s1 (-2.17 / <= -1.15)
+kept. A full builder rebuild re-routes seed 1: re-install with `.heirloom_work/skew_tools/install.sh bauhaus router1 21`.
+v0.1.3's screen data is in `.heirloom_work/rb_bauhaus/skew_v013/`. If HD HDMI shows thin flashing lines, try the spare.

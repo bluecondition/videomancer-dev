@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Bauhaus v0.1.1 -- Kinetic.
+-- Bauhaus v0.2.0 -- Kinetic.
 --
 -- A grid of shape tiles (Bauhaus geometric posters, generative "shape tile" grids): every cell holds one
 -- primitive in two flat palette colours.
@@ -23,10 +23,11 @@
 --   K1  Scale    cell pitch 38 .. 332 virtual lines (exponential, glided)
 --   K2  Shape    figure inset: full-bleed .. 40 % of the cell with margins
 --   K3  Mix      curved motifs .. straight motifs
---   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
+--   K4  Contrast the camera halftone's contrast about the middle level: x 0.25 .. x 1 (50 %) .. x 5, glided
+--                (v0.2.0; was Rate, now fixed at the old default 640: about 19 s per wave cycle)
 --   K5  Colour   the 16 shared palettes (was K6; Spread is fixed at 354 = phase step per cell, square law)
---   K6  Camera   camera / Osc strength: 0 % = the poster alone, 0 .. 20 % a gain (20 % = v0.1.0), past it a
---                contrast about the middle level (50 % = x 2.5, 100 % = x 5: the 2026-11-15 +25 %), glided
+--   K6  Camera   camera / Osc strength (v0.2.0): the threshold that hands cells from the poster to the
+--                halftone, brightest first: 0 % = the poster alone, 100 % = every cell above black
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Gutters  Off / On (ground lines between the cells)
@@ -45,6 +46,7 @@
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 354 (C_KFIX_5).
 -- 2026-11-15: K6 camera top +25 % (Ron)
+-- v0.2.0 2026-11-23 (Ron): K4 Rate -> Contrast (the old K6 contrast law, now its own knob); K6 = threshold strength.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -58,6 +60,7 @@ use work.all;
 
 architecture bauhaus of program_top is
     constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(354, 10));   -- K6 camera pass: fixed knob
+    constant C_KFIX_4 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(640, 10));   -- v0.2.0: Rate fixed (K4 = Contrast)
     constant C_NP       : integer := 35;      -- pixel stages up to the colour register
     constant C_LAT      : integer := 42;      -- = processing_delay_clks = C_NP + 7
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
@@ -249,14 +252,20 @@ architecture bauhaus of program_top is
     signal m_done : std_logic := '0';
     signal m_sr  : std_logic_vector(3 to 7) := (others => '0');
     signal s_cs  : std_logic_vector(3 to 14) := (others => '0');
-    -- K6 Camera (2026-11-15): glided knob (Q3); level = (held x c_cg - c_off) / 256, gated-sum product
+    -- K4 Contrast (v0.2.0): glided knob (Q3); level = (held x c_cg - c_off) / 256, gated-sum product,
+    -- c_off = (c_cg - 20) x 90 (signed: below unity the pivot pulls the dark cells up)
     signal c6_g  : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal c6_d  : signed(13 downto 0) := (others => '0');
-    signal c6_t  : unsigned(12 downto 0) := (others => '0');
-    signal c_cg  : unsigned(6 downto 0) := to_unsigned(40, 7);
-    signal c6_e  : unsigned(6 downto 0) := to_unsigned(20, 7);
-    signal c_off : unsigned(12 downto 0) := to_unsigned(1800, 13);
-    signal c_chi : std_logic := '1';
+    signal c6_t  : unsigned(13 downto 0) := (others => '0');
+    signal c_cg  : unsigned(6 downto 0) := to_unsigned(20, 7);
+    signal c6_e  : signed(7 downto 0) := (others => '0');
+    signal c_off : signed(13 downto 0) := (others => '0');
+    -- K6 Camera (v0.2.0): strength = the cell threshold c_t (held below it keeps the poster), +-4 deadband
+    signal c6k   : unsigned(9 downto 0) := to_unsigned(1023, 10);
+    signal c6k_r : unsigned(9 downto 0) := to_unsigned(1023, 10);
+    signal c6k_d : signed(10 downto 0) := (others => '0');
+    signal c6k_v : std_logic := '0';
+    signal c_t   : unsigned(7 downto 0) := to_unsigned(13, 8);
     signal k_kl  : signed(15 downto 0) := (others => '0');
     signal k_lv  : unsigned(3 downto 0) := (others => '0');
     signal k_pa, k_pb, k_pc : unsigned(9 downto 0) := (others => '0');
@@ -418,6 +427,11 @@ begin
         variable v_k  : unsigned(10 downto 0);
         variable v_q  : signed(6 downto 0);
         variable v_i  : signed(6 downto 0);
+        variable v_cu, v_cp, v_cq : unsigned(13 downto 0);
+        variable v_cc : unsigned(14 downto 0);
+        variable v_cin : std_logic;
+        variable v_cg : unsigned(6 downto 0);
+        variable v_cn : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -448,8 +462,8 @@ begin
                 s_hcnt <= (others => '0');
             end if;
 
-            -- Rate: bipolar with a +-8 deadband
-            s_k4 <= unsigned(registers_in(3));
+            -- Rate: bipolar with a +-8 deadband (v0.2.0: fixed at the old default 640, K4 is Contrast)
+            s_k4 <= unsigned(C_KFIX_4);
             v_s := signed(resize(s_k4, 11)) - 512;
             s_vneg <= v_s(10);
             if v_s > -9 and v_s < 9 then
@@ -572,26 +586,55 @@ begin
                     when 25 => c_hi <= not c_m;
                     when 26 => z_k2 <= resize(unsigned(registers_in(2)) & "0000", 16) + resize(unsigned(registers_in(2)), 16);
                     when 27 => c_thr <= z_k2(14 downto 10);
-                    -- K6 Camera: glide (1/8 of the gap per field, +-4 deadband), then the law: gain c_cg = 5k / 64
-                    -- (0 .. 79; 20 = v0.1.0 at k = 256).  Up to 256 a plain gain (fades the halftone in from the
-                    -- poster); past 256 a contrast about level 7 (held 90): c_off = (c_cg - 20) x 90, level >= 1
-                    when 40 => c6_d <= signed(resize(unsigned(registers_in(5)) & "000", 14)) - signed(resize(c6_g, 14));
+                    -- K4 Contrast (v0.2.0; the old K6 glide and law): glide (1/8 of the gap per field, +-4
+                    -- deadband), then the slope c_cg about level 7 (held 90): c_off = (c_cg - 20) x 90.
+                    -- One octave per knob quarter, linear inside it: c_cg = b + m u / 256 (u = k mod 256)
+                    --   0 .. 25 %  5 .. 9   (x 0.25 .. x 0.5)      50 % = 20 = x 1 = v0.1.0 (held x 5 / 64)
+                    --  25 .. 50 %  10 .. 19 (x 0.5 .. x 1)         100 % = 99 = x 5 = the v0.1.3 default
+                    --  50 .. 75 %  20 .. 39 (x 1 .. x 2)           (held x c_cg <= 239 x 99 = 23661: 15 bits;
+                    --  75 .. 100 % 40 .. 99 (x 2 .. x 5)            c_off -1350 .. 7110: 14 bits signed)
+                    when 40 => c6_d <= signed(resize(unsigned(registers_in(3)) & "000", 14)) - signed(resize(c6_g, 14));
                     when 41 =>
                         if C_SIM_SNAP then null;
                         elsif c6_d > 32 or c6_d < -32 then c6_d <= shift_right(c6_d, 3);
                         else c6_d <= (others => '0'); end if;
                     when 42 => c6_g <= unsigned(signed(c6_g) + c6_d(12 downto 0));
-                    when 43 => c6_t <= resize(c6_g(12 downto 3) & "00", 13) + resize(c6_g(12 downto 3), 13);
-                    -- K6 top +25 % (2026-11-15): c_cg = 5k / 64 x 1.25 = 25k / 256 (0 .. 99; 5k + 5k / 4 <= 6393
-                    -- fits 13 bits); the contrast knee follows the gain (c_cg = 20, k ~ 205), so the law stays
-                    -- continuous.  c_off <= 79 x 90 = 7110 (13 bits), held x c_cg <= 239 x 99 = 23661 (15 bits)
-                    when 44 => c_cg <= resize(shift_right(c6_t + shift_right(c6_t, 2), 6), 7);
-                    when 45 =>
-                        if c_cg < 20 then c6_e <= (others => '0'); c_chi <= '0';
-                        else c6_e <= c_cg - 20; c_chi <= '1'; end if;
-                    when 46 => c_off <= shift_left(resize(c6_e, 13), 6) + shift_left(resize(c6_e, 13), 4);
-                    when 47 => c_off <= c_off + shift_left(resize(c6_e, 13), 3);
-                    when 48 => c_off <= c_off + shift_left(resize(c6_e, 13), 1);
+                    when 43 =>                                  -- m u: 5u, 10u, 20u, 60u = 64u - 4u (one adder)
+                        v_cu := resize(c6_g(10 downto 3), 14);
+                        v_cin := c6_g(12) and c6_g(11);
+                        case c6_g(12 downto 11) is
+                            when "00"   => v_cp := shift_left(v_cu, 2); v_cq := v_cu;
+                            when "01"   => v_cp := shift_left(v_cu, 3); v_cq := shift_left(v_cu, 1);
+                            when "10"   => v_cp := shift_left(v_cu, 4); v_cq := shift_left(v_cu, 2);
+                            when others => v_cp := shift_left(v_cu, 6); v_cq := not shift_left(v_cu, 2);
+                        end case;
+                        v_cc := (v_cp & '1') + (v_cq & v_cin);
+                        c6_t <= v_cc(14 downto 1);
+                    when 44 =>
+                        case c6_g(12 downto 11) is
+                            when "00"   => v_cg := to_unsigned(5, 7);
+                            when "01"   => v_cg := to_unsigned(10, 7);
+                            when "10"   => v_cg := to_unsigned(20, 7);
+                            when others => v_cg := to_unsigned(40, 7);
+                        end case;
+                        c_cg <= v_cg + resize(c6_t(13 downto 8), 7);
+                    when 45 => c6_e <= signed(resize(c_cg, 8)) - to_signed(20, 8);
+                    when 46 => c_off <= shift_left(resize(c6_e, 14), 6) + shift_left(resize(c6_e, 14), 4);
+                    when 47 => c_off <= c_off + shift_left(resize(c6_e, 14), 3);
+                    when 48 => c_off <= c_off + shift_left(resize(c6_e, 14), 1);
+                    -- K6 Camera (v0.2.0): strength as the cell threshold.  Cells whose held luma is below c_t keep
+                    -- the poster; the rest are halftoned at K4's contrast (level >= 1).  c_t = 13 + (1023 - k) x 7/32
+                    -- (237 .. 13): 0 % = the poster alone, 100 % = every cell above black (= v0.1.3's rule).
+                    -- +-4 deadband, latched unconditionally on the first field.
+                    when 49 => c6k_r <= unsigned(registers_in(5));
+                    when 50 => c6k_d <= signed(resize(c6k_r, 11)) - signed(resize(c6k, 11));
+                    when 51 =>
+                        if c6k_v = '0' or c6k_d > 4 or c6k_d < -4 then c6k <= c6k_r; end if;
+                        c6k_v <= '1';
+                    when 52 =>
+                        v_cn := not c6k;
+                        c_t <= v_cn(9 downto 2) - resize(v_cn(9 downto 5), 8);
+                    when 53 => c_t <= c_t + 13;
 
                     -- pitch: e = 0.25 + k1 * 3.13 octaves (Q8), P = 32 * 2^e, 2^-e
                     when 60 => z_e <= to_unsigned(64, 11) + resize(f_acc(23 downto 13), 11);
@@ -840,11 +883,12 @@ begin
             k_qa <= resize(k_pa, 12) + shift_left(resize(k_pb, 12), 2);
             k_qb <= resize(k_pc, 11) + shift_left(resize(k_pd, 11), 2);
             k_kg <= resize(k_qa, 15) + shift_left(resize(k_qb, 15), 4);
-            k_kl <= signed(resize(k_kg, 16)) - signed(resize(c_off, 16));
-            if k_kl < 0 then k_lv <= (others => '0');
+            k_kl <= signed(resize(k_kg, 16)) - resize(c_off, 16);
+            -- v0.2.0: below K6's threshold the poster (level 0); above it level >= 1 at every contrast
+            if k_held < c_t then k_lv <= (others => '0');
+            elsif k_kl < 256 then k_lv <= to_unsigned(1, 4);
             elsif k_kl(15 downto 12) /= "0000" then k_lv <= to_unsigned(15, 4);
             else k_lv <= unsigned(k_kl(11 downto 8)); end if;
-            if c_chi = '1' and k_held >= 13 and (k_kl < 256) then k_lv <= to_unsigned(1, 4); end if;
             hl_wd <= std_logic_vector(k_held) & std_logic_vector(v_fn);
             hl_wa <= k_i;
             hl_we <= m_sr(7);
@@ -1027,7 +1071,7 @@ begin
             if v_fr(8 downto 1) > 128 then q15_s <= to_unsigned(128, 8); else q15_s <= v_fr(8 downto 1); end if;
             -- the cell's source level (0 .. 15), latched as the cell start passes
             if s_cs(14) = '1' then
-                -- K6 Camera: the level from k_lv (K6 = 25 %: held x 5 / 64 as in v0.1.0)
+                -- the level from k_lv (K4 = 50 %, K6 = 100 %: held x 5 / 64 as in v0.1.0)
                 q15_l <= k_lv;
             end if;
             -- 16 .. 18: hash rounds 2 .. 4; the level by palette polarity (0 = no source) and its size cap
