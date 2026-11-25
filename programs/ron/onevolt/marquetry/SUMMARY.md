@@ -1,6 +1,6 @@
 # Marquetry: the Syntonie shape rack
 
-**v0.1.0 built 2026-11-25, not flashed.** Onevolt 8. Three ready-made Rampes figures (a diamond, a rectangle and a
+**v0.1.1 (2026-11-25): v0.1.0 with the HD HDMI bitstream re-placed (router1 seed 6); awaiting hardware.** Onevolt 8. Three ready-made Rampes figures (a diamond, a rectangle and a
 cross), curved together by Courbes, shifted with wrap and cut into each other by Seuils' logic, posterised with
 swapped bits by Isohelie and coloured by Matrice: a dense, symmetric inlay of flat colour. Presets are
 hand-written placeholders.
@@ -135,6 +135,14 @@ diamond's steps shrink toward the centre while the rectangle's grow), the zone s
   store 4. Every written RAM carries `no_rw_check`.
 
 ## Status
+
+- **v0.1.1 (2026-11-25), same RTL, HD HDMI re-placed.** Ron flashed v0.1.0 on HD HDMI and saw thin yellow / cyan
+  lines across the whole screen: the encoder pin-skew fault (per-line U / V swap), not the program. The v0.1.0
+  HD HDMI placement (router2 seed 1) had HSYNC at -0.63 ns against the forwarded clock (data <= -0.66). v0.1.1
+  ships **HD HDMI router1 seed 6: HSYNC +1.45 ns, data <= -1.21 ns, 96.72 MHz** (the window is +1.0 .. +2.3 with
+  data <= -0.6), installed with `.heirloom_work/skew_tools/install.sh marquetry router1 6 hd_hdmi`. The other
+  five bitstreams are the v0.1.0 ones. A plain `./build_set.sh onevolt marquetry` rebuild gives the router2
+  seed-1 placement again: re-run the install afterwards. Screen data: `.heirloom_work/rb_marquetry/skew/`.
 
 - **v0.1.0 built 2026-11-25 with router2 (the build default), all six configs on seed 1, not flashed.**
   Rebuild: `./build_set.sh onevolt marquetry` -> `out/rev_b/ron/onevolt/marquetry.vmprog` (425,822 bytes).
