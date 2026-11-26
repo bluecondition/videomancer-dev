@@ -1,0 +1,164 @@
+# Gyre - Onevolt, 2026-11-25 (v0.1.0).  A lattice wound into a vortex: Visual Cortex ramps through a Navigator whose
+# Rotation CV is driven at video rate by a shape gradient (and the camera), mirrored and combined in Arch, folded by
+# Staircase (or outlined by Doorway), coloured by Color Chords.  See gyre.vhd, gyre.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 52
+program_id = "com.czartroniks.gyre"
+program_name = "Gyre"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Warp", "Pattern", "Color"]
+program_type = "processing"
+description = "Navigator lattice wound into a vortex by a video-rate rotation CV; Staircase bands, Color Chords colour."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Rotation"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 180
+initial_value = 20
+display_float_digits = 0
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 650
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Height"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 520
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Fold"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 480
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Twist"
+value_labels = ["Ellipse", "Ramp"]
+initial_value_label = "Ellipse"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mirror"
+value_labels = ["In", "Out"]
+initial_value_label = "In"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Logic"
+value_labels = ["Average", "Absolute"]
+initial_value_label = "Average"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Folder"
+value_labels = ["Staircase", "Doorway"]
+initial_value_label = "Staircase"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Twist"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Gyre"
+
+[[preset]]
+name = "Rigid Weave"
+rotary_potentiometer_4 = 600
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Maelstrom"
+rotary_potentiometer_2 = 720
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 560
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Page Turn"
+rotary_potentiometer_5 = 256
+toggle_switch_7 = 1
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Spiral Arms"
+rotary_potentiometer_5 = 384
+toggle_switch_8 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Saltire"
+rotary_potentiometer_4 = 360
+rotary_potentiometer_5 = 768
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Neon Lattice"
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 512
+toggle_switch_10 = 1
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Fan Lines"
+rotary_potentiometer_5 = 384
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
