@@ -102,7 +102,7 @@ lattice into the same path at twice the gain.
 
 ## Status
 
-- **Pin-skew placement (orchestrator, after the build).** HD HDMI pin-skew screen: NO placement in the +1.0..+2.3 ns window was found (NONE router2 s1 hs +0.75 data -1.25); the builder's placement is shipped. See .onevolt_work/skew/ondine_rank.txt.
+- **Pin-skew placement (orchestrator, after the build).** HD HDMI re-placed for the encoder pin skew: router2 seed 104 (HSYNC +2.26 ns, data <= -1.18 ns, 79.35 MHz). The builder's router2 seed 1 sat at +0.75 ns, and seeds 1-40 of both routers gave no in-window placement (90.6 % LC); seeds 41-120 gave eight, all router2. Spares: router2 seed 83 (+1.49 / <= -1.65, 79.16 MHz), seed 59 (+1.77 / <= -0.76, 83.33 MHz). A plain rebuild gives the builder's placement again: re-run .heirloom_work/skew_tools/install.sh ondine router2 104 hd_hdmi. Screen data: .heirloom_work/rb_ondine/skew/.
 
 - **v0.1.0 built 2026-11-25, router2 (the build default), all six configs on seed 1, not flashed.**
   Rebuild: `./build_set.sh onevolt ondine`, giving `out/rev_b/ron/onevolt/ondine.vmprog` (465,424 bytes).
