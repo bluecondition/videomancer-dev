@@ -1,0 +1,162 @@
+# Overshoot - Onevolt, 2026-11-25 (v0.1.0).  One rack: Navigator -> DSG3 -> Keychain (a field of flat rhombi, S9 bricks; S10:
+# a DWO3 curtain of bars) -> Contour's three high-passes (S7: Detail Blur) -> Curtain rectifier + mix -> SMX3.
+# Horizontal-only filters: every edge the beam crosses lights a head and drags a comet tail to the right.
+# See overshoot.vhd, overshoot.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 28
+program_id = "com.czartroniks.overshoot"
+program_name = "Overshoot"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Edges", "Pattern", "Color"]
+program_type = "processing"
+description = "Horizontal high-pass rack: turning rhombi light a head at every edge and drag spectral comet tails right."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Size"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 820
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rotation"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 360
+initial_value = 48
+display_float_digits = 0
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 720
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Mix"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 7
+initial_value = 0
+display_float_digits = 1
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Filter"
+value_labels = ["Contour", "Blur"]
+initial_value_label = "Contour"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Shape"
+value_labels = ["Both", "Signed"]
+initial_value_label = "Both"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "DSG3"
+value_labels = ["Average", "Maximum"]
+initial_value_label = "Average"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Source"
+value_labels = ["Figures", "Bars"]
+initial_value_label = "Figures"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Input"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Comets"
+
+[[preset]]
+name = "Relief"
+rotary_potentiometer_4 = 420
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Bricks"
+rotary_potentiometer_2 = 200
+toggle_switch_9 = 1
+linear_potentiometer_12 = 420
+
+[[preset]]
+name = "Ice Curtain"
+rotary_potentiometer_5 = 292
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Brick Smear"
+rotary_potentiometer_5 = 585
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Hairlines"
+rotary_potentiometer_1 = 500
+rotary_potentiometer_3 = 1023
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Spectral Smear"
+rotary_potentiometer_3 = 900
+rotary_potentiometer_5 = 877
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Lit Tiles"
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 146
+toggle_switch_8 = 1
+toggle_switch_10 = 1
