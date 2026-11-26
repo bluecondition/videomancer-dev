@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+# Copyright (C) 2026 czartroniks
+# SPDX-License-Identifier: GPL-3.0-only
+"""
+CASEMENT v0.1.0 - build hook.  Writes casement_pkg.vhd next to this file (pure python: the builder runs it with the
+system python3).  The integer model (.onevolt_work/rb_casement/imodel.py) imports the same tables.
+
+Package contents:
+  C_CM_EXP   256 x 16   round(32768 * 2^(i / 256)): the zone sequencer's exp2 (Tiles, Ratio)
+  C_CM_COL   128 x 16   the Matte sets: index = set * 16 + colour * 4 + channel; colour 0 = A (layer 1), 1 = B
+                        (layer 2), 2 = C (layer 3, the camera's), 3 = G (the ground at the top-left corner, the
+                        Angles colour field's own value added); channel 0 = Y (pre-scaled 16/13 for the shell's 13/16
+                        output, capped at 860), 1 = U (= Cr), 2 = V (= Cb), 3 unused
+  C_CM_SQ    256 x 12   the DSG3 parabola ((i + 1/2) / 256)^2 (Q12), one ROM per layer and axis
+  C_CM_GXU   the Angles colour field's U (Cr) slope per virtual px (Q10, hardware units)
+Colours are in the hardware convention (U register = Cr, V register = Cb).
+"""
+import math
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Matte sets: A (top), B (frame), C (layer 3, the camera's window), G (ground base); RGB 0..255
+SETS = [
+    ('Mono',    (250, 248, 240), (160, 160, 168), (64, 66, 78),   (6, 6, 10)),
+    ('Ember',   (255, 220, 110), (245, 100, 20),  (120, 16, 36),  (24, 6, 8)),
+    ('Bauhaus', (255, 226, 30),  (225, 40, 30),   (30, 50, 150),  (6, 8, 34)),
+    ('Acid',    (200, 255, 40),  (235, 30, 170),  (10, 95, 70),   (10, 16, 6)),
+    ('Sea',     (180, 255, 225), (0, 190, 210),   (14, 46, 120),  (2, 10, 24)),
+    ('Neon',    (255, 130, 225), (50, 225, 255),  (90, 30, 170),  (18, 4, 30)),
+    ('Sunset',  (255, 236, 120), (255, 80, 130),  (70, 24, 130),  (24, 8, 34)),
+    ('Pastel',  (255, 224, 205), (200, 175, 255), (60, 100, 150), (28, 24, 40)),
+]
+YCAP = 860
+# the Angles colour field: three angled ramps as R, G, B (0..1 over h = x / 1920, v = y / 1080)
+#   R = 0.42 (0.5 + 0.8 (h - .5) + 0.5 (v - .5)), G = 0.18 (0.5 - 0.6 (h - .5) + 0.7 (v - .5)),
+#   B = 0.30 (0.5 - 0.3 (h - .5) - 0.9 (v - .5)); the RTL draws its U (Cr) across the line, Y and V flat
+RAMPS = [(0.42, 0.8, 0.5), (0.18, -0.6, 0.7), (0.30, -0.3, -0.9)]
+
+
+def ycc(rgb):
+    r, g, b = [c / 255.0 for c in rgb]
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    return y, (b - y) / 1.772, (r - y) / 1.402
+
+
+def hw(y, cb, cr, pre=True):
+    """float Y' 0..1, Cb, Cr -> hardware 10-bit (Y pre-scaled 16/13, U = Cr, V = Cb), unrounded"""
+    yy = y * 876.0 * (16.0 / 13.0 if pre else 1.0)
+    return 64.0 + yy, 512.0 + cr * 896.0, 512.0 + cb * 896.0
+
+
+def field_lin():
+    """the field's R, G, B as (const, d/dh, d/dv) at h = v = 0, then mapped to Y, Cb, Cr (linear)"""
+    rgb0 = [a * (0.5 - 0.5 * kh - 0.5 * kv) for a, kh, kv in RAMPS]
+    rgbh = [a * kh for a, kh, kv in RAMPS]
+    rgbv = [a * kv for a, kh, kv in RAMPS]
+
+    def lin(c):
+        r, g, b = c
+        y = 0.299 * r + 0.587 * g + 0.114 * b
+        return y, (b - y) / 1.772, (r - y) / 1.402
+    return lin(rgb0), lin(rgbh), lin(rgbv)
+
+
+def col_rom():
+    f0, _, fv = field_lin()
+    out = []
+    for name, a, b, c, g in SETS:
+        for k, rgb in enumerate((a, b, c, g)):
+            y, cb, cr = ycc(rgb)
+            if k == 3:          # the ground at the left edge, half-way down (the RTL draws only its U across the line)
+                y, cb, cr = y + f0[0] + 0.5 * fv[0], cb + f0[1] + 0.5 * fv[1], cr + f0[2] + 0.5 * fv[2]
+            Y, U, V = hw(y, cb, cr)
+            out += [int(round(min(YCAP, max(64, Y)))), int(round(min(1000, max(24, U)))),
+                    int(round(min(1000, max(24, V)))), 0]
+    return out
+
+
+def slopes():
+    """Q12 hardware units per virtual px (x) and per virtual line (y) for Y (pre-scaled), U, V"""
+    _, fh, fv = field_lin()
+
+    def q8(y, cb, cr, n):
+        Y, U, V = (y * 876.0 * 16.0 / 13.0, cr * 896.0, cb * 896.0)
+        return [int(round(t * 4096.0 / n)) for t in (Y, U, V)]
+    return q8(fh[0], fh[1], fh[2], 1920.0), q8(fv[0], fv[1], fv[2], 1080.0)
+
+
+def sq_rom():
+    """the DSG3 parabola: ((i + 1/2) / 256)^2 in Q12 (4096 = one cell squared)"""
+    return [min(4095, int(round(((i + 0.5) / 256.0) ** 2 * 4096))) for i in range(256)]
+
+
+def exp_rom():
+    return [min(65535, int(round(32768 * 2 ** (i / 256.0)))) for i in range(256)]
+
+
+def vhd_table(name, typ, depth, width, vals):
+    lines = ["    type %s is array (0 to %d) of %s(%d downto 0);" % ("t_" + name.lower(), depth - 1, typ, width - 1),
+             "    constant %s : %s := (" % (name, "t_" + name.lower())]
+    items = ['x"%0*X"' % ((width + 3) // 4, v) for v in vals]
+    for i in range(0, len(items), 16):
+        lines.append("        " + ", ".join(items[i:i + 16]) + ("," if i + 16 < len(items) else ""))
+    lines.append("    );")
+    return "\n".join(lines)
+
+
+def main():
+    gx, gy = slopes()
+    parts = ["-- Generated by casement.py -- DO NOT EDIT.",
+             "library ieee;", "use ieee.std_logic_1164.all;", "use ieee.numeric_std.all;", "",
+             "package casement_pkg is",
+             vhd_table("C_CM_EXP", "unsigned", 256, 16, exp_rom()),
+             vhd_table("C_CM_COL", "unsigned", 128, 16, col_rom()),
+             vhd_table("C_CM_SQ", "unsigned", 256, 12, sq_rom()),
+             "    constant C_CM_GXU : integer := %d;   -- Q10 per virtual px" % ((gx[1] + 2) // 4),
+             "end package casement_pkg;", ""]
+    with open(os.path.join(HERE, "casement_pkg.vhd"), "w") as f:
+        f.write("\n".join(parts))
+
+
+if __name__ == "__main__":
+    main()

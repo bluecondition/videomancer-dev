@@ -1,0 +1,178 @@
+# Casement - Onevolt, 2026-11-25 (v0.1.0).  Three sliding, tiling windows with priority: Scrolls' mirrored ramps
+# through three Procs into a Stacker, its keys driving a Switcher; Matte colours striped by Stairs folds of each
+# layer's own ramp, an Angles colour field as the ground, and the camera keyed over layer 3's striped Matte.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.casement"
+program_name = "Casement"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Mask", "Pattern", "Mirror", "Vision"]
+program_type = "processing"
+description = "Three striped windows per mirrored cell slide over each other; the camera shows through the largest."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Size 1"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 560
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Size 2"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 520
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Size 3"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 880
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Ratio"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 293
+display_float_digits = 1
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Ramps"
+value_labels = ["Straight", "Angles"]
+initial_value_label = "Straight"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Keys"
+value_labels = ["Stacker", "DSG3"]
+initial_value_label = "Stacker"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Fills"
+value_labels = ["Stairs", "Matte"]
+initial_value_label = "Stairs"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Mixer"
+value_labels = ["Switcher", "SMX3"]
+initial_value_label = "Switcher"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Tiles"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 680
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Casement"
+
+[[preset]]
+name = "Rose Window"
+rotary_potentiometer_1 = 400
+rotary_potentiometer_2 = 560
+rotary_potentiometer_3 = 900
+rotary_potentiometer_5 = 730
+toggle_switch_8 = 1
+linear_potentiometer_12 = 420
+
+[[preset]]
+name = "Gels"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 860
+rotary_potentiometer_5 = 1023
+toggle_switch_10 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Lattice"
+rotary_potentiometer_1 = 380
+rotary_potentiometer_2 = 460
+rotary_potentiometer_3 = 920
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 440
+toggle_switch_7 = 1
+linear_potentiometer_12 = 760
+
+[[preset]]
+name = "Flat Bauhaus"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Great Window"
+rotary_potentiometer_1 = 480
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 920
+rotary_potentiometer_5 = 585
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Mosaic"
+rotary_potentiometer_3 = 940
+rotary_potentiometer_5 = 870
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Silver Gel"
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 0
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 620
