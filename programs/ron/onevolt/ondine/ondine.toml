@@ -1,0 +1,167 @@
+# Ondine - Onevolt 3, 2026-11-25 (v0.1.0).  The Syntonie oscillator voice: Ondes A (H-locked, FM'd and AM'd by
+# Ondes B) and Ondes B (V-locked) -> Formes -> Combines -> Solaire (four rectifiers, Ondes B injected between the
+# folds) -> Matrice.  A fanned lattice of chevron cells, each a nest of rectifier rings.  See ondine.vhd, ondine.py.
+
+[program]
+processing_delay_clks = 28
+program_id = "com.czartroniks.ondine"
+program_name = "Ondine"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Color"]
+program_type = "processing"
+description = "Syntonie voice: two oscillators, FM and AM, folded by a rectifier chain into a fanned lattice of ringed cells."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Freq A"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 560
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Freq B"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 455
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "FM A"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 772
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "AM A"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 960
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 146
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Norm A"
+value_labels = ["+1V", "SQR"]
+initial_value_label = "+1V"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Formes"
+value_labels = ["Sine", "Trapezoid"]
+initial_value_label = "Sine"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Combines"
+value_labels = ["AVG", "XOR"]
+initial_value_label = "AVG"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Solaire"
+value_labels = ["ADD", "SUB"]
+initial_value_label = "ADD"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Fold"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 680
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Rack"
+
+[[preset]]
+name = "Rigid Lattice"
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 440
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "X Cells"
+toggle_switch_9 = 1
+rotary_potentiometer_5 = 600
+linear_potentiometer_12 = 760
+
+[[preset]]
+name = "Plaid Null"
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_1 = 700
+toggle_switch_8 = 1
+rotary_potentiometer_5 = 300
+
+[[preset]]
+name = "Saw Fan"
+toggle_switch_7 = 1
+rotary_potentiometer_3 = 900
+rotary_potentiometer_5 = 880
+linear_potentiometer_12 = 820
+
+[[preset]]
+name = "Undertow"
+toggle_switch_10 = 1
+toggle_switch_8 = 1
+rotary_potentiometer_2 = 300
+rotary_potentiometer_5 = 1023
+
+[[preset]]
+name = "Soft Voice"
+linear_potentiometer_12 = 180
+rotary_potentiometer_3 = 300
+rotary_potentiometer_5 = 730
+
+[[preset]]
+name = "Full Fold"
+linear_potentiometer_12 = 1023
+toggle_switch_9 = 1
+toggle_switch_7 = 1
+rotary_potentiometer_2 = 640
