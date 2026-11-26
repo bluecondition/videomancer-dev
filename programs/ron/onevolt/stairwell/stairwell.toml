@@ -1,0 +1,163 @@
+# Stairwell - Onevolt 1, 2026-11-25 (v0.1.0).  LZX "Your First Patch" taken through Stairs: Scrolls ramps -> DSG3
+# (two Shape sections in series) -> Stairs (or Ribbons) -> three colour taps into ESG3.  See stairwell.vhd,
+# stairwell.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.stairwell"
+program_name = "Stairwell"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Color", "Mirror", "Pattern"]
+program_type = "processing"
+description = "DSG3 shapes in series folded by Stairs into three colour taps: a striped octagon on black (LZX rack)."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Height"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Phase"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Curve"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 7
+initial_value = 768
+display_float_digits = 1
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "H In"
+value_labels = ["Average", "Absolute"]
+initial_value_label = "Average"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "V In"
+value_labels = ["Minimum", "Maximum"]
+initial_value_label = "Minimum"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Fold"
+value_labels = ["Fold 1", "Fold 2"]
+initial_value_label = "Fold 1"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Folder"
+value_labels = ["Stairs", "Ribbons"]
+initial_value_label = "Stairs"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Steps"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 760
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "First Patch"
+
+[[preset]]
+name = "Colour Bars"
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Star Tunnel"
+rotary_potentiometer_4 = 60
+rotary_potentiometer_3 = 380
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Plus Weave"
+rotary_potentiometer_5 = 0
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Saltire"
+rotary_potentiometer_5 = 730
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Bar Lattice"
+rotary_potentiometer_2 = 420
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Glow"
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 900
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Columns"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 200
+rotary_potentiometer_5 = 146
+linear_potentiometer_12 = 620
