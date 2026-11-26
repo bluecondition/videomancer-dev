@@ -95,7 +95,7 @@ puts the shell's drifting triangle lattice on the same jack at twice the level (
 
 ## Status
 
-- **Pin-skew placement (orchestrator, after the build).** HD HDMI re-placed for the encoder pin skew: router1 seed 11 (HSYNC +1.04 ns, data <= -1.16 ns, 92.46 MHz); the builder's router2 seed 1 was outside the +1.0..+2.3 ns window. A plain rebuild gives the builder's placement again: re-run .heirloom_work/skew_tools/install.sh hachure router1 11 hd_hdmi. Screen data: .heirloom_work/rb_hachure/skew/.
+- **Pin-skew placement (orchestrator, after the build).** HD HDMI re-placed for the encoder pin skew: router2 seed 19 (HSYNC +1.58 ns, data <= -0.94 ns, 81.99 MHz), the most positive in-window placement of 76 screened; the builder's router1 seed 1 sat at -0.43 ns. Spare: router1 seed 11 (+1.04 / <= -1.16, 92.46 MHz). A plain rebuild gives the builder's placement again: re-run .heirloom_work/skew_tools/install.sh hachure router2 19 hd_hdmi. Screen data: .heirloom_work/rb_hachure/skew/.
 
 - **v0.1.0 built 2026-11-25 with router1, all six configs on seed 1, not flashed.** Rebuild:
   `NEXTPNR_ROUTER="--router router1" ./build_set.sh onevolt hachure` -> `out/rev_b/ron/onevolt/hachure.vmprog`
